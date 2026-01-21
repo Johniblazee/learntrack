@@ -57,3 +57,6 @@ build/
 tests/
 docs/
 scripts/
+
+# Agent guidelines (local file)
+AGENTS.md
