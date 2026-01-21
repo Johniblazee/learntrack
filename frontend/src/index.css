@@ -117,8 +117,8 @@
     /* Neutrals - Warm undertones */
     --muted: 30 10% 96%; /* Very light warm gray */
     --muted-foreground: 20 10% 45%; /* Medium gray text */
-    --border: 30 10% 90%; /* Light border */
-    --input: 0 0% 100%; /* White input backgrounds */
+    --border: 30 10% 85%; /* Visible light border */
+    --input: 30 10% 82%; /* Visible input border - slightly darker than border */
     --ring: 25 85% 55%; /* Focus ring uses primary */
 
     /* Action colors */
@@ -170,8 +170,8 @@
     /* Neutrals - Very dark warm grays */
     --muted: 20 15% 10%; /* Deep warm gray #1A1614 */
     --muted-foreground: 30 8% 50%; /* Subtle warm gray */
-    --border: 20 12% 16%; /* Subtle warm border */
-    --input: 20 15% 10%;
+    --border: 20 12% 20%; /* Visible warm border */
+    --input: 20 12% 25%; /* Visible input border - slightly lighter than border */
     --ring: 28 70% 50%;
 
     /* Action colors - slightly muted for dark mode */

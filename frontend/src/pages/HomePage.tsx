@@ -388,7 +388,7 @@ export default function HomePage() {
               variants={fadeUpVariants}
               initial="hidden"
               animate="visible"
-              className="mt-10 md:mt-12 flex flex-col items-center justify-center gap-3 sm:flex-row"
+              className="mt-6 md:mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row"
             >
               <motion.div
                 whileHover={{ scale: 1.05, y: -2 }}
