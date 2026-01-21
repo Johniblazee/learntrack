@@ -92,34 +92,34 @@
 
 @layer base {
   :root {
-    /* Light mode - Warm beige background like the design */
-    --background: 30 20% 97%; /* Light beige/cream #F8F6F3 */
-    --foreground: 20 14% 20%; /* Dark brown for text #3D3530 */
+    /* Light mode - Clean white background with warm amber accents */
+    --background: 0 0% 100%; /* Pure white for clean look */
+    --foreground: 20 14% 15%; /* Very dark brown for high contrast #2D2520 */
 
-    /* Cards and surfaces - White cards on beige background */
+    /* Cards and surfaces */
     --card: 0 0% 100%; /* Pure white for cards */
-    --card-foreground: 20 14% 20%;
+    --card-foreground: 20 14% 15%;
     --popover: 0 0% 100%;
-    --popover-foreground: 20 14% 20%;
+    --popover-foreground: 20 14% 15%;
 
-    /* Primary - Warm Brown #5D4E37 (similar to the design) */
-    --primary: 30 24% 29%;
+    /* Primary - Vibrant Amber/Terracotta that POPS */
+    --primary: 25 85% 55%; /* Vibrant amber-orange #E87830 */
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary - Light beige for subtle elements */
-    --secondary: 30 15% 90%;
-    --secondary-foreground: 20 14% 20%;
+    /* Secondary - Warm neutral */
+    --secondary: 30 20% 96%;
+    --secondary-foreground: 20 14% 15%;
 
-    /* Accent - Warm tan/brown for active states #C8A882 */
-    --accent: 35 35% 65%;
-    --accent-foreground: 20 14% 20%;
+    /* Accent - Rich golden amber for highlights */
+    --accent: 35 75% 55%; /* Golden amber #D4A017 */
+    --accent-foreground: 0 0% 100%;
 
-    /* Neutrals - Warm grays */
-    --muted: 30 15% 95%; /* Light warm gray */
-    --muted-foreground: 20 10% 50%; /* Medium gray text */
-    --border: 30 10% 88%; /* Light border */
+    /* Neutrals - Warm undertones */
+    --muted: 30 10% 96%; /* Very light warm gray */
+    --muted-foreground: 20 10% 45%; /* Medium gray text */
+    --border: 30 10% 90%; /* Light border */
     --input: 0 0% 100%; /* White input backgrounds */
-    --ring: 30 24% 29%; /* Focus ring uses primary */
+    --ring: 25 85% 55%; /* Focus ring uses primary */
 
     /* Action colors */
     --destructive: 0 72% 51%; /* Red */
@@ -131,68 +131,68 @@
     --info: 221 83% 53%; /* Blue */
     --info-foreground: 0 0% 100%;
 
-    --radius: 0.75rem; /* Slightly more rounded */
+    --radius: 0.75rem;
 
-    /* Sidebar specific - White sidebar on beige background */
-    --sidebar-background: 0 0% 100%; /* Pure white */
-    --sidebar-foreground: 20 14% 20%;
-    --sidebar-primary: 30 24% 29%;
+    /* Sidebar specific */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 20 14% 15%;
+    --sidebar-primary: 25 85% 55%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 30 15% 95%; /* Very light beige for hover */
-    --sidebar-accent-foreground: 20 14% 20%; /* Dark text on light hover */
+    --sidebar-accent: 30 10% 96%;
+    --sidebar-accent-foreground: 20 14% 15%;
     --sidebar-border: 30 10% 92%;
-    --sidebar-ring: 30 24% 29%;
+    --sidebar-ring: 25 85% 55%;
   }
 
   .dark {
-    /* Dark mode - Very dark background with golden accents */
-    --background: 0 0% 10%; /* Very dark background #1A1A1A */
-    --foreground: 0 0% 90%; /* Light gray text #E5E5E5 */
+    /* Dark mode - Deep dark with subtle warm amber accents */
+    --background: 20 20% 4%; /* Very deep warm black #0D0A08 */
+    --foreground: 30 15% 90%; /* Soft off-white #E8E4E0 */
 
     /* Cards and surfaces */
-    --card: 0 0% 14%; /* Slightly lighter dark #242424 */
-    --card-foreground: 0 0% 90%;
-    --popover: 0 0% 14%;
-    --popover-foreground: 0 0% 90%;
+    --card: 20 18% 7%; /* Deep dark card #141110 */
+    --card-foreground: 30 15% 90%;
+    --popover: 20 18% 7%;
+    --popover-foreground: 30 15% 90%;
 
-    /* Primary - Golden tan accent */
-    --primary: 35 35% 65%; /* Golden tan #C8A882 */
-    --primary-foreground: 0 0% 10%; /* Dark text on golden background */
+    /* Primary - Muted warm amber, not shouty */
+    --primary: 28 70% 50%; /* Deeper amber #D98A2B */
+    --primary-foreground: 20 20% 4%; /* Dark text on amber background */
 
-    /* Secondary - Muted golden */
-    --secondary: 35 25% 50%;
-    --secondary-foreground: 0 0% 90%;
+    /* Secondary - Very muted amber */
+    --secondary: 25 30% 18%;
+    --secondary-foreground: 30 15% 90%;
 
-    /* Accent - Golden tan for highlights */
-    --accent: 35 35% 65%; /* Golden tan #C8A882 */
-    --accent-foreground: 0 0% 10%;
+    /* Accent - Subdued golden amber */
+    --accent: 32 60% 45%; /* Muted golden #B8892E */
+    --accent-foreground: 20 20% 4%;
 
-    /* Neutrals - Dark grays */
-    --muted: 0 0% 18%; /* Dark gray backgrounds #2E2E2E */
-    --muted-foreground: 0 0% 53%; /* Medium gray text #888888 */
-    --border: 0 0% 20%; /* Dark gray borders #333333 */
-    --input: 0 0% 18%; /* Input backgrounds */
-    --ring: 35 35% 65%; /* Focus ring uses golden accent */
+    /* Neutrals - Very dark warm grays */
+    --muted: 20 15% 10%; /* Deep warm gray #1A1614 */
+    --muted-foreground: 30 8% 50%; /* Subtle warm gray */
+    --border: 20 12% 16%; /* Subtle warm border */
+    --input: 20 15% 10%;
+    --ring: 28 70% 50%;
 
-    /* Action colors - adjusted for dark mode */
-    --destructive: 0 72% 51%;
+    /* Action colors - slightly muted for dark mode */
+    --destructive: 0 65% 48%;
     --destructive-foreground: 0 0% 100%;
-    --success: 142 71% 45%;
+    --success: 142 60% 42%;
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
+    --warning: 38 75% 48%;
     --warning-foreground: 0 0% 100%;
-    --info: 217 91% 60%;
+    --info: 217 80% 58%;
     --info-foreground: 0 0% 100%;
 
-    /* Sidebar specific - dark theme with golden accents */
-    --sidebar-background: 0 0% 10%; /* Same as main background #1A1A1A */
-    --sidebar-foreground: 0 0% 70%; /* Muted gray for inactive items */
-    --sidebar-primary: 35 35% 65%; /* Golden tan for logo and active items */
-    --sidebar-primary-foreground: 0 0% 10%;
-    --sidebar-accent: 0 0% 18%; /* Slightly lighter for hover #2E2E2E */
-    --sidebar-accent-foreground: 35 35% 65%; /* Golden text on hover */
-    --sidebar-border: 0 0% 15%; /* Subtle border */
-    --sidebar-ring: 35 35% 65%; /* Golden focus ring */
+    /* Sidebar specific */
+    --sidebar-background: 20 20% 4%;
+    --sidebar-foreground: 30 12% 65%;
+    --sidebar-primary: 28 70% 50%;
+    --sidebar-primary-foreground: 20 20% 4%;
+    --sidebar-accent: 20 15% 10%;
+    --sidebar-accent-foreground: 28 70% 50%;
+    --sidebar-border: 20 12% 12%;
+    --sidebar-ring: 28 70% 50%;
   }
 }
 
@@ -215,6 +215,20 @@
   .font-inter {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
+}
+
+/* Marquee animation for infinite slider */
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-50% - var(--gap)/2));
+  }
+}
+
+.animate-marquee {
+  animation: marquee var(--duration, 40s) linear infinite;
 }
 
 /* Clerk form field overrides - Remove grayish tint completely */
