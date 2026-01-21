@@ -377,9 +377,9 @@ export default function HomePage() {
               variants={fadeUpVariants}
               initial="hidden"
               animate="visible"
-              className="mx-auto mt-6 md:mt-8 max-w-2xl text-balance text-base sm:text-lg md:text-xl text-muted-foreground leading-relaxed"
+              className="mx-auto mt-6 max-w-xl text-balance text-sm sm:text-base text-muted-foreground leading-relaxed"
             >
-              Generate curriculum-aligned questions in seconds with AI. Track every student's progress. Keep parents engaged.{" "}
+              AI-powered question generation, student tracking, and parent engagement.{" "}
               <span className="text-foreground font-medium">All for less than a coffee per week.</span>
             </motion.p>
 
