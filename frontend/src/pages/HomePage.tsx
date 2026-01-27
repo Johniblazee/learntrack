@@ -304,7 +304,7 @@ export default function HomePage() {
       {/* Hero Section with Animated Shapes */}
       <section className="relative min-h-[90vh] md:min-h-screen w-full flex items-center justify-center overflow-hidden bg-background">
         <div className="absolute inset-0 -z-10 size-full [background:radial-gradient(125%_125%_at_50%_100%,transparent_0%,hsl(var(--background))_75%)]" />
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.05] via-transparent to-accent/[0.05] dark:from-primary/[0.02] dark:to-accent/[0.02] blur-3xl" />
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.05] via-transparent to-accent/[0.05] blur-3xl" />
 
         <div className="absolute inset-0 overflow-hidden">
           <ElegantShape
@@ -312,7 +312,7 @@ export default function HomePage() {
             width={600}
             height={140}
             rotate={12}
-            gradient="from-primary/[0.15] dark:from-primary/[0.06]"
+            gradient="from-primary/[0.15]"
             className="left-[-10%] md:left-[-5%] top-[15%] md:top-[20%]"
           />
           <ElegantShape
@@ -320,7 +320,7 @@ export default function HomePage() {
             width={500}
             height={120}
             rotate={-15}
-            gradient="from-accent/[0.15] dark:from-accent/[0.06]"
+            gradient="from-accent/[0.15]"
             className="right-[-5%] md:right-[0%] top-[70%] md:top-[75%]"
           />
           <ElegantShape
@@ -328,7 +328,7 @@ export default function HomePage() {
             width={300}
             height={80}
             rotate={-8}
-            gradient="from-primary/[0.12] dark:from-primary/[0.05]"
+            gradient="from-primary/[0.12]"
             className="left-[5%] md:left-[10%] bottom-[5%] md:bottom-[10%]"
           />
           <ElegantShape
@@ -336,7 +336,7 @@ export default function HomePage() {
             width={200}
             height={60}
             rotate={20}
-            gradient="from-accent/[0.10] dark:from-accent/[0.04]"
+            gradient="from-accent/[0.10]"
             className="right-[15%] md:right-[20%] top-[25%] md:top-[30%]"
           />
         </div>
@@ -348,10 +348,10 @@ export default function HomePage() {
               variants={fadeUpVariants}
               initial="hidden"
               animate="visible"
-              className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 dark:bg-primary/5 dark:border-primary/10 mb-8 md:mb-10"
+              className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 mb-8 md:mb-10"
             >
-              <Sparkles className="h-4 w-4 text-primary dark:text-primary/80" />
-              <span className="text-sm text-primary dark:text-primary/80 tracking-wide font-medium">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="text-sm text-primary tracking-wide font-medium">
                 Trusted by 10,000+ Educators
               </span>
             </motion.div>
@@ -398,7 +398,7 @@ export default function HomePage() {
                 <Button
                   onClick={handleSignUp}
                   size="default"
-                  className="rounded-full px-6 h-10 text-sm font-medium bg-primary hover:bg-primary/90 shadow-lg shadow-primary/30 hover:shadow-primary/40 dark:shadow-primary/15 dark:hover:shadow-primary/20 transition-shadow"
+                  className="rounded-full px-6 h-10 text-sm font-medium bg-primary hover:bg-primary/90 shadow-lg shadow-primary/30 hover:shadow-primary/40 transition-shadow"
                 >
                   Start Free Trial
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -412,7 +412,7 @@ export default function HomePage() {
                 <Button
                   variant="outline"
                   size="default"
-                  className="rounded-full px-6 h-10 text-sm font-medium border-primary/20 hover:bg-primary/10 hover:border-primary/30 dark:border-primary/15 dark:hover:bg-primary/5 dark:hover:border-primary/25 transition-colors"
+                  className="rounded-full px-6 h-10 text-sm font-medium border-primary/20 hover:bg-primary/10 hover:border-primary/30 transition-colors"
                 >
                   <Play className="mr-2 h-4 w-4" />
                   Watch Demo
