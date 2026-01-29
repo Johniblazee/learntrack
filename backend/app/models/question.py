@@ -113,6 +113,7 @@ class QuestionInDB(QuestionBase):
     # Usage statistics
     times_used: int = 0
     average_score: Optional[float] = None
+    attempt_count: int = 0  # Number of attempts used for calculating average_score
 
     # Reference materials
     reference_materials: List[str] = []  # Material IDs

@@ -1,7 +1,9 @@
 """
 Application configuration using pydantic-settings and python-dotenv
 """
+
 import os
+from pathlib import Path
 from typing import List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
@@ -13,13 +15,16 @@ load_dotenv()
 
 class Settings(BaseSettings):
     """Application settings"""
-    
+
+    # Base Directory
+    BASE_DIR: str = str(Path(__file__).parent.parent.parent.parent)
+
     # API Configuration
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "LearnTrack MVP"
     VERSION: str = "1.0.0"
     DESCRIPTION: str = "Smart Assignment & Progress Monitoring API"
-    
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
@@ -32,16 +37,25 @@ class Settings(BaseSettings):
         env = info.data.get("ENVIRONMENT", "development")
         if env == "production":
             if not v or len(v) < 32:
-                raise ValueError("SECRET_KEY must be at least 32 characters in production")
-            placeholders = ["your-secret", "change-in-production", "placeholder", "secret-key"]
+                raise ValueError(
+                    "SECRET_KEY must be at least 32 characters in production"
+                )
+            placeholders = [
+                "your-secret",
+                "change-in-production",
+                "placeholder",
+                "secret-key",
+            ]
             if any(p in v.lower() for p in placeholders):
-                raise ValueError("SECRET_KEY appears to be a placeholder. Set a secure random key.")
+                raise ValueError(
+                    "SECRET_KEY appears to be a placeholder. Set a secure random key."
+                )
         return v
-    
+
     # Database
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "learntrack_mvp"
-    
+
     # Clerk Configuration - Enhanced for Backend-First Auth
     CLERK_SECRET_KEY: Optional[str] = None
     CLERK_PUBLISHABLE_KEY: Optional[str] = None
@@ -58,7 +72,7 @@ class Settings(BaseSettings):
     CLERK_JWKS_CACHE_TTL: int = 3600  # 1 hour in seconds
     CLERK_ENABLE_DEVELOPMENT_MODE: bool = True  # Allow dev tokens in development
     CLERK_FRONTEND_API: Optional[str] = None  # For frontend API calls
-    
+
     # AI Provider Configuration
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
@@ -80,7 +94,7 @@ class Settings(BaseSettings):
     # UploadThing Configuration
     UPLOADTHING_SECRET: Optional[str] = None
     UPLOADTHING_APP_ID: Optional[str] = None
-    
+
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
@@ -92,10 +106,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3002",
         "http://127.0.0.1:5173",
     ]
-    
+
     # Logging
     LOG_LEVEL: str = "INFO"
-    
+
     # File Storage (UploadThing Configuration)
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_FILE_TYPES: List[str] = [
@@ -104,13 +118,14 @@ class Settings(BaseSettings):
         "application/vnd.ms-powerpoint",
         "text/plain",
         "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ]
-    
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v):
         import json
+
         if isinstance(v, str):
             if v.startswith("["):
                 # Parse JSON array
@@ -129,7 +144,9 @@ class Settings(BaseSettings):
             if not v:
                 raise ValueError("CLERK_JWT_ISSUER is required in production")
             if v == "https://clerk.dev":
-                raise ValueError("CLERK_JWT_ISSUER must be set to your specific Clerk instance URL")
+                raise ValueError(
+                    "CLERK_JWT_ISSUER must be set to your specific Clerk instance URL"
+                )
         return v
 
     @field_validator("CLERK_JWT_AUDIENCE")
@@ -138,7 +155,7 @@ class Settings(BaseSettings):
         if info.data.get("ENVIRONMENT") == "production" and not v:
             raise ValueError("CLERK_JWT_AUDIENCE is required in production")
         return v
-    
+
     class Config:
         case_sensitive = True
         env_file = ".env"
@@ -146,4 +163,3 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
-

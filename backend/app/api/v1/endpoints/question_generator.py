@@ -18,7 +18,7 @@ from app.core.ai_models_config import get_all_active_models_for_dropdown
 from app.agents.graph.state import GenerationConfig, QuestionType, Difficulty, BloomsLevel, GenerationSession
 from app.agents.graph.question_generator_graph import QuestionGeneratorAgent
 from app.agents.streaming.sse_handler import SSEHandler
-from app.services.ai.ai_manager import get_tenant_ai_manager
+from app.ai.services.ai_manager import get_tenant_ai_manager
 from app.services.tenant_ai_config_service import TenantAIConfigService
 from app.services.generation_session_service import GenerationSessionService
 from app.models.generation_session import SessionStatus, QuestionStatus, StoredQuestion
@@ -724,7 +724,7 @@ async def get_available_models(
         ]
     }
     """
-    from app.services.ai.models_fetcher import fetch_all_provider_models
+    from app.ai.services.models_fetcher import fetch_all_provider_models
     from app.core.config import settings
     from app.services.tenant_ai_config_service import TenantAIConfigService
 

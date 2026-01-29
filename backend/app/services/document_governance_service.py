@@ -12,7 +12,7 @@ from app.models.file import (
     UploadedFile, EmbeddingStatus, SyncStatus, ErrorCategory,
     ProcessingHistoryEntry
 )
-from app.services.rag_service import RAGService
+from app.rag.services.rag_service import RAGService
 from app.core.exceptions import NotFoundError, DatabaseException
 from app.core.utils import to_object_id
 

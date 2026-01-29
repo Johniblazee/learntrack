@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 import structlog
 
 from app.core.config import settings
-from app.core.ai_models_config import get_model_prefixes
 
 logger = structlog.get_logger()
 
@@ -41,16 +40,12 @@ def _get_cache(provider: str) -> Optional[List[Dict[str, Any]]]:
 
 
 async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]]:
-    """Fetch models from Groq API (OpenAI compatible endpoint).
-
-    Returns GPT-OSS models and Llama 3.3 models (ignores limit for these).
-    """
+    """Fetch models from Groq API (OpenAI compatible endpoint)."""
     cached = _get_cache("groq")
     if cached:
-        return cached  # No limit for Groq - return all selected models
+        return cached
 
-    # Models to include from centralized config
-    must_include_prefixes = get_model_prefixes("groq")
+    must_include_prefixes = ["openai/gpt-oss", "llama-3.3"]
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -64,15 +59,11 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
             models = []
             for m in data.get("data", []):
                 model_id = m.get("id", "")
-                # Skip embedding, whisper, guard, tts models
                 if any(x in model_id.lower() for x in ["embed", "whisper", "guard", "tts", "rerank"]):
                     continue
-
-                # Only include GPT-OSS and Llama 3.3 models
                 if not any(model_id.startswith(prefix) or prefix in model_id for prefix in must_include_prefixes):
                     continue
 
-                # Set priority: GPT-OSS first, then Llama 3.3
                 if "gpt-oss-120b" in model_id:
                     priority = 0
                 elif "gpt-oss-20b" in model_id:
@@ -90,27 +81,21 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
                     "priority": priority
                 })
 
-            # Sort by priority
             models.sort(key=lambda x: x.get("priority", 999))
             _set_cache("groq", models)
-            return models  # No limit - return all GPT-OSS and Llama 3.3 models
+            return models
     except Exception as e:
         logger.error("Failed to fetch Groq models", error=str(e))
         return []
 
 
 async def fetch_openai_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]]:
-    """Fetch models from OpenAI API.
-
-    Returns GPT-4o, GPT-4.1, o1, o3, o4-mini models.
-    """
+    """Fetch models from OpenAI API."""
     cached = _get_cache("openai")
     if cached:
-        return cached  # No limit - return all selected models
+        return cached
 
-    # Model prefixes to include from centralized config
-    include_prefixes = get_model_prefixes("openai")
-    # Exclude patterns
+    include_prefixes = ["gpt-4o", "gpt-4.1", "o1", "o3", "o4-mini"]
     exclude_patterns = ["realtime", "audio", "transcribe", "tts", "search"]
 
     try:
@@ -125,20 +110,13 @@ async def fetch_openai_models(api_key: str, limit: int = 3) -> List[Dict[str, An
             models = []
             for m in data.get("data", []):
                 model_id = m.get("id", "")
-
-                # Skip excluded patterns
                 if any(x in model_id.lower() for x in exclude_patterns):
                     continue
-
-                # Only include models matching our prefixes
                 if not any(model_id.startswith(prefix) for prefix in include_prefixes):
                     continue
 
-                # Set priority order: gpt-5.2 first, then gpt-4o, then others
-                if model_id.startswith("gpt-5.2"):
-                    priority = 0 if model_id == "gpt-5.2" else 1
-                elif model_id.startswith("gpt-4o"):
-                    priority = 5 if model_id == "gpt-4o" else 6
+                if model_id.startswith("gpt-4o"):
+                    priority = 0 if model_id == "gpt-4o" else 1
                 elif model_id.startswith("gpt-4.1"):
                     priority = 10
                 elif model_id.startswith("o4-mini"):
@@ -157,27 +135,21 @@ async def fetch_openai_models(api_key: str, limit: int = 3) -> List[Dict[str, An
                     "priority": priority
                 })
 
-            # Sort by priority
             models.sort(key=lambda x: x.get("priority", 999))
             _set_cache("openai", models)
-            return models  # No limit - return all matching models
+            return models
     except Exception as e:
         logger.error("Failed to fetch OpenAI models", error=str(e))
         return []
 
 
 async def fetch_gemini_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]]:
-    """Fetch models from Google Gemini API.
-
-    Returns text models only: Gemini 2.5 and 3.0 models (no limit).
-    """
+    """Fetch models from Google Gemini API."""
     cached = _get_cache("gemini")
     if cached:
-        return cached  # No limit - return all 2.5 and 3.0 text models
+        return cached
 
-    # Model prefixes to include from centralized config
-    include_prefixes = get_model_prefixes("gemini")
-    # Exclude non-text models
+    include_prefixes = ["gemini-3", "gemini-2.5"]
     exclude_patterns = ["embed", "aqa", "vision", "image", "video", "audio", "live"]
 
     try:
@@ -193,19 +165,13 @@ async def fetch_gemini_models(api_key: str, limit: int = 3) -> List[Dict[str, An
                 model_name = m.get("name", "").replace("models/", "")
                 display_name = m.get("displayName", model_name)
 
-                # Skip non-generative models
                 if "generateContent" not in str(m.get("supportedGenerationMethods", [])):
                     continue
-
-                # Skip non-text models
                 if any(x in model_name.lower() for x in exclude_patterns):
                     continue
-
-                # Only include Gemini 2.5 and 3.0 models
                 if not any(model_name.startswith(prefix) for prefix in include_prefixes):
                     continue
 
-                # Calculate priority: Gemini 3.0 first, then 2.5
                 if model_name.startswith("gemini-3"):
                     priority = 0
                 elif model_name.startswith("gemini-2.5"):
@@ -220,10 +186,9 @@ async def fetch_gemini_models(api_key: str, limit: int = 3) -> List[Dict[str, An
                     "priority": priority
                 })
 
-            # Sort by priority
             models.sort(key=lambda x: x.get("priority", 999))
             _set_cache("gemini", models)
-            return models  # No limit - return all Gemini 2.5 and 3.0 text models
+            return models
     except Exception as e:
         logger.error("Failed to fetch Gemini models", error=str(e))
         return []
@@ -258,7 +223,6 @@ async def fetch_anthropic_models(api_key: str, limit: int = 3) -> List[Dict[str,
                     "description": f"Anthropic {display_name}",
                 })
 
-            # Already sorted by recency from API
             _set_cache("anthropic", models)
             return models[:limit]
     except Exception as e:

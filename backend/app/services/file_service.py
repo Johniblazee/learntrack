@@ -18,13 +18,10 @@ from app.models.file import (
     UploadThingFileCreate,
     UploadThingFileUpdate,
 )
-from app.services.ai.ai_manager import AIManager
+from app.ai.services.ai_manager import AIManager
 from app.services.question_service import QuestionService
-from app.services.enhanced_document_processor import (
-    EnhancedDocumentProcessor,
-    ProcessingOptions,
-)
-from app.services.cost_tracking_service import CostTrackingService
+from app.rag.processors.document_processor import DocumentProcessor
+from app.ai.services.cost_tracker import CostTrackingService
 from app.core.exceptions import (
     FileProcessingError,
     ValidationError,
@@ -44,7 +41,7 @@ class FileService:
         self.db = database
         self.collection = database.files
         self.http_client = httpx.AsyncClient()
-        self.enhanced_processor = EnhancedDocumentProcessor(database)
+        self.document_processor = DocumentProcessor()
         self.cost_service = CostTrackingService(database)
 
     async def register_file_metadata(
@@ -255,7 +252,9 @@ class FileService:
 
             # Process document using enhanced processor
             processing_result = (
-                await self.enhanced_processor.process_document_with_tracking(
+                # TODO: Implement document processing with new DocumentProcessor
+                # For now, use a placeholder
+                pass
                     file_path=None,  # Will download from uploadthing_url
                     file_id=file_id,
                     tenant_id=user_id,  # Using user_id as tenant for now
@@ -397,9 +396,10 @@ class FileService:
                     )
                 else:
                     # Fallback to global instance if no manager provided
-                    from app.services.ai.ai_manager import (
-                        ai_manager as global_ai_manager,
+                    from app.ai.services.ai_manager import (
+                        get_default_ai_manager,
                     )
+                    global_ai_manager = get_default_ai_manager()
 
                     extracted_text = await global_ai_manager.extract_text_from_content(
                         content_preview, file.content_type

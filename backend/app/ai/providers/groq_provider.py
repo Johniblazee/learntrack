@@ -6,7 +6,7 @@ import structlog
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.services.ai.base import BaseAIProvider
+from app.ai.providers.base import BaseAIProvider
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
 from app.agents.prompts import get_prompt
 from app.core.ai_models_config import get_default_model

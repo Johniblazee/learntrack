@@ -6,7 +6,7 @@ import asyncio
 import structlog
 from openai import AsyncOpenAI
 
-from app.services.ai.base import BaseAIProvider
+from app.ai.providers.base import BaseAIProvider
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
 from app.core.exceptions import AIProviderError
 from app.agents.prompts import get_prompt

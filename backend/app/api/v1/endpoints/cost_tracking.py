@@ -8,9 +8,9 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.core.dependencies import get_database, get_current_user
-from app.core.enhanced_auth import ClerkUserContext
-from app.models.cost_tracking import (
+from app.core.dependencies import get_database
+from app.core.enhanced_auth import ClerkUserContext, get_current_user
+from app.ai.models.cost_tracking import (
     CostQuota,
     CostQuotaCreate,
     CostQuotaUpdate,
@@ -21,7 +21,7 @@ from app.models.cost_tracking import (
     CostProvider,
     CostModel,
 )
-from app.services.cost_tracking_service import CostTrackingService, DEFAULT_QUOTAS
+from app.ai.services.cost_tracker import CostTrackingService
 from app.core.exceptions import ValidationError, NotFoundError, AuthorizationError
 
 router = APIRouter()

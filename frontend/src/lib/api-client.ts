@@ -1,4 +1,4 @@
-import React from 'react'
+import { useCallback } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { API_BASE_URL } from './config'
 
@@ -128,7 +128,7 @@ export class ApiClient {
 export function useApiClient() {
   const { getToken } = useAuth()
 
-  const memoizedGetToken = React.useCallback(() => {
+  const memoizedGetToken = useCallback(() => {
     // Don't specify template - use default Clerk JWT
     return getToken()
   }, [getToken])

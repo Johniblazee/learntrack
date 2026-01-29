@@ -19,19 +19,21 @@ pydantic[email]>=2.5.0,<3.0.0
 pydantic-settings>=2.1.0,<3.0.0
 
 # AI Providers
-openai>=1.12.0,<2.0.0
+openai>=1.109.0,<2.0.0
 anthropic>=0.18.0,<1.0.0
 google-generativeai>=0.4.0,<1.0.0
 
 # LangChain for RAG (pinned compatible versions)
-langchain>=0.1.0,<0.4.0
-langchain-core>=0.1.0,<0.4.0
-langchain-community>=0.0.20,<0.4.0
+langchain>=0.1.0,<0.3.0
+langchain-core>=0.1.0,<0.3.0
+langchain-community>=0.0.20,<0.3.0
 langchain-groq>=0.1.0,<0.3.0
 langchain-google-genai>=0.0.11,<0.1.0
 langchain-openai>=0.0.8,<0.3.0
 langchain-text-splitters>=0.0.1,<0.3.0
-langgraph>=0.0.20,<0.4.0
+langchain-qdrant>=0.1.0,<0.3.0
+langchain-sentence-transformers>=0.0.1,<0.3.0
+langgraph>=0.0.20,<0.3.0
 
 # CLI Tools
 rich>=13.0.0,<14.0.0
@@ -49,6 +51,9 @@ langchain-unstructured>=0.0.1,<0.2.0
 # HTTP Client
 httpx>=0.26.0,<1.0.0
 aiohttp>=3.9.0,<4.0.0
+
+# UploadThing for file storage (optional - will add if needed)
+# uploadthing>=6.0.0,<7.0.0
 
 # Utilities
 python-dateutil>=2.8.0,<3.0.0

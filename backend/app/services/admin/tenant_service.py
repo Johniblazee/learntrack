@@ -9,6 +9,7 @@ import structlog
 
 from app.models.admin import TenantInfo, TenantStatus, AuditAction
 from app.core.admin_context import SuperAdminContext
+from app.core.utils import escape_regex
 
 logger = structlog.get_logger()
 
@@ -56,8 +57,8 @@ class TenantService:
         
         if search:
             query["$or"] = [
-                {"name": {"$regex": search, "$options": "i"}},
-                {"email": {"$regex": search, "$options": "i"}}
+                {"name": {"$regex": escape_regex(search), "$options": "i"}},
+                {"email": {"$regex": escape_regex(search), "$options": "i"}}
             ]
         
         skip = (page - 1) * per_page

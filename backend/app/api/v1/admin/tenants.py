@@ -11,6 +11,7 @@ import structlog
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_super_admin, ClerkUserContext, require_admin_permission
+from app.core.utils import escape_regex
 from app.models.user import AdminPermission
 from app.models.admin import (
     TenantInfo, TenantListResponse, TenantStatus,
@@ -67,8 +68,8 @@ async def list_tenants(
         
         if search:
             query["$or"] = [
-                {"name": {"$regex": search, "$options": "i"}},
-                {"email": {"$regex": search, "$options": "i"}}
+                {"name": {"$regex": escape_regex(search), "$options": "i"}},
+                {"email": {"$regex": escape_regex(search), "$options": "i"}}
             ]
         
         # Get total count

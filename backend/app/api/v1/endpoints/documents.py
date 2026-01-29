@@ -12,7 +12,7 @@ from app.core.database import get_database
 from app.core.enhanced_auth import require_authenticated_user, ClerkUserContext
 from app.services.document_governance_service import DocumentGovernanceService
 from app.models.file import EmbeddingStatus, SyncStatus
-from app.core.utils import to_object_id
+from app.core.utils import to_object_id, escape_regex
 
 router = APIRouter()
 
@@ -189,7 +189,7 @@ async def get_document_list(
     if sync_status:
         query["sync_status"] = sync_status
     if search:
-        query["filename"] = {"$regex": search, "$options": "i"}
+        query["filename"] = {"$regex": escape_regex(search), "$options": "i"}
 
     # Get total count
     total = await files_collection.count_documents(query)

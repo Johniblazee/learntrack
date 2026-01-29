@@ -9,7 +9,7 @@ from decimal import Decimal
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 
-from app.models.cost_tracking import (
+from app.ai.models.cost_tracking import (
     CostTracking,
     CostQuota,
     CostAlert,

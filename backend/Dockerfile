@@ -24,12 +24,15 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for better caching)
-COPY requirements.txt .
+# Install UV
+RUN pip install --no-cache-dir uv
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Copy pyproject.toml and uv.lock (if it exists)
+COPY pyproject.toml .
+COPY uv.lock* .
+
+# Install Python dependencies using UV
+RUN uv sync --frozen
 
 # Copy the rest of the application code
 COPY . .

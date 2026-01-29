@@ -7,8 +7,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 
 from app.models.question import Question, QuestionCreate, QuestionUpdate, QuestionForStudent, QuestionStatus
-from app.core.exceptions import NotFoundError, DatabaseException, AuthorizationError
-from app.core.utils import to_object_id
+from app.core.exceptions import NotFoundError, DatabaseException, AuthorizationError, ValidationError
+from app.core.utils import to_object_id, escape_regex
 
 logger = structlog.get_logger()
 
@@ -67,11 +67,8 @@ class QuestionService:
         """Get question by ID with optional ownership validation"""
         try:
             oid = to_object_id(question_id)
-            query = {"_id": oid, "status": {"$ne": "deleted"}} # Keep "deleted" as string if not in Enum or add to Enum? 
-            # QuestionStatus Enum doesn't strictly have "deleted" in the definition I read earlier, checking...
-            # Yes it does: ACTIVE, PENDING, REJECTED, ARCHIVED. "deleted" was often used as soft delete string. 
-            # I should verify QuestionStatus enum definition in model again. 
-            
+            query = {"_id": oid, "status": {"$ne": QuestionStatus.DELETED}}
+
             # Add tutor_id filter if provided for ownership validation
             if tutor_id:
                 query["tutor_id"] = tutor_id
@@ -142,7 +139,7 @@ class QuestionService:
             if question_type:
                 query["question_type"] = question_type
             if search:
-                query["question_text"] = {"$regex": search, "$options": "i"}
+                query["question_text"] = {"$regex": escape_regex(search), "$options": "i"}
 
             # Get total count
             total = await self.collection.count_documents(query)
@@ -314,7 +311,6 @@ class QuestionService:
             })
             
             if assignment_count > 0:
-                from app.core.exceptions import ValidationError
                 raise ValidationError("Cannot delete question that is used in assignments")
             
             oid = to_object_id(question_id)
@@ -354,8 +350,7 @@ class QuestionService:
             # Validate ownership - approver must own the question
             question = await self.get_question_by_id(question_id, tutor_id=approver_id)
 
-            if question.status != "pending":
-                from app.core.exceptions import ValidationError
+            if question.status != QuestionStatus.PENDING:
                 raise ValidationError("Only pending questions can be approved")
 
             oid = to_object_id(question_id)
@@ -363,7 +358,7 @@ class QuestionService:
                 {"_id": oid, "tutor_id": approver_id},
                 {
                     "$set": {
-                        "status": "active",
+                        "status": QuestionStatus.ACTIVE,
                         "approved_by": approver_id,
                         "approved_at": datetime.now(timezone.utc),
                         "updated_at": datetime.now(timezone.utc)
@@ -377,11 +372,9 @@ class QuestionService:
             logger.info("Question approved", question_id=question_id, approver_id=approver_id)
             return await self.get_question_by_id(question_id)
 
-        except (NotFoundError, AuthorizationError):
+        except (NotFoundError, AuthorizationError, ValidationError):
             raise
         except Exception as e:
-            if "ValidationError" in str(type(e)):
-                raise
             logger.error("Failed to approve question", question_id=question_id, error=str(e))
             raise DatabaseException(f"Failed to approve question: {str(e)}")
 
@@ -391,8 +384,7 @@ class QuestionService:
             # Validate ownership - rejector must own the question
             question = await self.get_question_by_id(question_id, tutor_id=rejector_id)
 
-            if question.status != "pending":
-                from app.core.exceptions import ValidationError
+            if question.status != QuestionStatus.PENDING:
                 raise ValidationError("Only pending questions can be rejected")
 
             oid = to_object_id(question_id)
@@ -400,7 +392,7 @@ class QuestionService:
                 {"_id": oid, "tutor_id": rejector_id},
                 {
                     "$set": {
-                        "status": "rejected",
+                        "status": QuestionStatus.REJECTED,
                         "rejected_by": rejector_id,
                         "rejected_at": datetime.now(timezone.utc),
                         "rejection_reason": reason,
@@ -415,11 +407,9 @@ class QuestionService:
             logger.info("Question rejected", question_id=question_id, rejector_id=rejector_id)
             return await self.get_question_by_id(question_id)
 
-        except (NotFoundError, AuthorizationError):
+        except (NotFoundError, AuthorizationError, ValidationError):
             raise
         except Exception as e:
-            if "ValidationError" in str(type(e)):
-                raise
             logger.error("Failed to reject question", question_id=question_id, error=str(e))
             raise DatabaseException(f"Failed to reject question: {str(e)}")
 
@@ -429,8 +419,7 @@ class QuestionService:
             # Validate ownership
             question = await self.get_question_by_id(question_id, tutor_id=tutor_id)
 
-            if question.status != "pending":
-                from app.core.exceptions import ValidationError
+            if question.status != QuestionStatus.PENDING:
                 raise ValidationError("Only pending questions can have revision requested")
 
             oid = to_object_id(question_id)
@@ -450,11 +439,9 @@ class QuestionService:
             logger.info("Revision requested for question", question_id=question_id, tutor_id=tutor_id)
             return await self.get_question_by_id(question_id)
 
-        except (NotFoundError, AuthorizationError):
+        except (NotFoundError, AuthorizationError, ValidationError):
             raise
         except Exception as e:
-            if "ValidationError" in str(type(e)):
-                raise
             logger.error("Failed to request revision", question_id=question_id, error=str(e))
             raise DatabaseException(f"Failed to request revision: {str(e)}")
 
@@ -467,11 +454,11 @@ class QuestionService:
                 {
                     "_id": {"$in": oids},
                     "tutor_id": approver_id,
-                    "status": "pending"
+                    "status": QuestionStatus.PENDING
                 },
                 {
                     "$set": {
-                        "status": "active",
+                        "status": QuestionStatus.ACTIVE,
                         "approved_by": approver_id,
                         "approved_at": datetime.now(timezone.utc),
                         "updated_at": datetime.now(timezone.utc)
@@ -487,25 +474,46 @@ class QuestionService:
             raise DatabaseException(f"Failed to bulk approve questions: {str(e)}")
 
     async def update_average_score(self, question_id: str, new_score: float) -> bool:
-        """Update question average score"""
+        """Update question average score using running average calculation.
+
+        Uses the formula: new_average = (old_average * attempt_count + new_score) / (attempt_count + 1)
+        This provides accurate historical average tracking.
+        """
         try:
             # Get current question to calculate new average
             question = await self.get_question_by_id(question_id)
 
-            if question.average_score is None:
+            current_attempt_count = getattr(question, 'attempt_count', 0) or 0
+            current_average = question.average_score or 0.0
+
+            # Calculate running average
+            new_attempt_count = current_attempt_count + 1
+            if current_attempt_count == 0:
                 new_average = new_score
             else:
-                # Simple average calculation - in production you might want more sophisticated tracking
-                new_average = (question.average_score + new_score) / 2
+                # Running average formula: (old_avg * count + new_value) / (count + 1)
+                total_score = current_average * current_attempt_count + new_score
+                new_average = total_score / new_attempt_count
 
             oid = to_object_id(question_id)
             result = await self.collection.update_one(
                 {"_id": oid},
-                {"$set": {"average_score": new_average}}
+                {"$set": {
+                    "average_score": new_average,
+                    "attempt_count": new_attempt_count
+                }}
             )
-            
+
+            logger.debug(
+                "Updated average score",
+                question_id=question_id,
+                new_score=new_score,
+                new_average=new_average,
+                attempt_count=new_attempt_count
+            )
+
             return result.matched_count > 0
-            
+
         except Exception as e:
             logger.error("Failed to update average score", question_id=question_id, error=str(e))
             return False

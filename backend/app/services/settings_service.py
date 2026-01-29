@@ -174,7 +174,7 @@ class SettingsService:
         
         try:
             # Import and test the AI manager with current settings
-            from app.services.ai.ai_manager import AIManager
+            from app.ai.services.ai_manager import AIManager
             current_settings = await self.get_settings()
             ai_settings = {
                 "providers": current_settings.ai.providers,

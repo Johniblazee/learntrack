@@ -13,9 +13,10 @@ from app.models.tenant_ai_config import (
     ConfigChangeAuditLog, TenantAIConfigInDB,
     EmbeddingProviderAvailability, EmbeddingModelAvailability
 )
-from app.services.ai.models_fetcher import fetch_all_provider_models
+from app.ai.services.models_fetcher import fetch_all_provider_models
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
+from app.core.utils import escape_regex
 
 logger = structlog.get_logger()
 
@@ -85,7 +86,7 @@ class TenantAIConfigService:
             del _config_cache[key]
 
         # Also invalidate the AIManager cache for this tenant
-        from app.services.ai.ai_manager import invalidate_tenant_ai_manager
+        from app.ai.services.ai_manager import invalidate_tenant_ai_manager
         invalidate_tenant_ai_manager(tenant_id)
     
     async def get_config(self, tenant_id: str, use_cache: bool = True) -> Optional[TenantAIConfig]:
@@ -372,7 +373,7 @@ class TenantAIConfigService:
         """List all tenant AI configurations with pagination"""
         query = {}
         if search:
-            query["tenant_id"] = {"$regex": search, "$options": "i"}
+            query["tenant_id"] = {"$regex": escape_regex(search), "$options": "i"}
 
         total = await self.collection.count_documents(query)
         skip = (page - 1) * per_page

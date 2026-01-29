@@ -14,7 +14,7 @@ from app.models.question import (
     Question, QuestionCreate, QuestionUpdate, QuestionForStudent,
     QuestionGenerationRequest, QuestionGenerationResponse
 )
-from app.services.ai.ai_manager import AIManager
+from app.ai.services.ai_manager import AIManager
 from app.services.question_service import QuestionService
 from app.services.user_service import UserService
 from app.utils.pagination import PaginatedResponse, paginate

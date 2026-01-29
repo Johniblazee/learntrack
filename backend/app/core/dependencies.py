@@ -125,7 +125,7 @@ async def get_rag_service(
     database: AsyncIOMotorDatabase = Depends(get_database)
 ):
     """Dependency to get RAGService instance"""
-    from app.services.rag_service import RAGService
+    from app.rag.services.rag_service import RAGService
     return ServiceContainer.get_service(RAGService, database)
 
 

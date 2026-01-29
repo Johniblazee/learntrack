@@ -3,7 +3,6 @@ RAG (Retrieval-Augmented Generation) models
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
-from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 
 from app.models.user import PyObjectId
@@ -13,7 +12,7 @@ class TutorRAGSettings(BaseModel):
     """RAG settings for each tutor"""
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     tutor_id: str = Field(..., description="Tutor's Clerk user ID")
-    
+
     # Web search credits
     web_search_credits: int = Field(default=100, description="Monthly web search credits")
     web_search_credits_used: int = Field(default=0, description="Credits used this month")
@@ -22,28 +21,28 @@ class TutorRAGSettings(BaseModel):
         description="Date when credits reset"
     )
     auto_web_search: bool = Field(default=False, description="Automatically include web search")
-    
+
     # Qdrant settings
     qdrant_collection_name: Optional[str] = Field(None, description="Tutor's Qdrant collection")
     qdrant_initialized: bool = Field(default=False, description="Whether Qdrant collection is set up")
-    
+
     # Preferred AI settings
     preferred_provider: str = Field(default="groq", description="Preferred AI provider")
     preferred_model: Optional[str] = Field(None, description="Preferred model for generation")
-    
+
     # Embedding settings
     embedding_model: str = Field(default="text-embedding-3-small", description="OpenAI embedding model")
     chunk_size: int = Field(default=1000, description="Chunk size for text splitting")
     chunk_overlap: int = Field(default=200, description="Overlap between chunks")
-    
+
     # Usage statistics
     total_documents: int = Field(default=0, description="Total documents in library")
     total_embeddings: int = Field(default=0, description="Total embeddings stored")
     total_generations: int = Field(default=0, description="Total RAG generations")
-    
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
+
     model_config = ConfigDict(
         populate_by_name=True,
         arbitrary_types_allowed=True
@@ -55,7 +54,7 @@ class RAGQuestionGenerationRequest(BaseModel):
     # Content sources
     document_ids: List[str] = Field(default=[], description="Document IDs to use for context")
     text_content: Optional[str] = Field(None, description="Direct text content")
-    
+
     # Question settings
     subject: str = Field(..., description="Subject area")
     topic: str = Field(..., description="Specific topic")
@@ -63,19 +62,19 @@ class RAGQuestionGenerationRequest(BaseModel):
     question_types: List[str] = Field(default=["multiple-choice"])
     difficulty: Optional[str] = Field(default=None, description="Single difficulty override")
     difficulty_levels: List[str] = Field(default=["medium"])
-    
+
     # AI settings
     ai_provider: str = Field(default="groq", description="AI provider to use")
     model_name: Optional[str] = Field(None, description="Specific model to use")
     custom_prompt: Optional[str] = Field(None, description="Custom generation prompt")
     additional_context: Optional[str] = Field(None, description="Additional context to include")
-    
+
     # RAG settings
     enable_web_search: bool = Field(default=False, description="Include web search results")
     use_web_search: Optional[bool] = Field(default=None, description="Alias for enable_web_search")
     web_search_query: Optional[str] = Field(None, description="Custom web search query")
     context_chunks: int = Field(default=5, ge=1, le=20, description="Number of context chunks")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -131,7 +130,7 @@ class DocumentLibraryItem(BaseModel):
     subject_id: Optional[str] = None
     topic: Optional[str] = None
     uploadthing_url: str
-    
+
     model_config = ConfigDict(
         json_encoders={datetime: lambda v: v.isoformat() if v else None}
     )
@@ -156,3 +155,4 @@ class WebSearchResult(BaseModel):
     snippet: str
     score: float
     raw_content: Optional[str] = None
+
