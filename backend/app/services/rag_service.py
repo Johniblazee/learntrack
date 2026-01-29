@@ -35,6 +35,7 @@ from app.services.document_processors import (
 from app.services.semantic_chunker import SemanticChunker, create_semantic_chunker
 from app.services.cost_tracking_service import CostTrackingService
 from app.services.cost_tracking_service import MODEL_COSTS
+from decimal import Decimal
 
 logger = structlog.get_logger()
 
@@ -834,8 +835,57 @@ class RAGService:
         tenant_id: str,
         provider: str = DEFAULT_EMBEDDING_PROVIDER,
         model: str = DEFAULT_EMBEDDING_MODEL,
+        prefer_local: bool = True,
+        quality: str = "medium",
     ) -> List[List[float]]:
-        """Get embeddings with cost tracking"""
+        """
+        Get embeddings with cost tracking and local model support
+
+        Args:
+            texts: Texts to embed
+            tenant_id: Tenant for cost tracking
+            provider: API provider (fallback)
+            model: API model (fallback)
+            prefer_local: Try local embeddings first
+            quality: Embedding quality level
+
+        Returns:
+            List of embeddings
+        """
+        # Use local embeddings if preferred
+        if prefer_local:
+            try:
+                from app.services.local_embedding_service import HybridEmbeddingService
+
+                hybrid_service = HybridEmbeddingService()
+
+                # Get embeddings with quality preference
+                embeddings = await hybrid_service.embed_with_quality(
+                    texts=texts, quality=quality
+                )
+
+                # Track local usage (minimal cost)
+                await self.cost_service.track_usage(
+                    tenant_id=tenant_id,
+                    provider="local",
+                    model="local_embedding",
+                    input_tokens=sum(len(text.split()) for text in texts),
+                    output_tokens=0,
+                    operation="embedding",
+                    metadata={
+                        "text_count": len(texts),
+                        "model_type": "local",
+                        "quality": quality,
+                    },
+                )
+
+                logger.info(f"Used local embeddings for {len(texts)} texts")
+                return embeddings
+
+            except Exception as e:
+                logger.warning(f"Local embedding failed, using API fallback: {e}")
+
+        # Fallback to API-based embeddings
         # Estimate tokens and cost
         estimated_tokens = sum(
             len(text.split()) * 1.3 for text in texts
@@ -861,7 +911,12 @@ class RAGService:
             input_tokens=int(actual_tokens),
             output_tokens=0,
             operation="embedding",
-            metadata={"text_count": len(texts)},
+            metadata={
+                "text_count": len(texts),
+                "model_type": "api",
+                "provider": provider,
+                "quality": quality,
+            },
         )
 
         return embeddings
