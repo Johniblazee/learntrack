@@ -250,9 +250,11 @@ class CostEstimate(BaseModel):
     @property
     def estimated_cost(self) -> Decimal:
         """Calculate estimated cost based on token estimates"""
-        # This would use the same cost calculation as CostTrackingService
-        # For now, return a placeholder
-        return Decimal("0.01")
+        # This should use the centralized cost calculation (CostTrackingService).
+        # Fail fast so callers don't rely on a misleading placeholder value.
+        raise NotImplementedError(
+            "estimated_cost not implemented; use CostTrackingService to compute costs"
+        )
 
 
 class CostAnalysis(BaseModel):
@@ -278,4 +280,7 @@ class CostAnalysis(BaseModel):
     )
 
     class Config:
-        json_encoders = {Decimal: lambda v: float(v)}
+        json_encoders = {
+            Decimal: lambda v: float(v),
+            datetime: lambda v: v.isoformat(),
+        }

@@ -6,7 +6,10 @@ Tracks AI usage costs per tenant with configurable quotas and alerts
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from decimal import Decimal
+from bson.decimal128 import Decimal128
+from pymongo import ReturnDocument
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from bson import ObjectId
 import structlog
 
 from app.ai.models.cost_tracking import (
@@ -184,19 +187,27 @@ class CostTrackingService:
         self, provider: str, model: str, tokens: int, token_type: str
     ) -> Decimal:
         """Calculate cost for given tokens"""
-        provider_costs = MODEL_COSTS.get(provider, {})
-        model_costs = provider_costs.get(model, {})
-        cost_per_token = model_costs.get(token_type, Decimal("0"))
+            provider_costs = MODEL_COSTS.get(provider)
+            if provider_costs is None:
+                logger.warning("Unknown provider in cost calculation", provider=provider, model=model)
+                return Decimal("0")
 
-        # Convert to cost per token (costs are stored per 1K or 1M tokens)
-        if provider in ["openai", "anthropic", "groq"]:
-            # Costs are per 1K tokens
-            cost_per_token = cost_per_token / Decimal("1000")
-        elif provider == "gemini":
-            # Costs are per 1M tokens
-            cost_per_token = cost_per_token / Decimal("1000000")
+            model_costs = provider_costs.get(model)
+            if model_costs is None:
+                logger.warning("Unknown model in cost calculation", provider=provider, model=model)
+                return Decimal("0")
 
-        return cost_per_token * Decimal(str(tokens))
+            cost_per_token = model_costs.get(token_type, Decimal("0"))
+
+            # Convert to cost per token (costs may be stored per 1K or 1M tokens depending on provider)
+            if provider in ["openai", "anthropic", "groq"]:
+                # Costs are per 1K tokens
+                cost_per_token = cost_per_token / Decimal("1000")
+            elif provider == "gemini":
+                # Costs are per 1M tokens
+                cost_per_token = cost_per_token / Decimal("1000000")
+
+            return cost_per_token * Decimal(str(tokens))
 
     async def get_quota(self, tenant_id: str) -> Optional[CostQuota]:
         """Get quota configuration for tenant"""
@@ -229,10 +240,21 @@ class CostTrackingService:
             created_at=datetime.now(timezone.utc),
         )
 
-        await self.quota_collection.insert_one(quota.model_dump())
-        logger.info("Created default quota", tenant_id=tenant_id, tier=tier)
+        # Upsert the default quota so repeated calls don't create duplicates
+        payload = quota.model_dump()
+        result = await self.quota_collection.update_one(
+            {"tenant_id": tenant_id},
+            {"$setOnInsert": payload},
+            upsert=True,
+        )
 
-        return quota
+        if result.upserted_id:
+            logger.info("Created default quota", tenant_id=tenant_id, tier=tier)
+        else:
+            logger.debug("Default quota already exists, returning existing", tenant_id=tenant_id)
+
+        # Return the current quota document
+        return await self.get_quota(tenant_id)
 
     async def update_quota(
         self,
@@ -303,8 +325,17 @@ class CostTrackingService:
         now = datetime.now(timezone.utc)
         updates = {}
 
-        # Reset daily usage if new day
-        if (now - quota.last_daily_reset).days >= 1:
+        # Reset daily usage if a new calendar day has started
+        try:
+            last_daily = (
+                quota.last_daily_reset
+                if quota.last_daily_reset.tzinfo is not None
+                else quota.last_daily_reset.replace(tzinfo=timezone.utc)
+            )
+        except Exception:
+            last_daily = quota.last_daily_reset
+
+        if now.date() != last_daily.astimezone(timezone.utc).date():
             updates["current_daily_usage"] = Decimal("0")
             updates["last_daily_reset"] = now
 
@@ -332,23 +363,31 @@ class CostTrackingService:
         if not quota:
             return
 
-        # Update usage counters
+        # Reset usage counters if needed before applying increment
         quota = await self._reset_usage_if_needed(quota)
 
-        new_daily_usage = quota.current_daily_usage + cost
-        new_monthly_usage = quota.current_monthly_usage + cost
+        # Atomically increment usage counters to avoid lost updates under concurrency
+        inc_value = float(cost)
 
-        await self.quota_collection.update_one(
+        updated = await self.quota_collection.find_one_and_update(
             {"tenant_id": tenant_id},
-            {
-                "$set": {
-                    "current_daily_usage": new_daily_usage,
-                    "current_monthly_usage": new_monthly_usage,
-                }
-            },
+            {"$inc": {"current_daily_usage": inc_value, "current_monthly_usage": inc_value}},
+            return_document=ReturnDocument.AFTER,
         )
 
-        # Check alert thresholds
+        if not updated:
+            logger.error("Failed to atomically update quota usage", tenant_id=tenant_id)
+            return
+
+        # Convert returned usage values into Decimal for threshold checks
+        try:
+            new_daily_usage = Decimal(str(updated.get("current_daily_usage", 0)))
+            new_monthly_usage = Decimal(str(updated.get("current_monthly_usage", 0)))
+        except Exception:
+            new_daily_usage = Decimal("0")
+            new_monthly_usage = Decimal("0")
+
+        # Check alert thresholds against the up-to-date counters
         await self._check_alert_thresholds(
             tenant_id, quota, new_daily_usage, new_monthly_usage
         )
@@ -424,8 +463,9 @@ class CostTrackingService:
         end_date: Optional[datetime] = None,
     ) -> UsageMetrics:
         """Get usage metrics for a tenant"""
-        if not start_date:
+        if end_date is None:
             end_date = datetime.now(timezone.utc)
+        if start_date is None:
             if period == CostPeriod.DAILY:
                 start_date = end_date - timedelta(days=1)
             elif period == CostPeriod.WEEKLY:
@@ -545,10 +585,20 @@ class CostTrackingService:
 
         return alerts
 
-    async def dismiss_alert(self, alert_id: str) -> bool:
-        """Dismiss a cost alert"""
+    async def dismiss_alert(self, alert_id: str, tenant_id: Optional[str] = None) -> bool:
+        """Dismiss a cost alert. Optionally validate tenant ownership."""
+        try:
+            oid = ObjectId(alert_id)
+        except Exception:
+            logger.warning("Invalid alert_id passed to dismiss_alert", alert_id=alert_id)
+            return False
+
+        query = {"_id": oid}
+        if tenant_id:
+            query["tenant_id"] = tenant_id
+
         result = await self.alerts_collection.update_one(
-            {"_id": alert_id},
+            query,
             {"$set": {"dismissed": True, "dismissed_at": datetime.now(timezone.utc)}},
         )
         return result.modified_count > 0

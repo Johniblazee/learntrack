@@ -50,7 +50,11 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-*.toml
+# Only ignore local or generated TOML files, not repository-level manifests
+# Keep repository files like pyproject.toml tracked
+local.toml
+config/*.local.toml
+build/*.toml
 # clerk configuration (can include secrets)
 /.clerk/
 

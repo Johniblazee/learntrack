@@ -62,8 +62,10 @@ async def get_student_progress_analytics_by_id(
         if not student or student.role != UserRole.STUDENT:
             raise HTTPException(status_code=404, detail="Student not found")
 
-        # Security check
-        if current_user.role == UserRole.TUTOR:
+        # Security check - super admins have full access
+        if current_user.is_super_admin:
+            pass  # Super admins can view any student
+        elif current_user.role == UserRole.TUTOR:
             # Tutors can view their students
             if student.tutor_id != current_user.clerk_id:
                 raise HTTPException(
@@ -91,31 +93,49 @@ async def get_student_progress_analytics_by_id(
         progress_service = ProgressService(database)
         analytics = await progress_service.get_student_analytics(student_id)
 
-        # Calculate monthly scores from real progress data (last 6 months)
-        monthly_scores = []
+        # Calculate monthly scores using single aggregation query (replaces 6 sequential queries)
         now = datetime.now(timezone.utc)
+        six_months_ago = (now.replace(day=1) - timedelta(days=5 * 30)).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
 
+        # Single aggregation to get monthly averages
+        monthly_pipeline = [
+            {
+                "$match": {
+                    "student_id": student_id,
+                    "submitted_at": {"$gte": six_months_ago},
+                    "score": {"$ne": None}
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "year": {"$year": "$submitted_at"},
+                        "month": {"$month": "$submitted_at"}
+                    },
+                    "avg_score": {"$avg": "$score"},
+                    "count": {"$sum": 1}
+                }
+            },
+            {"$sort": {"_id.year": 1, "_id.month": 1}}
+        ]
+
+        monthly_results = await database.progress.aggregate(monthly_pipeline).to_list(length=12)
+
+        # Build month lookup from aggregation results
+        month_lookup = {}
+        for result in monthly_results:
+            key = (result["_id"]["year"], result["_id"]["month"])
+            month_lookup[key] = round(result["avg_score"]) if result["avg_score"] else 0
+
+        # Generate last 6 months with scores (fill gaps with 0)
+        monthly_scores = []
         for i in range(5, -1, -1):
             month_date = now.replace(day=1) - timedelta(days=i * 30)
             month_name = month_abbr[month_date.month]
-
-            month_start = month_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            if month_date.month == 12:
-                month_end = month_start.replace(year=month_start.year + 1, month=1)
-            else:
-                month_end = month_start.replace(month=month_start.month + 1)
-
-            progress_records = await database.progress.find({
-                "student_id": student_id,
-                "submitted_at": {"$gte": month_start, "$lt": month_end}
-            }).to_list(length=100)
-
-            if progress_records:
-                scores = [p.get("score", 0) for p in progress_records if p.get("score") is not None]
-                avg_score = round(sum(scores) / len(scores)) if scores else 0
-            else:
-                avg_score = 0
-
+            key = (month_date.year, month_date.month)
+            avg_score = month_lookup.get(key, 0)
             monthly_scores.append({"month": month_name, "score": avg_score})
 
         return {

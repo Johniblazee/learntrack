@@ -34,13 +34,16 @@ class OpenAIProvider(BaseAIProvider):
                 return content
             
             # For other file types, use OpenAI to extract and clean text
+            # Truncate content before interpolation to avoid embedding comments
+            truncated_content = content[:8000]
+
             prompt = f"""
             Extract and clean the text content from the following {file_type} content.
             Remove any formatting artifacts, headers, footers, and irrelevant metadata.
             Return only the main educational content that would be useful for generating questions.
             
             Content:
-            {content[:8000]}  # Limit to avoid token limits
+            {truncated_content}
             """
             
             # Use centralized prompt from registry
@@ -56,10 +59,13 @@ class OpenAIProvider(BaseAIProvider):
                 temperature=0.1
             )
             
-            return response.choices[0].message.content.strip()
+            content_resp = getattr(response.choices[0].message, "content", None)
+            if content_resp is None:
+                return ""
+            return content_resp.strip()
             
         except Exception as e:
-            logger.error("OpenAI text extraction failed", error=str(e))
+            logger.error("OpenAI text extraction failed", error=str(e), exc_info=True)
             raise AIProviderError(f"Text extraction failed: {str(e)}", "openai")
     
     async def generate_questions(
@@ -101,7 +107,7 @@ class OpenAIProvider(BaseAIProvider):
             return questions
             
         except Exception as e:
-            logger.error("OpenAI question generation failed", error=str(e))
+            logger.error("OpenAI question generation failed", error=str(e), exc_info=True)
             raise AIProviderError(f"Question generation failed: {str(e)}", "openai")
     
     async def validate_question(self, question: QuestionCreate) -> Dict[str, Any]:
@@ -145,26 +151,36 @@ class OpenAIProvider(BaseAIProvider):
             )
             
             import json
-            validation_result = json.loads(response.choices[0].message.content)
-            
+            content_text = getattr(response.choices[0].message, "content", "")
+            try:
+                validation_result = json.loads(content_text)
+            except json.JSONDecodeError as je:
+                logger.error("OpenAI validation JSON parse error", error=str(je), exc_info=True)
+                return {
+                    "quality_score": 10,
+                    "clarity_score": 10,
+                    "difficulty_score": 10,
+                    "issues": ["Validation failed: invalid JSON response"],
+                    "acceptable": False,
+                }
+
             return validation_result
-            
+
         except Exception as e:
-            logger.error("OpenAI question validation failed", error=str(e))
+            logger.error("OpenAI question validation failed", error=str(e), exc_info=True)
             return {
                 "quality_score": 5,
                 "clarity_score": 5,
                 "difficulty_score": 5,
                 "issues": [f"Validation failed: {str(e)}"],
-                "acceptable": True  # Default to acceptable if validation fails
+                "acceptable": False,
             }
     
     async def health_check(self) -> bool:
         """Check OpenAI API health"""
         try:
-            # Use a smaller, representative model from the updated list for health checks
-            # to avoid hardcoding models that might be removed.
-            health_check_model = "gpt-5.2-mini" # Use a model from the *new* OPENAI_MODELS
+            # Use the configured model if available, otherwise fall back to a safe default
+            health_check_model = self.model or get_default_model("openai") or "gpt-4o-mini"
 
             response = await self.client.chat.completions.create(
                 model=health_check_model,

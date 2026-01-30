@@ -21,7 +21,7 @@ from app.ai.models.cost_tracking import (
     CostProvider,
     CostModel,
 )
-from app.ai.services.cost_tracker import CostTrackingService
+from app.ai.services.cost_tracker import CostTrackingService, DEFAULT_QUOTAS
 from app.core.exceptions import ValidationError, NotFoundError, AuthorizationError
 
 router = APIRouter()
@@ -63,6 +63,10 @@ async def create_cost_quota(
 
     service = CostTrackingService(db)
 
+    # Enforce tenant-level authorization: only allow creating quotas for your tenant
+    if not (current_user.is_super_admin or current_user.tenant_id == quota_data.tenant_id):
+        raise AuthorizationError("billing.write")
+
     # Check if quota already exists
     existing = await service.get_quota(quota_data.tenant_id)
     if existing:
@@ -70,7 +74,19 @@ async def create_cost_quota(
             status_code=400, detail="Quota already exists for this tenant"
         )
 
-    return await service.create_default_quota(quota_data.tenant_id)
+    # Create default quota using requested tier, then override limits if provided
+    quota = await service.create_default_quota(quota_data.tenant_id, tier=quota_data.tier)
+
+    # If the request provided explicit limits, update them
+    await service.update_quota(
+        tenant_id=quota_data.tenant_id,
+        monthly_limit=quota_data.monthly_limit,
+        daily_limit=quota_data.daily_limit,
+        alert_threshold=quota_data.alert_threshold,
+        tier=quota_data.tier,
+    )
+
+    return await service.get_quota(quota_data.tenant_id)
 
 
 @router.put("/quota", response_model=CostQuota)
@@ -171,7 +187,8 @@ async def dismiss_cost_alert(
         raise AuthorizationError("billing.write")
 
     service = CostTrackingService(db)
-    success = await service.dismiss_alert(alert_id)
+    # Ensure tenant ownership when dismissing alerts
+    success = await service.dismiss_alert(alert_id, tenant_id=current_user.tenant_id)
 
     if not success:
         raise HTTPException(status_code=404, detail="Alert not found")

@@ -240,13 +240,30 @@ async def get_student_parents(
         if student.tutor_id != current_user.clerk_id:
             raise HTTPException(status_code=403, detail="Access forbidden: Student does not belong to this tutor.")
 
-        # Find parents linked to this student
+        # Use the student's actual clerk_id from the database (in case the URL param differs)
+        actual_student_clerk_id = student.clerk_id
+
+        logger.info(
+            "Fetching parents for student",
+            url_student_id=student_clerk_id,
+            actual_clerk_id=actual_student_clerk_id,
+            tutor_id=current_user.clerk_id
+        )
+
+        # Find parents linked to this student - search for both the URL param and actual clerk_id
+        # This handles cases where the student_ids might have been stored with a different ID format
         parent_cursor = db.parents.find({
-            "student_ids": student_clerk_id,
+            "$or": [
+                {"student_ids": student_clerk_id},
+                {"student_ids": actual_student_clerk_id},
+                {"student_ids": str(student.id)}  # Also check MongoDB ObjectId as string
+            ],
             "tutor_id": current_user.clerk_id,
             "is_active": True
         })
         parents = await parent_cursor.to_list(length=50)
+
+        logger.info("Found parents for student", count=len(parents), student_id=actual_student_clerk_id)
 
         # Convert to Pydantic models for proper ObjectId serialization
         return [User(**parent) for parent in parents]
@@ -285,6 +302,16 @@ async def link_parent_to_student(
         if student.tutor_id != current_user.clerk_id:
             raise HTTPException(status_code=403, detail="Access forbidden: Student does not belong to this tutor.")
 
+        # Use the student's actual clerk_id from the database for consistency
+        actual_student_id = student.clerk_id
+
+        logger.info(
+            "Linking parent to student",
+            url_student_id=student_clerk_id,
+            actual_student_id=actual_student_id,
+            parent_email=payload.parent_email
+        )
+
         # Check if parent already exists by email
         existing_parent = await db.parents.find_one({
             "email": payload.parent_email,
@@ -292,14 +319,15 @@ async def link_parent_to_student(
         })
 
         if existing_parent:
-            # Check if already linked
-            if student_clerk_id in existing_parent.get("student_ids", []):
+            # Check if already linked (check both URL param and actual ID for robustness)
+            existing_student_ids = existing_parent.get("student_ids", [])
+            if actual_student_id in existing_student_ids or student_clerk_id in existing_student_ids:
                 raise HTTPException(status_code=400, detail="Parent is already linked to this student")
 
-            # Add student to existing parent's student_ids
+            # Add student to existing parent's student_ids using the actual clerk_id
             await db.parents.update_one(
                 {"_id": existing_parent["_id"]},
-                {"$addToSet": {"student_ids": student_clerk_id}}
+                {"$addToSet": {"student_ids": actual_student_id}}
             )
 
             return {"message": "Parent linked successfully", "parent_id": str(existing_parent["_id"])}
@@ -314,7 +342,7 @@ async def link_parent_to_student(
                 "email": payload.parent_email,
                 "role": "parent",
                 "tutor_id": current_user.clerk_id,
-                "student_ids": [student_clerk_id],
+                "student_ids": [actual_student_id],  # Use actual clerk_id for consistency
                 "is_active": True,
                 "created_at": datetime.now(timezone.utc),
                 "updated_at": datetime.now(timezone.utc)
@@ -351,6 +379,9 @@ async def unlink_parent_from_student(
         if student.tutor_id != current_user.clerk_id:
             raise HTTPException(status_code=403, detail="Access forbidden: Student does not belong to this tutor.")
 
+        # Use the student's actual clerk_id from the database
+        actual_student_id = student.clerk_id
+
         # Find the parent by clerk_id or _id
         parent = await db.parents.find_one({
             "$or": [
@@ -363,10 +394,10 @@ async def unlink_parent_from_student(
         if not parent:
             raise HTTPException(status_code=404, detail="Parent not found")
 
-        # Remove student from parent's student_ids
+        # Remove student from parent's student_ids (remove both URL param and actual ID for robustness)
         await db.parents.update_one(
             {"_id": parent["_id"]},
-            {"$pull": {"student_ids": student_clerk_id}}
+            {"$pull": {"student_ids": {"$in": [student_clerk_id, actual_student_id, str(student.id)]}}}
         )
 
         return None

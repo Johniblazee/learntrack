@@ -182,6 +182,26 @@ class StudentService:
             logger.error("Failed to list student groups", error=str(e), tutor_id=tutor_id)
             raise DatabaseException(f"Failed to list student groups: {str(e)}")
 
+    async def get_groups_for_student(self, student_id: str, tutor_id: str, limit: int = 50) -> List[StudentGroup]:
+        """Get all groups that contain a specific student (optimized query with tenant isolation)"""
+        try:
+            # Query MongoDB directly for groups containing this student
+            # Uses the index on (tutor_id, studentIds)
+            cursor = self.groups.find({
+                "tutor_id": tutor_id,
+                "studentIds": student_id
+            }).limit(limit).sort("created_at", -1)
+
+            results: List[StudentGroup] = []
+            async for doc in cursor:
+                results.append(StudentGroup(**doc))
+
+            logger.info("Retrieved groups for student", student_id=student_id, tutor_id=tutor_id, count=len(results))
+            return results
+        except Exception as e:
+            logger.error("Failed to get groups for student", error=str(e), student_id=student_id, tutor_id=tutor_id)
+            raise DatabaseException(f"Failed to get groups for student: {str(e)}")
+
     async def create_group(self, data: StudentGroupCreate, tutor_id: str) -> StudentGroup:
         """Create a new group (with tenant isolation)"""
         try:

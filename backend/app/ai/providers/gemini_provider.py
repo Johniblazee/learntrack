@@ -3,6 +3,7 @@ Google Gemini AI Provider using LangChain
 """
 from typing import List, Dict, Any, Optional
 import structlog
+import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -74,14 +75,24 @@ Respond with JSON only: {{"is_valid": true/false, "issues": [], "suggestions": [
             messages = [HumanMessage(content=prompt)]
             response = await self.llm.ainvoke(messages)
             
-            import json
             try:
                 return json.loads(response.content)
-            except:
-                return {"is_valid": True, "issues": [], "suggestions": [], "quality_score": 75}
+            except json.JSONDecodeError as je:
+                logger.error("Gemini validate_question JSON parse error", error=str(je), exc_info=True)
+                return {
+                    "is_valid": False,
+                    "issues": ["AI validation failed: invalid JSON response"],
+                    "suggestions": [],
+                    "quality_score": 10,
+                }
         except Exception as e:
-            logger.error(f"Gemini validation failed: {e}")
-            return {"is_valid": True, "issues": [], "suggestions": [], "quality_score": 50}
+            logger.error("Gemini validation failed", error=str(e), exc_info=True)
+            return {
+                "is_valid": False,
+                "issues": [f"AI validation failed: {str(e)[:200]}"],
+                "suggestions": [],
+                "quality_score": 5,
+            }
 
     async def health_check(self) -> bool:
         """Check if Gemini is available"""

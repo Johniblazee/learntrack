@@ -151,82 +151,86 @@ export default function StudentDetailsPage() {
         completedAssignments: userData.student_profile?.completedAssignments || 0
       })
 
-      // Fetch progress data from API
-      try {
-        const progressRes = await client.get(`/progress/student/${studentClerkId}/analytics`)
-        if (progressRes.data?.monthly_scores) {
-          setProgressData(progressRes.data.monthly_scores)
+      // Fetch all additional data in parallel for better performance
+      const [progressResult, assignmentsResult, groupsResult, activityResult, parentsResult] = await Promise.allSettled([
+        client.get(`/progress/student/${studentClerkId}/analytics`),
+        client.get(`/assignments/student/${studentClerkId}?status=pending`),
+        client.get(`/groups/student/${studentClerkId}`),
+        client.get(`/activity/student/${studentClerkId}`),
+        client.get(`/students/${studentClerkId}/parents`)
+      ])
+
+      // Process progress data
+      if (progressResult.status === 'fulfilled' && progressResult.value.data?.monthly_scores) {
+        setProgressData(progressResult.value.data.monthly_scores)
+      } else {
+        if (progressResult.status === 'rejected') {
+          console.error('Failed to fetch progress data:', progressResult.reason)
         }
-      } catch (err) {
-        console.error('Failed to fetch progress data:', err)
-        // Set empty array if API fails
         setProgressData([])
       }
 
-      // Fetch assignments from API
-      try {
-        const assignmentsRes = await client.get(`/assignments/student/${studentClerkId}?status=pending`)
-        if (assignmentsRes.data) {
-          const mappedAssignments = assignmentsRes.data.map((a: any) => ({
-            id: a._id,
-            title: a.title,
-            subject: a.subject_id?.name || 'Unknown',
-            dueDate: a.due_date,
-            status: a.status
-          }))
-          setAssignments(mappedAssignments)
+      // Process assignments data
+      if (assignmentsResult.status === 'fulfilled' && assignmentsResult.value.data) {
+        const mappedAssignments = assignmentsResult.value.data.map((a: any) => ({
+          id: a._id,
+          title: a.title,
+          subject: a.subject_id?.name || 'Unknown',
+          dueDate: a.due_date,
+          status: a.status
+        }))
+        setAssignments(mappedAssignments)
+      } else {
+        if (assignmentsResult.status === 'rejected') {
+          console.error('Failed to fetch assignments:', assignmentsResult.reason)
         }
-      } catch (err) {
-        console.error('Failed to fetch assignments:', err)
         setAssignments([])
       }
 
-      // Fetch groups from API
-      try {
-        const groupsRes = await client.get(`/groups/student/${studentClerkId}`)
-        if (groupsRes.data) {
-          const mappedGroups = groupsRes.data.map((g: any) => ({
-            id: g._id,
-            name: g.name,
-            color: g.color || 'blue'
-          }))
-          setGroups(mappedGroups)
+      // Process groups data
+      if (groupsResult.status === 'fulfilled' && groupsResult.value.data) {
+        const mappedGroups = groupsResult.value.data.map((g: any) => ({
+          id: g._id,
+          name: g.name,
+          color: g.color || 'blue'
+        }))
+        setGroups(mappedGroups)
+      } else {
+        if (groupsResult.status === 'rejected') {
+          console.error('Failed to fetch groups:', groupsResult.reason)
         }
-      } catch (err) {
-        console.error('Failed to fetch groups:', err)
         setGroups([])
       }
 
-      // Fetch recent activity from API
-      try {
-        const activityRes = await client.get(`/activity/student/${studentClerkId}`)
-        if (activityRes.data) {
-          const mappedActivities = activityRes.data.map((a: any) => ({
-            id: a._id,
-            type: a.type,
-            title: a.title,
-            timestamp: a.timestamp,
-            score: a.score
-          }))
-          setActivities(mappedActivities)
+      // Process activity data
+      if (activityResult.status === 'fulfilled' && activityResult.value.data) {
+        const mappedActivities = activityResult.value.data.map((a: any) => ({
+          id: a._id,
+          type: a.type,
+          title: a.title,
+          timestamp: a.timestamp,
+          score: a.score
+        }))
+        setActivities(mappedActivities)
+      } else {
+        if (activityResult.status === 'rejected') {
+          console.error('Failed to fetch activity:', activityResult.reason)
         }
-      } catch (err) {
-        console.error('Failed to fetch activity:', err)
         setActivities([])
       }
-      // Fetch linked parents for this student
-      try {
-        const parentsRes = await client.get(`/students/${studentClerkId}/parents`)
-        if (parentsRes.data) {
-          const mappedParents = parentsRes.data.map((p: any) => ({
-            id: String(p.clerk_id || p._id),
-            name: p.name,
-            email: p.email
-          }))
-          setLinkedParents(mappedParents)
+
+      // Process parents data
+      if (parentsResult.status === 'fulfilled' && parentsResult.value.data) {
+        const mappedParents = parentsResult.value.data.map((p: any) => ({
+          id: String(p.clerk_id || p._id),
+          name: p.name,
+          email: p.email
+        }))
+        setLinkedParents(mappedParents)
+      } else {
+        if (parentsResult.status === 'rejected') {
+          console.error('Failed to fetch linked parents:', parentsResult.reason)
         }
-      } catch (err) {
-        console.error('Failed to fetch linked parents:', err)
         setLinkedParents([])
       }
     } catch (err: any) {
@@ -277,6 +281,16 @@ export default function StudentDetailsPage() {
     e.preventDefault()
     if (!parentEmail.trim() || !parentName.trim() || !student) return
 
+    // Check if this email is already linked to this student (client-side validation)
+    const emailLower = parentEmail.trim().toLowerCase()
+    const alreadyLinked = linkedParents.some(p => p.email.toLowerCase() === emailLower)
+    if (alreadyLinked) {
+      toast.warning('Parent already linked', {
+        description: `A parent with email "${parentEmail}" is already linked to this student.`
+      })
+      return
+    }
+
     try {
       setLinkingParent(true)
       const res = await client.post(`/students/${student.id}/parents`, {
@@ -311,9 +325,17 @@ export default function StudentDetailsPage() {
       setLinkParentModalOpen(false)
     } catch (error: any) {
       console.error('Failed to link parent:', error)
-      toast.error('Failed to link parent', {
-        description: error.message || 'Please try again or contact support.'
-      })
+      // Provide more specific error messages based on the error
+      const errorMessage = error.message || ''
+      if (errorMessage.includes('already linked')) {
+        toast.warning('Parent already linked', {
+          description: `This parent is already linked to ${student.name}.`
+        })
+      } else {
+        toast.error('Failed to link parent', {
+          description: errorMessage || 'Please try again or contact support.'
+        })
+      }
     } finally {
       setLinkingParent(false)
     }
@@ -429,7 +451,7 @@ export default function StudentDetailsPage() {
                 <h2 className="text-2xl font-bold mb-4">Student not found</h2>
                 <Button
                   onClick={() => navigate('/dashboard/students')}
-                  className="bg-[#C8A882] text-white hover:bg-[#B89872]"
+                  className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] dark:bg-[#C8A882] dark:text-white dark:hover:bg-[#B89872] border-0"
                 >
                   Back to Students
                 </Button>
@@ -442,11 +464,11 @@ export default function StudentDetailsPage() {
               <div className="mb-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-4">
-                    <Avatar className="h-20 w-20 border-4 border-[#C8A882]/20">
+                    <Avatar className="h-20 w-20 border-4 border-[#5c4a38]/20 dark:border-[#C8A882]/20">
                       {student.avatar ? (
                         <AvatarImage src={student.avatar} alt={student.name} />
                       ) : (
-                        <AvatarFallback className="bg-gradient-to-br from-[#C8A882] to-[#B89872] text-white text-2xl font-semibold">
+                        <AvatarFallback className="bg-gradient-to-br from-[#5c4a38] to-[#4a3c2e] dark:from-[#C8A882] dark:to-[#B89872] text-white text-2xl font-semibold">
                           {getInitials(student.name)}
                         </AvatarFallback>
                       )}
@@ -454,7 +476,7 @@ export default function StudentDetailsPage() {
                     <div>
                       <div className="flex items-center gap-3">
                         <h1 className="text-3xl font-bold text-foreground">{student.name}</h1>
-                        <Badge variant="outline" className="border-[#C8A882] text-[#C8A882]">
+                        <Badge variant="outline" className="border-[#5c4a38] text-[#5c4a38] dark:border-[#C8A882] dark:text-[#C8A882]">
                           <GraduationCap className="h-3 w-3 mr-1" />
                           {student.grade}
                         </Badge>
@@ -473,14 +495,14 @@ export default function StudentDetailsPage() {
                     <Button
                       variant="outline"
                       onClick={handleSendMessage}
-                      className="border-[#C8A882] text-[#C8A882] hover:bg-[#C8A882] hover:text-white"
+                      className="border-[#5c4a38] border-2 text-[#5c4a38] bg-transparent hover:bg-[#5c4a38] hover:text-white dark:border-[#C8A882] dark:text-[#C8A882] dark:hover:bg-[#C8A882] dark:hover:text-white"
                     >
                       <MessageCircle className="h-4 w-4 mr-2" />
                       Send Message
                     </Button>
                     <Button
                       onClick={handleEditProfile}
-                      className="bg-[#C8A882] text-white hover:bg-[#B89872]"
+                      className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] border-0 dark:bg-[#C8A882] dark:hover:bg-[#B89872]"
                     >
                       <Edit className="h-4 w-4 mr-2" />
                       Edit Profile
@@ -572,7 +594,7 @@ export default function StudentDetailsPage() {
               <Card className="border-border bg-card">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-foreground flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5 text-[#C8A882]" />
+                    <BarChart3 className="h-5 w-5 text-[#5c4a38] dark:text-[#C8A882]" />
                     Academic Progress
                   </CardTitle>
                   {progressData.length > 0 && (
@@ -609,10 +631,10 @@ export default function StudentDetailsPage() {
                         <Line
                           type="monotone"
                           dataKey="score"
-                          stroke="#C8A882"
+                          stroke="#5c4a38"
                           strokeWidth={3}
-                          dot={{ fill: '#C8A882', r: 5, strokeWidth: 2, stroke: '#fff' }}
-                          activeDot={{ r: 7, stroke: '#C8A882', strokeWidth: 2 }}
+                          dot={{ fill: '#5c4a38', r: 5, strokeWidth: 2, stroke: '#fff' }}
+                          activeDot={{ r: 7, stroke: '#5c4a38', strokeWidth: 2 }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -692,13 +714,13 @@ export default function StudentDetailsPage() {
               <Card className="border-border bg-card">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                   <CardTitle className="text-foreground flex items-center gap-2 text-base">
-                    <Users className="h-5 w-5 text-[#C8A882]" />
+                    <Users className="h-5 w-5 text-[#5c4a38] dark:text-[#C8A882]" />
                     Linked Parents
                   </CardTitle>
                   <Button
                     size="sm"
                     onClick={() => setLinkParentModalOpen(true)}
-                    className="bg-[#C8A882] text-white hover:bg-[#B89872] h-8"
+                    className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] h-8 border-0 dark:bg-[#C8A882] dark:hover:bg-[#B89872]"
                   >
                     <UserPlus className="h-4 w-4 mr-1" />
                     Link
@@ -712,8 +734,8 @@ export default function StudentDetailsPage() {
                         className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border hover:bg-muted/70 transition-colors"
                       >
                         <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="h-9 w-9 rounded-full bg-[#C8A882]/10 flex items-center justify-center flex-shrink-0">
-                            <User className="h-4 w-4 text-[#C8A882]" />
+                          <div className="h-9 w-9 rounded-full bg-[#5c4a38]/10 dark:bg-[#C8A882]/10 flex items-center justify-center flex-shrink-0">
+                            <User className="h-4 w-4 text-[#5c4a38] dark:text-[#C8A882]" />
                           </div>
                           <div className="min-w-0">
                             <p className="text-foreground font-medium text-sm truncate">{parent.name}</p>
@@ -958,14 +980,14 @@ export default function StudentDetailsPage() {
                 variant="outline"
                 onClick={() => setLinkParentModalOpen(false)}
                 disabled={linkingParent}
-                className="border-[#C8A882] text-[#C8A882] hover:bg-[#C8A882] hover:text-white"
+                className="border-[#5c4a38] border-2 text-[#5c4a38] bg-transparent hover:bg-[#5c4a38] hover:text-white dark:border-[#C8A882] dark:text-[#C8A882] dark:hover:bg-[#C8A882] dark:hover:text-white"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={linkingParent || !parentEmail.trim() || !parentName.trim()}
-                className="bg-[#C8A882] text-white hover:bg-[#B89872] disabled:bg-[#C8A882]/50"
+                className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] disabled:bg-[#5c4a38]/50 border-0 dark:bg-[#C8A882] dark:hover:bg-[#B89872] dark:disabled:bg-[#C8A882]/50"
               >
                 {linkingParent ? (
                   <>

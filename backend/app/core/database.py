@@ -86,9 +86,13 @@ class Database:
             await self.database.progress.create_index([("student_id", 1), ("assignment_id", 1)], unique=True)
             await self.database.progress.create_index("student_id")
             await self.database.progress.create_index("assignment_id")
+            await self.database.progress.create_index("submitted_at")  # For monthly score queries
+            await self.database.progress.create_index([("student_id", 1), ("submitted_at", -1)])  # Compound index for analytics
 
             # Student groups collection indexes
             await self.database.student_groups.create_index("tutor_id")
+            await self.database.student_groups.create_index("studentIds")  # For filtering groups by student
+            await self.database.student_groups.create_index([("tutor_id", 1), ("studentIds", 1)])  # Compound index for filtered queries
 
             # Files collection indexes (with tenant isolation)
             await self.database.files.create_index("userId")

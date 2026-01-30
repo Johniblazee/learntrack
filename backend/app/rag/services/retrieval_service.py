@@ -4,6 +4,8 @@ Optimized document retrieval with configurable strategies
 """
 
 import os
+import hashlib
+import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 import structlog
 
@@ -129,7 +131,9 @@ class RetrievalService:
                 # Add unique IDs if not present
                 for j, doc in enumerate(batch):
                     if "id" not in doc.metadata:
-                        doc.metadata["id"] = f"doc_{i}_{j}_{hash(doc.page_content)}"
+                        # Use deterministic SHA-256 digest of content for stable IDs
+                        digest = hashlib.sha256(doc.page_content.encode("utf-8")).hexdigest()
+                        doc.metadata["id"] = f"doc_{i}_{j}_{digest[:32]}"
 
                 # Use LangChain's optimized document addition
                 ids = await self.vectorstore.aadd_documents(batch, **kwargs)
@@ -270,7 +274,7 @@ class RetrievalService:
             )
             raise
 
-    def _build_filter(self, filter_dict: Dict[str, Any]) -> Filter:
+    def _build_filter(self, filter_dict: Dict[str, Any]) -> Optional[Filter]:
         """Build Qdrant filter from dictionary"""
         conditions = []
 
@@ -333,11 +337,11 @@ class RetrievalService:
         """
         try:
             # First delete existing documents with the same IDs
-            doc_ids = [
-                doc.metadata.get("id") for doc in documents if "id" in doc.metadata
-            ]
+            doc_ids = [doc.metadata.get("id") for doc in documents if "id" in doc.metadata]
             if doc_ids:
-                await self.delete_documents(document_ids=doc_ids)
+                success = await self.delete_documents(document_ids=doc_ids)
+                if not success:
+                    raise RuntimeError("Failed to delete existing documents before update")
 
             # Then add the updated documents
             return await self.add_documents(documents, **kwargs)
@@ -381,12 +385,14 @@ class RetrievalService:
         try:
             qdrant_filter = self._build_filter(filter_dict)
 
-            # Use scroll to get documents matching the filter
-            points, _ = self.qdrant_client.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=qdrant_filter,
-                limit=limit,
-                **kwargs,
+            # Use scroll to get documents matching the filter. Run blocking client call off-thread.
+            points, _ = await asyncio.to_thread(
+                lambda: self.qdrant_client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=qdrant_filter,
+                    limit=limit,
+                    **kwargs,
+                )
             )
 
             # Convert points to Document objects

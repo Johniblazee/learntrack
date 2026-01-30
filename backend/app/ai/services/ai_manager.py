@@ -20,6 +20,8 @@ logger = structlog.get_logger()
 
 # Cache for tenant-specific AI managers
 _tenant_ai_managers: Dict[str, "AIManager"] = {}
+# Async lock to guard tenant AI manager cache
+_tenant_cache_lock = asyncio.Lock()
 
 
 class AIManager:
@@ -46,16 +48,14 @@ class AIManager:
         # Reject common placeholder patterns
         placeholders = [
             "your_",
-            "YOUR_",
             "sk_test_",
             "api_key",
-            "API_KEY",
             "placeholder",
-            "PLACEHOLDER",
             "dummy",
             "test_key",
         ]
-        return not any(placeholder in key.lower() for placeholder in placeholders)
+        key_l = key.lower()
+        return not any(placeholder in key_l for placeholder in placeholders)
 
     def _initialize_providers(self) -> None:
         """Initialize all available AI providers"""
@@ -128,8 +128,20 @@ class AIManager:
         providers_to_try = []
 
         # Use preferred provider if specified
-        if preferred_provider and preferred_provider in self.providers:
-            providers_to_try.append(preferred_provider)
+        # Normalize preferred_provider to AIProvider enum when possible
+        preferred_enum = None
+        if preferred_provider:
+            try:
+                preferred_enum = (
+                    preferred_provider
+                    if isinstance(preferred_provider, AIProvider)
+                    else AIProvider(preferred_provider)
+                )
+            except Exception:
+                logger.debug("preferred_provider could not be mapped to AIProvider", preferred=preferred_provider)
+
+        if preferred_enum and preferred_enum in self.providers:
+            providers_to_try.append(preferred_enum)
 
         # Add default provider
         if self.default_provider in self.providers:
@@ -433,9 +445,8 @@ class AIManager:
         return False
     
     def get_available_models(self, provider_name: Optional[str] = None) -> Dict[str, List[str]]:
-        """Get available models for providers"""
-        # This would be implemented based on each provider's capabilities
-        return {
+        """Get available models for providers. If provider_name is provided, return only that provider's models."""
+        models_map = {
             "openai": [
                 "gpt-4o",
                 "gpt-4o-mini",
@@ -453,16 +464,32 @@ class AIManager:
                 "gemini-pro",
             ],
         }
+        if provider_name:
+            key = provider_name.lower()
+            if key in models_map:
+                return {key: models_map[key]}
+            return {}
+        return models_map
 
 
-def get_ai_manager_for_tenant(
+async def get_ai_manager_for_tenant(
     tenant_id: str,
     tenant_config: Optional[Dict[str, Any]] = None,
 ) -> AIManager:
-    """Get or create AI manager for a specific tenant"""
-    if tenant_id not in _tenant_ai_managers:
-        _tenant_ai_managers[tenant_id] = AIManager(tenant_config=tenant_config)
-    return _tenant_ai_managers[tenant_id]
+    """Get or create AI manager for a specific tenant (async and guarded). If tenant_config differs, recreate the manager."""
+    async with _tenant_cache_lock:
+        existing = _tenant_ai_managers.get(tenant_id)
+        if existing:
+            # If a new tenant_config is passed and differs, recreate manager
+            if tenant_config and existing.tenant_config != tenant_config:
+                _tenant_ai_managers[tenant_id] = AIManager(tenant_config=tenant_config)
+                return _tenant_ai_managers[tenant_id]
+            return existing
+
+        # Create and cache
+        mgr = AIManager(tenant_config=tenant_config)
+        _tenant_ai_managers[tenant_id] = mgr
+        return mgr
 
 
 def create_ai_manager(
@@ -478,11 +505,12 @@ def get_default_ai_manager() -> AIManager:
     return create_ai_manager()
 
 
-def invalidate_tenant_ai_manager(tenant_id: str) -> None:
-    """Invalidate the cached AI manager for a tenant"""
-    if tenant_id in _tenant_ai_managers:
-        del _tenant_ai_managers[tenant_id]
-        logger.debug("Invalidated AI manager cache for tenant", tenant_id=tenant_id)
+async def invalidate_tenant_ai_manager(tenant_id: str) -> None:
+    """Invalidate the cached AI manager for a tenant (async)."""
+    async with _tenant_cache_lock:
+        if tenant_id in _tenant_ai_managers:
+            del _tenant_ai_managers[tenant_id]
+            logger.debug("Invalidated AI manager cache for tenant", tenant_id=tenant_id)
 
 
 async def get_tenant_ai_manager(tenant_id: str, db=None) -> AIManager:
@@ -497,4 +525,4 @@ async def get_tenant_ai_manager(tenant_id: str, db=None) -> AIManager:
         AIManager instance for the tenant
     """
     # In future, could load tenant config from db here
-    return get_ai_manager_for_tenant(tenant_id)
+    return await get_ai_manager_for_tenant(tenant_id)

@@ -21,18 +21,15 @@ async def get_student_groups(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database)
 ):
-    """Get all groups that a student belongs to (tenant isolated)"""
+    """Get all groups that a student belongs to (tenant isolated, optimized query)"""
     try:
         student_service = StudentService(database)
 
-        # Get all groups for the tutor (tenant isolated)
-        all_groups = await student_service.list_groups(tutor_id=current_user.clerk_id, limit=200)
-
-        # Filter groups that include this student
-        student_groups = []
-        for group in all_groups:
-            if student_id in group.studentIds:
-                student_groups.append(group)
+        # Use optimized MongoDB query instead of fetching all groups and filtering in Python
+        student_groups = await student_service.get_groups_for_student(
+            student_id=student_id,
+            tutor_id=current_user.clerk_id
+        )
 
         return student_groups
     except Exception as e:

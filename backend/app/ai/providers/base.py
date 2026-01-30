@@ -64,6 +64,9 @@ class BaseAIProvider(ABC):
         """Build prompt for question generation"""
         types_str = ", ".join([qt.value for qt in question_types])
         
+        # Truncate content before interpolation to avoid embedding comments in the prompt
+        truncated_text = text_content[:4000]
+
         prompt = f"""
 You are an expert educator creating assessment questions for the subject "{subject}" on the topic "{topic}".
 
@@ -72,7 +75,7 @@ Based on the following content, generate {question_count} high-quality {difficul
 Question types to include: {types_str}
 
 Content:
-{text_content[:4000]}  # Limit content to avoid token limits
+{truncated_text}
 
 Requirements:
 1. Questions should be clear, unambiguous, and directly related to the content
@@ -115,7 +118,11 @@ Generate exactly {question_count} questions.
             if "```json" in response_text:
                 json_start = response_text.find("```json") + 7
                 json_end = response_text.find("```", json_start)
-                json_text = response_text[json_start:json_end].strip()
+                # If the closing fence is missing, take the remainder of the response
+                if json_end == -1:
+                    json_text = response_text[json_start:].strip()
+                else:
+                    json_text = response_text[json_start:json_end].strip()
             else:
                 json_text = response_text.strip()
             
@@ -149,7 +156,16 @@ Generate exactly {question_count} questions.
                     )
                     questions.append(question)
                 except Exception as e:
-                    logger.warning("Failed to parse question", error=str(e), question_data=q_data)
+                    # Avoid logging potentially sensitive question content. Log keys instead.
+                    try:
+                        q_keys = list(q_data.keys()) if isinstance(q_data, dict) else None
+                    except Exception:
+                        q_keys = None
+                    logger.warning(
+                        "Failed to parse question",
+                        error=str(e),
+                        question_keys=q_keys,
+                    )
                     continue
             
             return questions

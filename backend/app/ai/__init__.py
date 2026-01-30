@@ -12,7 +12,7 @@ from .providers.gemini_provider import GeminiProvider
 
 __all__ = [
     "AIManager",
-    "CostTracker",
+    "CostTrackingService",
     "BaseAIProvider",
     "OpenAIProvider",
     "GroqProvider",

@@ -6,6 +6,7 @@ Creates collections for cost tracking and updates existing data
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
+from bson.decimal128 import Decimal128
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 
@@ -76,11 +77,12 @@ async def create_default_quotas(db: AsyncIOMotorDatabase):
         quota = {
             "tenant_id": tenant_id,
             "tier": tier,
-            "monthly_limit": monthly_limit,
-            "daily_limit": daily_limit,
-            "alert_threshold": Decimal("0.8"),
-            "current_monthly_usage": Decimal("0"),
-            "current_daily_usage": Decimal("0"),
+            # Store numeric limits as Decimal128 for MongoDB
+            "monthly_limit": Decimal128(str(monthly_limit)),
+            "daily_limit": Decimal128(str(daily_limit)),
+            "alert_threshold": Decimal128(str(Decimal("0.8"))),
+            "current_monthly_usage": Decimal128(str(Decimal("0"))),
+            "current_daily_usage": Decimal128(str(Decimal("0"))),
             "last_monthly_reset": datetime.now(timezone.utc),
             "last_daily_reset": datetime.now(timezone.utc),
             "is_active": True,
@@ -88,7 +90,10 @@ async def create_default_quotas(db: AsyncIOMotorDatabase):
             "updated_at": None,
         }
 
-        await quota_collection.insert_one(quota)
+        # Upsert to avoid duplicates
+        await quota_collection.update_one(
+            {"tenant_id": tenant_id}, {"$setOnInsert": quota}, upsert=True
+        )
         quotas_created += 1
 
     logger.info(f"Created default quotas for {quotas_created} tenants")
@@ -104,7 +109,11 @@ async def update_existing_files_with_cost_metadata(db: AsyncIOMotorDatabase):
     records_created = 0
 
     for file in files:
-        tenant_id = str(file.get("tutor_id", file.get("uploaded_by")))
+        tenant_raw = file.get("tutor_id") or file.get("uploaded_by")
+        if tenant_raw is None:
+            logger.warning("Skipping file with missing tenant info", file_id=str(file.get("_id")))
+            continue
+        tenant_id = str(tenant_raw)
         file_id = str(file["_id"])
 
         # Estimate historical cost (simplified)
@@ -112,17 +121,17 @@ async def update_existing_files_with_cost_metadata(db: AsyncIOMotorDatabase):
         chunk_count = file.get("chunk_count", 10)
 
         # Create historical cost record
+        # Prepare cost_record using Decimal128 for numeric fields
+        input_cost_val = token_estimate * 0.00000002
         cost_record = {
             "tenant_id": tenant_id,
-            "provider": "openai",  # Assume OpenAI for historical data
+            "provider": "openai",
             "model": "text-embedding-3-small",
             "input_tokens": token_estimate,
             "output_tokens": 0,
-            "input_cost": Decimal(
-                str(token_estimate * 0.00000002)
-            ),  # OpenAI small embedding cost
-            "output_cost": Decimal("0"),
-            "total_cost": Decimal(str(token_estimate * 0.00000002)),
+            "input_cost": Decimal128(str(input_cost_val)),
+            "output_cost": Decimal128(str(0)),
+            "total_cost": Decimal128(str(input_cost_val)),
             "operation": "document_embedding",
             "timestamp": file.get(
                 "last_embedded_at", file.get("created_at", datetime.now(timezone.utc))
@@ -134,6 +143,19 @@ async def update_existing_files_with_cost_metadata(db: AsyncIOMotorDatabase):
                 "historical": True,
             },
         }
+
+        # Skip or upsert if a historical record for this file already exists
+        existing = await cost_collection.find_one(
+            {
+                "tenant_id": tenant_id,
+                "operation": "document_embedding",
+                "metadata.file_id": file_id,
+                "metadata.historical": True,
+            }
+        )
+        if existing:
+            logger.debug("Historical cost record already exists for file", file_id=file_id)
+            continue
 
         await cost_collection.insert_one(cost_record)
         records_created += 1
@@ -160,8 +182,13 @@ async def create_migration_log(db: AsyncIOMotorDatabase):
         ],
     }
 
-    await migration_collection.insert_one(migration_record)
-    logger.info("Migration logged successfully")
+    # Upsert migration log to avoid duplicate entries on repeated runs
+    await migration_collection.update_one(
+        {"name": migration_record["name"], "version": migration_record["version"]},
+        {"$setOnInsert": migration_record},
+        upsert=True,
+    )
+    logger.info("Migration logged (upsert) successfully")
 
 
 async def run_migration(db: AsyncIOMotorDatabase):

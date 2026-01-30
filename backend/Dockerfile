@@ -29,10 +29,13 @@ RUN pip install --no-cache-dir uv
 
 # Copy pyproject.toml and uv.lock (if it exists)
 COPY pyproject.toml .
+# Copy explicit lockfile if present (optional - keep wildcard to avoid build failures when lock not committed)
 COPY uv.lock* .
 
-# Install Python dependencies using UV
-RUN uv sync --frozen
+# Install Python dependencies using UV into the system Python environment so
+# `uvicorn` launched from CMD can import installed packages.
+# Do not require a lockfile at build time so builds don't fail when uv.lock is not committed.
+RUN uv sync --system
 
 # Copy the rest of the application code
 COPY . .

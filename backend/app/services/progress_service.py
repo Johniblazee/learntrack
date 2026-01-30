@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 import structlog
+from app.core.config import settings
 
 from app.models.progress import (
     Progress, ProgressCreate, ProgressUpdate, ProgressInDB,
@@ -148,15 +149,65 @@ class ProgressService:
             raise DatabaseException(f"Failed to get assignment progress: {str(e)}")
     
     async def get_student_analytics(self, student_id: str) -> ProgressAnalytics:
-        """Get progress analytics for a student"""
+        """Get progress analytics for a student using optimized aggregation queries"""
         try:
-            # Get all progress records for the student
-            cursor = self.collection.find({"student_id": student_id})
-            progress_records = []
-            async for progress in cursor:
-                progress_records.append(progress)
+            # Use aggregation pipeline with $lookup to get all data in fewer queries
+            # This eliminates N+1 query problem by joining progress with assignments and subjects
+            pipeline = [
+                {"$match": {"student_id": student_id}},
+                # Convert assignment_id string to ObjectId for lookup (use $convert with onError)
+                {"$addFields": {
+                    "assignment_oid": {
+                        "$convert": {"input": "$assignment_id", "to": "objectId", "onError": None}
+                    }
+                }},
+                # Lookup assignment details
+                {"$lookup": {
+                    "from": "assignments",
+                    "localField": "assignment_oid",
+                    "foreignField": "_id",
+                    "as": "assignment_info"
+                }},
+                {"$unwind": {"path": "$assignment_info", "preserveNullAndEmptyArrays": True}},
+                # Lookup subject details
+                {"$lookup": {
+                    "from": "subjects",
+                    "localField": "assignment_info.subject_id",
+                    "foreignField": "_id",
+                    "as": "subject_info"
+                }},
+                {"$unwind": {"path": "$subject_info", "preserveNullAndEmptyArrays": True}},
+                # Project needed fields
+                {"$project": {
+                    "student_id": 1,
+                    "assignment_id": 1,
+                    "status": 1,
+                    "score": 1,
+                    "time_spent": 1,
+                    "created_at": 1,
+                    "submitted_at": 1,
+                    "updated_at": 1,
+                    "assignment_title": "$assignment_info.title",
+                    "subject_name": {"$ifNull": ["$subject_info.name", "Unknown"]}
+                }}
+            ]
 
-            # Calculate analytics
+            # Execute aggregation (single query replaces N+1 queries)
+            # Allow a configurable maximum and detect truncation by requesting one extra
+            max_limit = getattr(settings, "PROGRESS_AGG_LIMIT", 500)
+            progress_records = await self.collection.aggregate(pipeline).to_list(length=max_limit + 1)
+
+            # Detect truncation
+            was_truncated = len(progress_records) > max_limit
+            if was_truncated:
+                logger.warning(
+                    "Progress aggregation results truncated",
+                    requested_limit=max_limit,
+                    returned=max_limit + 1,
+                )
+                progress_records = progress_records[:max_limit]
+
+            # Calculate basic analytics from fetched records
             total_assignments = len(progress_records)
             completed_assignments = len([p for p in progress_records if p.get("status") == SubmissionStatus.SUBMITTED.value])
             pending_assignments = total_assignments - completed_assignments
@@ -168,28 +219,17 @@ class ProgressService:
             # Calculate total time spent
             total_time = sum(p.get("time_spent", 0) or 0 for p in progress_records)
 
-            # Calculate subject performance from real data
-            subject_performance = []
+            # Calculate subject performance from aggregated data (no additional queries needed)
             subject_data: dict = {}
-
             for progress in progress_records:
-                assignment_id = progress.get("assignment_id")
-                if assignment_id:
-                    # Get assignment to find subject
-                    assignment = await self.db.assignments.find_one({"_id": ObjectId(assignment_id)})
-                    if assignment:
-                        subject_id = assignment.get("subject_id")
-                        if subject_id:
-                            subject = await self.db.subjects.find_one({"_id": ObjectId(subject_id)})
-                            subject_name = subject.get("name", "Unknown") if subject else "Unknown"
+                subject_name = progress.get("subject_name", "Unknown")
+                if subject_name not in subject_data:
+                    subject_data[subject_name] = {"scores": [], "count": 0}
+                if progress.get("score") is not None:
+                    subject_data[subject_name]["scores"].append(progress["score"])
+                subject_data[subject_name]["count"] += 1
 
-                            if subject_name not in subject_data:
-                                subject_data[subject_name] = {"scores": [], "count": 0}
-
-                            if progress.get("score") is not None:
-                                subject_data[subject_name]["scores"].append(progress["score"])
-                            subject_data[subject_name]["count"] += 1
-
+            subject_performance = []
             for subject_name, data in subject_data.items():
                 avg_score = round(sum(data["scores"]) / len(data["scores"]), 1) if data["scores"] else 0
                 subject_performance.append({
@@ -198,22 +238,31 @@ class ProgressService:
                     "assignments": data["count"]
                 })
 
-            # Get recent submissions (last 5 completed)
-            recent_submissions = []
+            # Helper function to ensure datetime is timezone-aware for comparison
+            def ensure_tz_aware(dt) -> datetime:
+                if dt is None:
+                    return None
+                if not isinstance(dt, datetime):
+                    return None
+                if dt.tzinfo is None:
+                    return dt.replace(tzinfo=timezone.utc)
+                return dt
+
+            # Use timezone-aware datetime.min to avoid comparison errors with database datetimes
+            min_datetime = datetime.min.replace(tzinfo=timezone.utc)
+
+            # Get recent submissions (last 5 completed) - data already fetched
             completed_records = [p for p in progress_records if p.get("status") == SubmissionStatus.SUBMITTED.value]
-            completed_records.sort(key=lambda x: x.get("submitted_at") or x.get("updated_at") or datetime.min, reverse=True)
+            completed_records.sort(
+                key=lambda x: ensure_tz_aware(x.get("submitted_at")) or ensure_tz_aware(x.get("updated_at")) or min_datetime,
+                reverse=True
+            )
 
+            recent_submissions = []
             for progress in completed_records[:5]:
-                assignment_id = progress.get("assignment_id")
-                assignment = await self.db.assignments.find_one({"_id": ObjectId(assignment_id)}) if assignment_id else None
-                subject_name = "Unknown"
-                if assignment and assignment.get("subject_id"):
-                    subject = await self.db.subjects.find_one({"_id": ObjectId(assignment["subject_id"])})
-                    subject_name = subject.get("name", "Unknown") if subject else "Unknown"
-
                 recent_submissions.append({
-                    "assignment_title": assignment.get("title", "Assignment") if assignment else "Assignment",
-                    "subject": subject_name,
+                    "assignment_title": progress.get("assignment_title", "Assignment"),
+                    "subject": progress.get("subject_name", "Unknown"),
                     "score": progress.get("score", 0),
                     "submitted_at": progress.get("submitted_at")
                 })
@@ -221,13 +270,14 @@ class ProgressService:
             # Calculate weekly progress (last 4 weeks)
             weekly_progress = []
             now = datetime.now(timezone.utc)
+
             for week_num in range(4, 0, -1):
                 week_start = now - timedelta(weeks=week_num)
                 week_end = now - timedelta(weeks=week_num - 1)
 
                 week_records = [
                     p for p in progress_records
-                    if p.get("created_at") and week_start <= p["created_at"] < week_end
+                    if p.get("created_at") and week_start <= ensure_tz_aware(p["created_at"]) < week_end
                 ]
                 completed_in_week = len([p for p in week_records if p.get("status") == SubmissionStatus.SUBMITTED.value])
 

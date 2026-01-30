@@ -34,7 +34,7 @@ class UploadThingService:
 
         logger.info(
             "Initialized UploadThing service",
-            app_id=self.app_id,
+            app_id_configured=bool(self.app_id),
         )
 
     async def upload_file(
@@ -61,7 +61,7 @@ class UploadThingService:
 
         try:
             # Get upload URL from UploadThing
-            upload_data = await self._get_upload_url(filename, content_type, metadata)
+            upload_data = await self._get_upload_url(filename, content_type, metadata, file_size=len(file_content))
 
             if not upload_data.get("presignedUrl"):
                 raise Exception("Failed to get upload URL")
@@ -105,10 +105,11 @@ class UploadThingService:
         filename: str,
         content_type: str,
         metadata: Optional[Dict[str, Any]] = None,
+        file_size: int = 0,
     ) -> Dict[str, Any]:
         """Get presigned upload URL from UploadThing"""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"{self.base_url}/api/uploadFiles",
                     headers={
@@ -120,7 +121,7 @@ class UploadThingService:
                             {
                                 "name": filename,
                                 "type": content_type,
-                                "size": len(filename),  # Will be updated after upload
+                                "size": file_size,
                                 "customId": filename,
                                 "metadata": metadata or {},
                             }
@@ -157,10 +158,19 @@ class UploadThingService:
                 return True
 
         except Exception as e:
+            # Avoid logging the full presigned URL (may contain credentials). Log host/path only.
+            try:
+                from urllib.parse import urlparse
+
+                p = urlparse(presigned_url)
+                safe_url = f"{p.scheme}://{p.netloc}{p.path}"
+            except Exception:
+                safe_url = "<masked>"
+
             logger.error(
                 "Failed to upload to presigned URL",
                 error=str(e),
-                url=presigned_url[:100],  # Log first 100 chars
+                target=safe_url,
             )
             return False
 
@@ -178,7 +188,7 @@ class UploadThingService:
             raise ValueError("UploadThing configuration missing")
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.delete(
                     f"{self.base_url}/api/deleteFile/{file_key}",
                     headers={
@@ -208,7 +218,7 @@ class UploadThingService:
             raise ValueError("UploadThing configuration missing")
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.base_url}/api/file/{file_key}",
                     headers={
@@ -234,7 +244,7 @@ class UploadThingService:
             raise ValueError("UploadThing configuration missing")
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.base_url}/api/files",
                     headers={

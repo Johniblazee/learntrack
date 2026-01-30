@@ -3,6 +3,7 @@ Groq AI Provider using LangChain
 """
 from typing import List, Dict, Any, Optional
 import structlog
+import json
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -88,14 +89,24 @@ Respond with JSON: {{"is_valid": true/false, "issues": [], "suggestions": [], "q
             ]
             response = await self.llm.ainvoke(messages)
             
-            import json
             try:
                 return json.loads(response.content)
-            except:
-                return {"is_valid": True, "issues": [], "suggestions": [], "quality_score": 75}
+            except json.JSONDecodeError as je:
+                logger.error("Groq validate_question JSON parse error", error=str(je), exc_info=True)
+                return {
+                    "is_valid": False,
+                    "issues": ["AI validation failed: invalid JSON response"],
+                    "suggestions": [],
+                    "quality_score": 10,
+                }
         except Exception as e:
-            logger.error(f"Groq validation failed: {e}")
-            return {"is_valid": True, "issues": [], "suggestions": [], "quality_score": 50}
+            logger.error("Groq validation failed", error=str(e), exc_info=True)
+            return {
+                "is_valid": False,
+                "issues": [f"AI validation failed: {str(e)[:200]}"],
+                "suggestions": [],
+                "quality_score": 5,
+            }
 
     async def health_check(self) -> bool:
         """Check if Groq is available"""
