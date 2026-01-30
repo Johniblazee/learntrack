@@ -60,8 +60,8 @@ build/*.toml
 
 # Development scripts and mock data (exclude from commits)
 # Note: Keep test scripts and reports for end-to-end testing
-# tests/  <- Commented out to allow test scripts
-# test_reports/  <- Commented out to allow test reports
+tests/  
+test_reports/  
 docs/
 scripts/
 notebooks/
