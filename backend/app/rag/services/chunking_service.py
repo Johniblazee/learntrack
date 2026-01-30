@@ -4,6 +4,7 @@ Replaces custom semantic chunker with LangChain's optimized implementations
 """
 
 from typing import List, Dict, Any, Optional, Tuple
+import datetime
 import structlog
 
 from langchain_text_splitters import (
@@ -163,15 +164,15 @@ class ChunkingService:
                     "chunk_index": i,
                     "total_chunks": len(chunks),
                     "chunking_strategy": f"langchain_{chunk_type}",
-                    "created_at": structlog.get_logger().info(
-                        "chunk_created", chunk_index=i
-                    )["timestamp"],
+                    "created_at": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
                 }
             )
 
             # Preserve original document metadata
             if original_documents and i < len(original_documents):
-                orig_doc = original_documents[0]  # Assuming chunks come from one doc
+                orig_doc = original_documents[i]
                 chunk.metadata.update(
                     {
                         "source_document_id": orig_doc.metadata.get("id"),
@@ -232,40 +233,39 @@ class ChunkingService:
         """
         sample_doc = Document(page_content=sample_text)
 
-        for iteration in range(max_iterations):
-            # Binary search for optimal chunk size
-            low, high = 100, 5000
-            best_size = 1000
+        # Binary search for optimal chunk size
+        low, high = 100, 5000
+        best_size = 1000
 
-            while low <= high:
-                mid = (low + high) // 2
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=mid,
-                    chunk_overlap=mid // 5,  # 20% overlap
-                )
-                test_chunks = splitter.transform_documents([sample_doc])
-
-                if len(test_chunks) <= target_chunks:
-                    best_size = mid
-                    high = mid - 1
-                else:
-                    low = mid + 1
-
-            # Test the found size
-            test_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=best_size,
-                chunk_overlap=best_size // 5,
+        while low <= high:
+            mid = (low + high) // 2
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=mid,
+                chunk_overlap=mid // 5,  # 20% overlap
             )
-            final_chunks = test_splitter.transform_documents([sample_doc])
+            test_chunks = splitter.transform_documents([sample_doc])
 
-            if abs(len(final_chunks) - target_chunks) <= 2:  # Within tolerance
-                logger.info(
-                    "Found optimal chunk size",
-                    optimal_size=best_size,
-                    chunks_created=len(final_chunks),
-                    target=target_chunks,
-                )
-                return best_size
+            if len(test_chunks) <= target_chunks:
+                best_size = mid
+                high = mid - 1
+            else:
+                low = mid + 1
+
+        # Test the found size
+        test_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=best_size,
+            chunk_overlap=best_size // 5,
+        )
+        final_chunks = test_splitter.transform_documents([sample_doc])
+
+        if abs(len(final_chunks) - target_chunks) <= 2:  # Within tolerance
+            logger.info(
+                "Found optimal chunk size",
+                optimal_size=best_size,
+                chunks_created=len(final_chunks),
+                target=target_chunks,
+            )
+            return best_size
 
         # Fallback to default
         logger.warning("Could not find optimal chunk size, using default")

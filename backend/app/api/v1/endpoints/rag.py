@@ -267,6 +267,8 @@ async def regenerate_single_question(
         original = await question_service.get_question_by_id(
             body.question_id, current_user.clerk_id
         )
+        if not original:
+            raise HTTPException(status_code=404, detail="Question not found")
 
         prompt = (
             body.regeneration_prompt
@@ -416,9 +418,9 @@ async def delete_document_embeddings(
         rag_service = RAGService(database)
         await rag_service.delete_file_embeddings(file_id, current_user.clerk_id)
 
-        # Update file status
+        # Update file status - include tutor_id in filter for ownership verification
         await database.files.update_one(
-            {"_id": file_id},
+            {"_id": file_id, "uploaded_by": current_user.clerk_id},
             {"$set": {"embedding_status": "pending", "chunk_count": None}},
         )
         return {"message": "Embeddings deleted successfully"}

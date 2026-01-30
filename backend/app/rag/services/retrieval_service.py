@@ -132,7 +132,9 @@ class RetrievalService:
                 for j, doc in enumerate(batch):
                     if "id" not in doc.metadata:
                         # Use deterministic SHA-256 digest of content for stable IDs
-                        digest = hashlib.sha256(doc.page_content.encode("utf-8")).hexdigest()
+                        digest = hashlib.sha256(
+                            doc.page_content.encode("utf-8")
+                        ).hexdigest()
                         doc.metadata["id"] = f"doc_{i}_{j}_{digest[:32]}"
 
                 # Use LangChain's optimized document addition
@@ -274,8 +276,11 @@ class RetrievalService:
             )
             raise
 
-    def _build_filter(self, filter_dict: Dict[str, Any]) -> Optional[Filter]:
+    def _build_filter(self, filter_dict: Optional[Dict[str, Any]]) -> Optional[Filter]:
         """Build Qdrant filter from dictionary"""
+        if not filter_dict:
+            return None
+
         conditions = []
 
         for key, value in filter_dict.items():
@@ -337,11 +342,16 @@ class RetrievalService:
         """
         try:
             # First delete existing documents with the same IDs
-            doc_ids = [doc.metadata.get("id") for doc in documents if "id" in doc.metadata]
+            doc_ids = [
+                doc.metadata.get("id") for doc in documents if "id" in doc.metadata
+            ]
             if doc_ids:
-                success = await self.delete_documents(document_ids=doc_ids)
-                if not success:
-                    raise RuntimeError("Failed to delete existing documents before update")
+                delete_success = await self.delete_documents(document_ids=doc_ids)
+                if not delete_success:
+                    logger.error("Failed to delete existing documents, aborting update")
+                    raise RuntimeError(
+                        "Failed to delete existing documents before update"
+                    )
 
             # Then add the updated documents
             return await self.add_documents(documents, **kwargs)

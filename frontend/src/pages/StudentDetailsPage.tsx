@@ -34,14 +34,14 @@ import {
   BookOpen,
   Award,
   BarChart3,
-  Activity,
+  Activity as ActivityIcon,
   GraduationCap,
   User
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
-import { format } from 'date-fns'
+import { format, isValid } from 'date-fns'
 import { SendMessageModal } from '@/components/modals/SendMessageModal'
 
 interface StudentDetails {
@@ -483,7 +483,10 @@ export default function StudentDetailsPage() {
                       </div>
                       <p className="text-muted-foreground mt-1 flex items-center gap-2">
                         <Calendar className="h-4 w-4" />
-                        Joined {format(new Date(student.joinedDate), 'MMMM dd, yyyy')}
+                        Joined {(() => {
+                        const date = new Date(student.joinedDate)
+                        return isValid(date) ? format(date, 'MMMM dd, yyyy') : 'Join date unknown'
+                      })()}
                       </p>
                       <p className="text-muted-foreground text-sm flex items-center gap-2 mt-1">
                         <Mail className="h-3 w-3" />
@@ -655,8 +658,8 @@ export default function StudentDetailsPage() {
               {/* Recent Activity */}
               <Card className="border-border bg-card">
                 <CardHeader>
-                  <CardTitle className="text-foreground flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-blue-500" />
+                    <CardTitle className="text-foreground flex items-center gap-2">
+                    <ActivityIcon className="h-5 w-5 text-blue-500" />
                     Recent Activity
                   </CardTitle>
                 </CardHeader>
@@ -681,7 +684,10 @@ export default function StudentDetailsPage() {
                             </p>
                             <div className="flex items-center gap-2 mt-1">
                               <p className="text-muted-foreground text-sm">
-                                {format(new Date(activity.timestamp), 'PPp')}
+                                {(() => {
+                                  const date = new Date(activity.timestamp)
+                                  return isValid(date) ? format(date, 'PPp') : 'Invalid date'
+                                })()}
                               </p>
                               {activity.score && (
                                 <Badge variant="secondary" className="text-xs">
@@ -696,7 +702,7 @@ export default function StudentDetailsPage() {
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                       <div className="h-16 w-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-                        <Activity className="h-8 w-8 text-muted-foreground" />
+                        <ActivityIcon className="h-8 w-8 text-muted-foreground" />
                       </div>
                       <h3 className="text-foreground font-medium mb-1">No Recent Activity</h3>
                       <p className="text-muted-foreground text-sm max-w-xs">

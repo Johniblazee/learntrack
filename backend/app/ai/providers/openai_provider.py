@@ -1,6 +1,7 @@
 """
 OpenAI provider implementation
 """
+
 from typing import List, Dict, Any, Optional
 import asyncio
 import structlog
@@ -14,6 +15,7 @@ from app.core.ai_models_config import get_default_model
 
 logger = structlog.get_logger()
 
+
 class OpenAIProvider(BaseAIProvider):
     """OpenAI provider for question generation"""
 
@@ -26,13 +28,13 @@ class OpenAIProvider(BaseAIProvider):
     def set_model(self, model: str):
         """Change the active model"""
         self.model = model
-    
+
     async def extract_text_from_content(self, content: str, file_type: str) -> str:
         """Extract and clean text from file content using OpenAI"""
         try:
             if file_type == "text/plain":
                 return content
-            
+
             # For other file types, use OpenAI to extract and clean text
             # Truncate content before interpolation to avoid embedding comments
             truncated_content = content[:8000]
@@ -45,7 +47,7 @@ class OpenAIProvider(BaseAIProvider):
             Content:
             {truncated_content}
             """
-            
+
             # Use centralized prompt from registry
             system_prompt = get_prompt("text_extraction")
 
@@ -53,21 +55,21 @@ class OpenAIProvider(BaseAIProvider):
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=2000,
-                temperature=0.1
+                temperature=0.1,
             )
-            
+
             content_resp = getattr(response.choices[0].message, "content", None)
             if content_resp is None:
                 return ""
             return content_resp.strip()
-            
+
         except Exception as e:
             logger.error("OpenAI text extraction failed", error=str(e), exc_info=True)
             raise AIProviderError(f"Text extraction failed: {str(e)}", "openai")
-    
+
     async def generate_questions(
         self,
         text_content: str,
@@ -75,13 +77,16 @@ class OpenAIProvider(BaseAIProvider):
         topic: str,
         question_count: int = 10,
         difficulty: QuestionDifficulty = QuestionDifficulty.MEDIUM,
-        question_types: Optional[List[QuestionType]] = None
+        question_types: Optional[List[QuestionType]] = None,
     ) -> List[QuestionCreate]:
         """Generate questions using OpenAI"""
         try:
             if question_types is None:
-                question_types = [QuestionType.MULTIPLE_CHOICE, QuestionType.SHORT_ANSWER]
-            
+                question_types = [
+                    QuestionType.MULTIPLE_CHOICE,
+                    QuestionType.SHORT_ANSWER,
+                ]
+
             prompt = self._build_question_prompt(
                 text_content, subject, topic, question_count, difficulty, question_types
             )
@@ -93,23 +98,32 @@ class OpenAIProvider(BaseAIProvider):
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=4000,
                 temperature=0.7,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
-            
+
             response_text = response.choices[0].message.content
+            if response_text is None:
+                raise AIProviderError("OpenAI returned empty response", "openai")
             questions = self._parse_ai_response(response_text, subject, topic)
-            
-            logger.info("OpenAI questions generated", count=len(questions), subject=subject, topic=topic)
+
+            logger.info(
+                "OpenAI questions generated",
+                count=len(questions),
+                subject=subject,
+                topic=topic,
+            )
             return questions
-            
+
         except Exception as e:
-            logger.error("OpenAI question generation failed", error=str(e), exc_info=True)
+            logger.error(
+                "OpenAI question generation failed", error=str(e), exc_info=True
+            )
             raise AIProviderError(f"Question generation failed: {str(e)}", "openai")
-    
+
     async def validate_question(self, question: QuestionCreate) -> Dict[str, Any]:
         """Validate a question using OpenAI"""
         try:
@@ -122,9 +136,9 @@ class OpenAIProvider(BaseAIProvider):
             Topic: {question.topic}
             Difficulty: {question.difficulty}
             
-            Options: {question.options if question.options else 'N/A'}
-            Correct Answer: {question.correct_answer if question.correct_answer else 'N/A'}
-            Explanation: {question.explanation if question.explanation else 'N/A'}
+            Options: {question.options if question.options else "N/A"}
+            Correct Answer: {question.correct_answer if question.correct_answer else "N/A"}
+            Explanation: {question.explanation if question.explanation else "N/A"}
             
             Provide a validation report with:
             1. Overall quality score (1-10)
@@ -135,7 +149,7 @@ class OpenAIProvider(BaseAIProvider):
             
             Format as JSON.
             """
-            
+
             # Use centralized prompt from registry
             system_prompt = get_prompt("simple_question_validator")
 
@@ -143,19 +157,22 @@ class OpenAIProvider(BaseAIProvider):
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 max_tokens=1000,
                 temperature=0.3,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
-            
+
             import json
+
             content_text = getattr(response.choices[0].message, "content", "")
             try:
                 validation_result = json.loads(content_text)
             except json.JSONDecodeError as je:
-                logger.error("OpenAI validation JSON parse error", error=str(je), exc_info=True)
+                logger.error(
+                    "OpenAI validation JSON parse error", error=str(je), exc_info=True
+                )
                 return {
                     "quality_score": 10,
                     "clarity_score": 10,
@@ -167,7 +184,9 @@ class OpenAIProvider(BaseAIProvider):
             return validation_result
 
         except Exception as e:
-            logger.error("OpenAI question validation failed", error=str(e), exc_info=True)
+            logger.error(
+                "OpenAI question validation failed", error=str(e), exc_info=True
+            )
             return {
                 "quality_score": 5,
                 "clarity_score": 5,
@@ -175,17 +194,19 @@ class OpenAIProvider(BaseAIProvider):
                 "issues": [f"Validation failed: {str(e)}"],
                 "acceptable": False,
             }
-    
+
     async def health_check(self) -> bool:
         """Check OpenAI API health"""
         try:
             # Use the configured model if available, otherwise fall back to a safe default
-            health_check_model = self.model or get_default_model("openai") or "gpt-4o-mini"
+            health_check_model = (
+                self.model or get_default_model("openai") or "gpt-4o-mini"
+            )
 
             response = await self.client.chat.completions.create(
                 model=health_check_model,
                 messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=5
+                max_tokens=5,
             )
             return response.choices[0].message.content is not None
         except Exception as e:

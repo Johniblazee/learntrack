@@ -64,7 +64,7 @@ async def create_cost_quota(
     service = CostTrackingService(db)
 
     # Enforce tenant-level authorization: only allow creating quotas for your tenant
-    if not (current_user.is_super_admin or current_user.tenant_id == quota_data.tenant_id):
+    if current_user.tenant_id != quota_data.tenant_id:
         raise AuthorizationError("billing.write")
 
     # Check if quota already exists
@@ -75,7 +75,9 @@ async def create_cost_quota(
         )
 
     # Create default quota using requested tier, then override limits if provided
-    quota = await service.create_default_quota(quota_data.tenant_id, tier=quota_data.tier)
+    quota = await service.create_default_quota(
+        quota_data.tenant_id, tier=quota_data.tier
+    )
 
     # If the request provided explicit limits, update them
     await service.update_quota(

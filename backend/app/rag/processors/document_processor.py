@@ -5,6 +5,8 @@ Replaces multiple document processors with a single LangChain-based solution
 
 import os
 import tempfile
+import threading
+from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import structlog
@@ -14,6 +16,17 @@ from langchain_docling import DoclingLoader
 from langchain_docling.loader import ExportType
 
 logger = structlog.get_logger()
+
+
+@dataclass
+class ProcessingOptions:
+    """Configuration options for document processing"""
+
+    use_semantic_chunking: bool = True
+    preserve_structure: bool = True
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    export_type: ExportType = ExportType.MARKDOWN
 
 
 class DocumentProcessor:
@@ -149,7 +162,6 @@ class DocumentProcessor:
                 for doc in documents:
                     doc.metadata["filename"] = filename
                     doc.metadata["original_filename"] = filename
-                    doc.metadata["temp_file"] = temp_path
 
                 return documents
 
@@ -250,8 +262,7 @@ class DocumentProcessor:
             }
 
             # Add first document's metadata
-            if documents:
-                combined_metadata.update(documents[0].metadata)
+            combined_metadata.update(documents[0].metadata)
 
             return combined_metadata
 
@@ -261,18 +272,20 @@ class DocumentProcessor:
                 error=str(e),
                 file_path=str(file_path),
             )
-            return {}
+            raise
 
 
 # Global instance for convenience
 _default_document_processor = None
+_default_document_processor_lock = threading.Lock()
 
 
 def get_document_processor() -> DocumentProcessor:
     """Get or create default document processor"""
     global _default_document_processor
-    if _default_document_processor is None:
-        _default_document_processor = DocumentProcessor()
+    with _default_document_processor_lock:
+        if _default_document_processor is None:
+            _default_document_processor = DocumentProcessor()
     return _default_document_processor
 
 

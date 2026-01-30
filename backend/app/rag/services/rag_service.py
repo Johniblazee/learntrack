@@ -9,6 +9,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
 import structlog
 
+# Global lock for RAG service singleton creation
+_rag_service_lock = asyncio.Lock()
+
 from langchain_core.documents import Document
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -134,9 +137,18 @@ class RAGService:
             )
 
             # Update file status with error
-            await self._update_file_status(
-                filename, tenant_id, EmbeddingStatus.FAILED, {"error": str(e)}
-            )
+            try:
+                await self._update_file_status(
+                    filename, tenant_id, EmbeddingStatus.FAILED, {"error": str(e)}
+                )
+            except Exception as status_error:
+                logger.error(
+                    "Failed to update file status after error",
+                    original_error=str(e),
+                    status_error=str(status_error),
+                    filename=filename,
+                    tenant_id=tenant_id,
+                )
 
             return {
                 "success": False,
@@ -177,7 +189,6 @@ class RAGService:
                 results = await self.retrieval_service.similarity_search_with_relevance_scores(
                     query=query, k=k, filter_dict=filter_dict, **kwargs
                 )
-                return {"results": results, "search_type": "with_scores"}
             else:
                 raise ValueError(f"Unknown search type: {search_type}")
 
@@ -200,7 +211,7 @@ class RAGService:
             logger.error(
                 "Failed to search documents",
                 error=str(e),
-                query=query,
+                query_length=len(query or ""),
                 tenant_id=tenant_id,
             )
             raise
@@ -222,13 +233,8 @@ class RAGService:
             )
 
             if success:
-                # Update file status in database
-                await self._update_file_status(
-                    filename,
-                    tenant_id,
-                    EmbeddingStatus.PENDING,
-                    {"deleted_at": datetime.now(timezone.utc).isoformat()},
-                )
+                # Delete file record from database entirely
+                await self._delete_file_record(filename, tenant_id)
 
                 logger.info(
                     "Successfully deleted document",
@@ -325,6 +331,28 @@ class RAGService:
                 tenant_id=tenant_id,
             )
 
+    async def _delete_file_record(self, filename: str, tenant_id: str) -> None:
+        """Delete file record from database"""
+        try:
+            await self.db.uploaded_files.delete_one(
+                {
+                    "filename": filename,
+                    "tenant_id": tenant_id,
+                }
+            )
+            logger.info(
+                "Deleted file record",
+                filename=filename,
+                tenant_id=tenant_id,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to delete file record",
+                error=str(e),
+                filename=filename,
+                tenant_id=tenant_id,
+            )
+
     async def get_relevant_context(
         self, query: str, tenant_id: str, max_context_length: int = 4000, **kwargs
     ) -> str:
@@ -389,17 +417,18 @@ Source: {metadata.get("filename", "Unknown")}
 _default_rag_service = None
 
 
-def get_rag_service(
+async def get_rag_service(
     database: AsyncIOMotorDatabase, collection_name: str = "documents"
 ) -> RAGService:
-    """Get or create default RAG service"""
+    """Get or create default RAG service (async singleton with lock)"""
     global _default_rag_service
-    if _default_rag_service is None:
-        _default_rag_service = RAGService(
-            database=database,
-            collection_name=collection_name,
-        )
-    return _default_rag_service
+    async with _rag_service_lock:
+        if _default_rag_service is None:
+            _default_rag_service = RAGService(
+                database=database,
+                collection_name=collection_name,
+            )
+        return _default_rag_service
 
 
 def create_rag_service(

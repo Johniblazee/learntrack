@@ -26,62 +26,62 @@ from app.core.exceptions import ValidationError, NotFoundError
 
 logger = structlog.get_logger()
 
-# Cost per token for different models (in USD)
+# Cost per 1K tokens for different models (in USD)
 MODEL_COSTS: Dict[str, Dict[str, Dict[str, Decimal]]] = {
     "openai": {
         "gpt-4o": {
-            "input": Decimal("0.000005"),  # $0.005 per 1K tokens
-            "output": Decimal("0.000015"),  # $0.015 per 1K tokens
+            "input": Decimal("0.005"),  # $0.005 per 1K tokens
+            "output": Decimal("0.015"),  # $0.015 per 1K tokens
         },
         "gpt-4o-mini": {
-            "input": Decimal("0.00000015"),  # $0.00015 per 1K tokens
-            "output": Decimal("0.0000006"),  # $0.0006 per 1K tokens
+            "input": Decimal("0.00015"),  # $0.00015 per 1K tokens
+            "output": Decimal("0.0006"),  # $0.0006 per 1K tokens
         },
         "gpt-4-turbo": {
-            "input": Decimal("0.00001"),  # $0.01 per 1K tokens
-            "output": Decimal("0.00003"),  # $0.03 per 1K tokens
+            "input": Decimal("0.01"),  # $0.01 per 1K tokens
+            "output": Decimal("0.03"),  # $0.03 per 1K tokens
         },
         "text-embedding-3-small": {
-            "input": Decimal("0.00000002"),  # $0.00002 per 1K tokens
+            "input": Decimal("0.00002"),  # $0.00002 per 1K tokens
             "output": Decimal("0"),
         },
         "text-embedding-3-large": {
-            "input": Decimal("0.00000013"),  # $0.00013 per 1K tokens
+            "input": Decimal("0.00013"),  # $0.00013 per 1K tokens
             "output": Decimal("0"),
         },
     },
     "groq": {
         "llama-3.3-70b-versatile": {
-            "input": Decimal("0.00000059"),  # $0.00059 per 1K tokens
-            "output": Decimal("0.00000079"),  # $0.00079 per 1K tokens
+            "input": Decimal("0.00059"),  # $0.00059 per 1K tokens
+            "output": Decimal("0.00079"),  # $0.00079 per 1K tokens
         },
         "llama-3.1-8b-instant": {
-            "input": Decimal("0.00000005"),  # $0.00005 per 1K tokens
-            "output": Decimal("0.00000008"),  # $0.00008 per 1K tokens
+            "input": Decimal("0.00005"),  # $0.00005 per 1K tokens
+            "output": Decimal("0.00008"),  # $0.00008 per 1K tokens
         },
     },
     "gemini": {
         "gemini-1.5-pro": {
-            "input": Decimal("0.00125"),  # $1.25 per 1M tokens
-            "output": Decimal("0.00375"),  # $3.75 per 1M tokens
+            "input": Decimal("1.25"),  # $1.25 per 1M tokens = $0.00125 per 1K
+            "output": Decimal("3.75"),  # $3.75 per 1M tokens = $0.00375 per 1K
         },
         "gemini-1.5-flash": {
-            "input": Decimal("0.000075"),  # $0.075 per 1M tokens
-            "output": Decimal("0.00015"),  # $0.15 per 1M tokens
+            "input": Decimal("0.075"),  # $0.075 per 1M tokens = $0.000075 per 1K
+            "output": Decimal("0.15"),  # $0.15 per 1M tokens = $0.00015 per 1K
         },
         "text-embedding-004": {
-            "input": Decimal("0.000025"),  # $0.025 per 1M tokens
+            "input": Decimal("0.025"),  # $0.025 per 1M tokens = $0.000025 per 1K
             "output": Decimal("0"),
         },
     },
     "anthropic": {
         "claude-3.5-sonnet": {
-            "input": Decimal("0.000003"),  # $3.00 per 1M tokens
-            "output": Decimal("0.000015"),  # $15.00 per 1M tokens
+            "input": Decimal("3.00"),  # $3.00 per 1M tokens = $0.003 per 1K
+            "output": Decimal("15.00"),  # $15.00 per 1M tokens = $0.015 per 1K
         },
         "claude-3-haiku": {
-            "input": Decimal("0.00000025"),  # $0.25 per 1M tokens
-            "output": Decimal("0.00000125"),  # $1.25 per 1M tokens
+            "input": Decimal("0.25"),  # $0.25 per 1M tokens = $0.00025 per 1K
+            "output": Decimal("1.25"),  # $1.25 per 1M tokens = $0.00125 per 1K
         },
     },
 }
@@ -201,17 +201,10 @@ class CostTrackingService:
             )
             return Decimal("0")
 
-        cost_per_token = model_costs.get(token_type, Decimal("0"))
+        cost_per_1k = model_costs.get(token_type, Decimal("0"))
 
-        # Convert to cost per token (costs may be stored per 1K or 1M tokens depending on provider)
-        if provider in ["openai", "anthropic", "groq"]:
-            # Costs are per 1K tokens
-            cost_per_token = cost_per_token / Decimal("1000")
-        elif provider == "gemini":
-            # Costs are per 1M tokens
-            cost_per_token = cost_per_token / Decimal("1000000")
-
-        return cost_per_token * Decimal(str(tokens))
+        # Calculate cost: (cost per 1K tokens) * (tokens / 1000)
+        return cost_per_1k * Decimal(str(tokens)) / Decimal("1000")
 
     async def get_quota(self, tenant_id: str) -> Optional[CostQuota]:
         """Get quota configuration for tenant"""
@@ -373,7 +366,8 @@ class CostTrackingService:
         quota = await self._reset_usage_if_needed(quota)
 
         # Atomically increment usage counters to avoid lost updates under concurrency
-        inc_value = float(cost)
+        # Use Decimal128 for precise decimal arithmetic in MongoDB
+        inc_value = Decimal128(cost)
 
         updated = await self.quota_collection.find_one_and_update(
             {"tenant_id": tenant_id},

@@ -18,9 +18,10 @@ from app.models.file import (
     UploadThingFileCreate,
     UploadThingFileUpdate,
 )
+from app.models.question import QuestionDifficulty
 from app.ai.services.ai_manager import AIManager
 from app.services.question_service import QuestionService
-from app.rag.processors.document_processor import DocumentProcessor
+from app.rag.processors.document_processor import DocumentProcessor, ProcessingOptions
 from app.ai.services.cost_tracker import CostTrackingService
 from app.core.exceptions import (
     FileProcessingError,
@@ -242,6 +243,11 @@ class FileService:
 
             start_time = datetime.now(timezone.utc)
 
+            # Download file from UploadThing for processing
+            response = await self.http_client.get(str(file.uploadthing_url))
+            response.raise_for_status()
+            file_content = response.content
+
             # Process document with enhanced semantic chunking
             processing_options = ProcessingOptions(
                 use_semantic_chunking=True,
@@ -250,48 +256,15 @@ class FileService:
                 chunk_overlap=200,
             )
 
-            # Process document using enhanced processor
-            processing_result = (
-                # TODO: Implement document processing with new DocumentProcessor
-                # For now, use a placeholder
-                pass
-                    file_path=None,  # Will download from uploadthing_url
-                    file_id=file_id,
-                    tenant_id=user_id,  # Using user_id as tenant for now
-                    options=processing_options,
-                    file_url=file.uploadthing_url,
-                )
+            # Process document using DocumentProcessor
+            documents = await self.document_processor.load_from_bytes(
+                file_bytes=file_content,
+                filename=file.filename,
+                export_type=processing_options.export_type,
             )
 
-            # Download and extract text for question generation
-            text_content = await self._download_and_extract_text(file, ai_manager)
-
-            # Get AI settings and create manager
-            from app.services.settings_service import SettingsService
-
-            settings_service = SettingsService(self.db)
-            current_settings = await settings_service.get_settings()
-            ai_settings = {
-                "providers": current_settings.ai.providers,
-                "default_provider": current_settings.ai.default_provider,
-            }
-            ai_manager = AIManager(ai_settings)
-
-            # Generate questions using AI with cost tracking
-            questions = await ai_manager.generate_questions(
-                text_content=text_content,
-                subject=file.subject_id,
-                topic=file.topic,
-                question_count=question_count,
-                provider_name=ai_provider,
-                tenant_id=user_id,
-                cost_service=self.cost_service,
-            )
-
-            start_time = datetime.now(timezone.utc)
-
-            # Download and extract text from UploadThing file
-            text_content = await self._download_and_extract_text(file, ai_manager)
+            # Extract text content from documents
+            text_content = "\n\n".join(doc.page_content for doc in documents)
 
             # Get AI settings and create manager
             from app.services.settings_service import SettingsService
@@ -305,12 +278,16 @@ class FileService:
             ai_manager = AIManager(ai_settings)
 
             # Generate questions using AI
+            # Convert difficulty_level string to enum
+            difficulty = QuestionDifficulty(difficulty_level.lower())
+
             questions = await ai_manager.generate_questions(
                 text_content=text_content,
                 subject=file.subject_id,
                 topic=file.topic,
                 question_count=question_count,
-                provider_name=ai_provider,
+                difficulty=difficulty,
+                preferred_provider=ai_provider,
             )
 
             # Save questions to database if question_service provided
@@ -386,9 +363,26 @@ class FileService:
                 FileType.PPTX,
                 FileType.PPT,
             ]:
-                # For binary files, we'll use AI to extract text
-                # In a real implementation, you might use specialized libraries like PyPDF2, python-docx, etc.
-                content_preview = str(file_content[:4000])  # First 4000 bytes as string
+                # For binary files, use DocumentProcessor to extract text
+                # This properly handles different file formats
+                from app.rag.processors.document_processor import ProcessingOptions
+
+                processing_options = ProcessingOptions(
+                    use_semantic_chunking=False,  # Don't chunk for preview
+                    preserve_structure=True,
+                    chunk_size=4000,
+                    chunk_overlap=0,
+                )
+
+                documents = await self.document_processor.load_from_bytes(
+                    file_bytes=file_content,
+                    filename=file.filename,
+                    export_type=processing_options.export_type,
+                )
+
+                # Join all document content for preview (first 4000 chars)
+                full_text = "\n\n".join(doc.page_content for doc in documents)
+                content_preview = full_text[:4000]
 
                 if ai_manager:
                     extracted_text = await ai_manager.extract_text_from_content(
@@ -399,6 +393,7 @@ class FileService:
                     from app.ai.services.ai_manager import (
                         get_default_ai_manager,
                     )
+
                     global_ai_manager = get_default_ai_manager()
 
                     extracted_text = await global_ai_manager.extract_text_from_content(

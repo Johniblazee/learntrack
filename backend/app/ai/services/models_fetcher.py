@@ -1,6 +1,7 @@
 """
 Dynamic model fetcher service - fetches available models from AI provider APIs.
 """
+
 import httpx
 import asyncio
 from typing import Dict, List, Any, Optional
@@ -28,7 +29,7 @@ def _set_cache(provider: str, models: List[Dict[str, Any]]) -> None:
     """Cache models for a provider."""
     _models_cache[provider] = {
         "models": models,
-        "expires_at": datetime.now() + timedelta(minutes=CACHE_TTL_MINUTES)
+        "expires_at": datetime.now() + timedelta(minutes=CACHE_TTL_MINUTES),
     }
 
 
@@ -51,7 +52,7 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 "https://api.groq.com/openai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"}
+                headers={"Authorization": f"Bearer {api_key}"},
             )
             response.raise_for_status()
             data = response.json()
@@ -59,9 +60,15 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
             models = []
             for m in data.get("data", []):
                 model_id = m.get("id", "")
-                if any(x in model_id.lower() for x in ["embed", "whisper", "guard", "tts", "rerank"]):
+                if any(
+                    x in model_id.lower()
+                    for x in ["embed", "whisper", "guard", "tts", "rerank"]
+                ):
                     continue
-                if not any(model_id.startswith(prefix) or prefix in model_id for prefix in must_include_prefixes):
+                if not any(
+                    model_id.startswith(prefix) or prefix in model_id
+                    for prefix in must_include_prefixes
+                ):
                     continue
 
                 if "gpt-oss-120b" in model_id:
@@ -73,17 +80,19 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
                 else:
                     priority = 99
 
-                models.append({
-                    "id": model_id,
-                    "name": model_id.replace("-", " ").title(),
-                    "description": f"Context: {m.get('context_window', 'N/A')} tokens",
-                    "context_window": m.get("context_window", 0),
-                    "priority": priority
-                })
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": model_id.replace("-", " ").title(),
+                        "description": f"Context: {m.get('context_window', 'N/A')} tokens",
+                        "context_window": m.get("context_window", 0),
+                        "priority": priority,
+                    }
+                )
 
             models.sort(key=lambda x: x.get("priority", 999))
             _set_cache("groq", models)
-            return models
+            return models[:limit]
     except Exception as e:
         logger.error("Failed to fetch Groq models", error=str(e))
         return []
@@ -93,7 +102,7 @@ async def fetch_openai_models(api_key: str, limit: int = 3) -> List[Dict[str, An
     """Fetch models from OpenAI API."""
     cached = _get_cache("openai")
     if cached:
-        return cached
+        return cached[:limit]
 
     include_prefixes = ["gpt-4o", "gpt-4.1", "o1", "o3", "o4-mini"]
     exclude_patterns = ["realtime", "audio", "transcribe", "tts", "search"]
@@ -102,7 +111,7 @@ async def fetch_openai_models(api_key: str, limit: int = 3) -> List[Dict[str, An
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"}
+                headers={"Authorization": f"Bearer {api_key}"},
             )
             response.raise_for_status()
             data = response.json()
@@ -128,16 +137,18 @@ async def fetch_openai_models(api_key: str, limit: int = 3) -> List[Dict[str, An
                 else:
                     priority = 99
 
-                models.append({
-                    "id": model_id,
-                    "name": model_id.upper().replace("-", " "),
-                    "description": f"OpenAI {model_id}",
-                    "priority": priority
-                })
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": model_id.upper().replace("-", " "),
+                        "description": f"OpenAI {model_id}",
+                        "priority": priority,
+                    }
+                )
 
             models.sort(key=lambda x: x.get("priority", 999))
             _set_cache("openai", models)
-            return models
+            return models[:limit]
     except Exception as e:
         logger.error("Failed to fetch OpenAI models", error=str(e))
         return []
@@ -147,7 +158,7 @@ async def fetch_gemini_models(api_key: str, limit: int = 3) -> List[Dict[str, An
     """Fetch models from Google Gemini API."""
     cached = _get_cache("gemini")
     if cached:
-        return cached
+        return cached[:limit]
 
     include_prefixes = ["gemini-3", "gemini-2.5"]
     exclude_patterns = ["embed", "aqa", "vision", "image", "video", "audio", "live"]
@@ -165,11 +176,15 @@ async def fetch_gemini_models(api_key: str, limit: int = 3) -> List[Dict[str, An
                 model_name = m.get("name", "").replace("models/", "")
                 display_name = m.get("displayName", model_name)
 
-                if "generateContent" not in str(m.get("supportedGenerationMethods", [])):
+                if "generateContent" not in str(
+                    m.get("supportedGenerationMethods", [])
+                ):
                     continue
                 if any(x in model_name.lower() for x in exclude_patterns):
                     continue
-                if not any(model_name.startswith(prefix) for prefix in include_prefixes):
+                if not any(
+                    model_name.startswith(prefix) for prefix in include_prefixes
+                ):
                     continue
 
                 if model_name.startswith("gemini-3"):
@@ -179,16 +194,18 @@ async def fetch_gemini_models(api_key: str, limit: int = 3) -> List[Dict[str, An
                 else:
                     priority = 99
 
-                models.append({
-                    "id": model_name,
-                    "name": display_name,
-                    "description": m.get("description", "")[:100],
-                    "priority": priority
-                })
+                models.append(
+                    {
+                        "id": model_name,
+                        "name": display_name,
+                        "description": m.get("description", "")[:100],
+                        "priority": priority,
+                    }
+                )
 
             models.sort(key=lambda x: x.get("priority", 999))
             _set_cache("gemini", models)
-            return models
+            return models[:limit]
     except Exception as e:
         logger.error("Failed to fetch Gemini models", error=str(e))
         return []
@@ -204,10 +221,7 @@ async def fetch_anthropic_models(api_key: str, limit: int = 3) -> List[Dict[str,
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 "https://api.anthropic.com/v1/models",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01"
-                }
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
             )
             response.raise_for_status()
             data = response.json()
@@ -217,11 +231,13 @@ async def fetch_anthropic_models(api_key: str, limit: int = 3) -> List[Dict[str,
                 model_id = m.get("id", "")
                 display_name = m.get("display_name", model_id)
 
-                models.append({
-                    "id": model_id,
-                    "name": display_name,
-                    "description": f"Anthropic {display_name}",
-                })
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": display_name,
+                        "description": f"Anthropic {display_name}",
+                    }
+                )
 
             _set_cache("anthropic", models)
             return models[:limit]
@@ -262,4 +278,3 @@ async def fetch_all_provider_models(limit: int = 3) -> Dict[str, List[Dict[str, 
                 results[provider] = response
 
     return results
-

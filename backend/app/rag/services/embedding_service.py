@@ -4,6 +4,7 @@ Local embeddings only - no API embeddings to reduce costs
 """
 
 import os
+import threading
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import structlog
@@ -65,7 +66,7 @@ LOCAL_MODELS: Dict[str, EmbeddingModel] = {
     "bge-large-en-v1.5": EmbeddingModel(
         name="bge-large-en-v1.5",
         dimensions=1024,
-        description="State-of-the-art multilingual embeddings",
+        description="High-quality English embeddings",
         max_sequence_length=512,
         is_cached=False,  # Download on first use
     ),
@@ -79,8 +80,12 @@ class EmbeddingService:
     """
 
     def __init__(self, model_name: str = "e5-base-v2"):
+        if model_name not in LOCAL_MODELS:
+            raise ValueError(
+                f"Unknown model: {model_name}. Available models: {list(LOCAL_MODELS.keys())}"
+            )
         self.model_name = model_name
-        self.model_config = LOCAL_MODELS.get(model_name, LOCAL_MODELS["e5-base-v2"])
+        self.model_config = LOCAL_MODELS[model_name]
         self._embeddings = None
         self._model = None
 
@@ -107,7 +112,10 @@ class EmbeddingService:
     def model(self) -> SentenceTransformer:
         """Access to the underlying sentence-transformers model"""
         if self._model is None:
-            self._model = SentenceTransformer(self.model_name)
+            self._model = SentenceTransformer(
+                self.model_name,
+                cache_folder=os.path.join(settings.BASE_DIR, "embedding_cache"),
+            )
         return self._model
 
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
@@ -192,8 +200,16 @@ class EmbeddingService:
             e1 = np.array(embedding1)
             e2 = np.array(embedding2)
 
+            # Compute norms
+            norm1 = np.linalg.norm(e1)
+            norm2 = np.linalg.norm(e2)
+
+            # Check for zero norm to avoid division by zero
+            if norm1 == 0.0 or norm2 == 0.0:
+                return 0.0
+
             # Compute cosine similarity
-            similarity = np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2))
+            similarity = np.dot(e1, e2) / (norm1 * norm2)
             return float(similarity)
         except Exception as e:
             logger.error("Failed to compute similarity", error=str(e))
@@ -219,17 +235,19 @@ class EmbeddingService:
 
 # Global instance for convenience
 _default_embedding_service = None
+_default_embedding_service_lock = threading.Lock()
 
 
 def get_embedding_service(model_name: str = "e5-base-v2") -> EmbeddingService:
     """Get or create default embedding service"""
     global _default_embedding_service
-    if (
-        _default_embedding_service is None
-        or _default_embedding_service.model_name != model_name
-    ):
-        _default_embedding_service = EmbeddingService(model_name)
-    return _default_embedding_service
+    with _default_embedding_service_lock:
+        if (
+            _default_embedding_service is None
+            or _default_embedding_service.model_name != model_name
+        ):
+            _default_embedding_service = EmbeddingService(model_name)
+        return _default_embedding_service
 
 
 def create_embedding_service(model_name: str = "e5-base-v2") -> EmbeddingService:

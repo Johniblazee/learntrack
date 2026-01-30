@@ -28,14 +28,16 @@ let globalToastCallback: ToastContextValue | null = null
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastProps[]>([])
 
-  // Track if component is mounted to prevent duplicate toasts in StrictMode
-  const isMountedRef = useRef(false)
   const pendingToastsRef = useRef<Set<string>>(new Set())
 
   const removeToast = useCallback((id: string) => {
+    const toastToRemove = toasts.find((toast) => toast.id === id)
+    if (toastToRemove) {
+      const dedupeKey = `${toastToRemove.type}-${toastToRemove.message}-${toastToRemove.description || ''}`
+      pendingToastsRef.current.delete(dedupeKey)
+    }
     setToasts((prev) => prev.filter((toast) => toast.id !== id))
-    pendingToastsRef.current.delete(id)
-  }, [])
+  }, [toasts])
 
   const addToast = useCallback(
     (message: string, type: ToastType, options?: ToastOptions) => {
@@ -106,16 +108,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     dismissAll,
   }), [success, error, warning, info, removeToast, dismissAll])
 
-  // Register global callback for imperative API - only run once on mount
+  // Register global callback for imperative API
   useEffect(() => {
-    // In StrictMode, this runs twice. We only want to set the callback once.
-    if (!isMountedRef.current) {
-      isMountedRef.current = true
-    }
     globalToastCallback = contextValue
 
     return () => {
-      // Only clear on actual unmount, not StrictMode cleanup
       globalToastCallback = null
     }
   }, [contextValue])
