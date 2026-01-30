@@ -45,7 +45,7 @@ qdrant-client>=1.7.0,<2.0.0
 tavily-python>=0.3.0,<1.0.0
 
 # Document Processing - LangChain Integrations
-langchain-docling
+langchain-docling>=0.1.0,<0.2.0
 langchain-unstructured>=0.0.1,<0.2.0
 
 # HTTP Client

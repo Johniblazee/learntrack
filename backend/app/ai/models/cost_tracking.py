@@ -17,6 +17,7 @@ class CostProvider(str, Enum):
     GROQ = "groq"
     GEMINI = "gemini"
     ANTHROPIC = "anthropic"
+    OTHER = "other"
 
 
 class CostModel(str, Enum):
@@ -41,6 +42,9 @@ class CostModel(str, Enum):
     # Anthropic
     CLAUDE_3_5_SONNET = "claude-3.5-sonnet"
     CLAUDE_3_HAIKU = "claude-3-haiku"
+
+    # Other/Unknown
+    OTHER = "other"
 
 
 class CostPeriod(str, Enum):

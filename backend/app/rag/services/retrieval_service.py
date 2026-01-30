@@ -27,6 +27,9 @@ from .embedding_service import EmbeddingService
 
 logger = structlog.get_logger()
 
+# Global lock for retrieval service singleton creation
+_retrieval_service_lock = asyncio.Lock()
+
 
 class RetrievalService:
     """
@@ -53,6 +56,7 @@ class RetrievalService:
         # Initialize Qdrant client
         self._qdrant_client = None
         self._vectorstore = None
+        self._qdrant_client_lock = asyncio.Lock()
 
         logger.info(
             "Initialized RetrievalService",
@@ -60,27 +64,39 @@ class RetrievalService:
             qdrant_url=self.qdrant_url,
         )
 
-    @property
-    def qdrant_client(self) -> QdrantClient:
-        """Lazy initialization of Qdrant client"""
+    async def get_qdrant_client(self) -> QdrantClient:
+        """Lazy initialization of Qdrant client (async thread-safe)"""
         if self._qdrant_client is None:
-            if self.qdrant_api_key:
-                self._qdrant_client = QdrantClient(
-                    url=self.qdrant_url,
-                    api_key=self.qdrant_api_key,
-                )
-            else:
-                self._qdrant_client = QdrantClient(url=self.qdrant_url)
+            async with self._qdrant_client_lock:
+                if self._qdrant_client is None:
+                    if self.qdrant_api_key:
+                        self._qdrant_client = QdrantClient(
+                            url=self.qdrant_url,
+                            api_key=self.qdrant_api_key,
+                        )
+                    else:
+                        self._qdrant_client = QdrantClient(url=self.qdrant_url)
 
-            logger.info("Connected to Qdrant", url=self.qdrant_url)
+                    logger.info("Connected to Qdrant", url=self.qdrant_url)
         return self._qdrant_client
 
     @property
     def vectorstore(self) -> Qdrant:
-        """Lazy initialization of LangChain Qdrant vectorstore"""
+        """Lazy initialization of LangChain Qdrant vectorstore (sync - for backwards compatibility)"""
         if self._vectorstore is None:
+            # Use sync initialization for property access
+            if self._qdrant_client is None:
+                if self.qdrant_api_key:
+                    self._qdrant_client = QdrantClient(
+                        url=self.qdrant_url,
+                        api_key=self.qdrant_api_key,
+                    )
+                else:
+                    self._qdrant_client = QdrantClient(url=self.qdrant_url)
+                logger.info("Connected to Qdrant (sync)", url=self.qdrant_url)
+
             self._vectorstore = Qdrant(
-                client=self.qdrant_client,
+                client=self._qdrant_client,
                 collection_name=self.collection_name,
                 embeddings=self.embedding_service.embeddings,
             )
@@ -90,14 +106,29 @@ class RetrievalService:
 
         return self._vectorstore
 
+    async def get_vectorstore(self) -> Qdrant:
+        """Async initialization of LangChain Qdrant vectorstore"""
+        if self._vectorstore is None:
+            client = await self.get_qdrant_client()
+            self._vectorstore = Qdrant(
+                client=client,
+                collection_name=self.collection_name,
+                embeddings=self.embedding_service.embeddings,
+            )
+
+            # Create collection if it doesn't exist
+            await self._ensure_collection_exists_async()
+
+        return self._vectorstore
+
     def _ensure_collection_exists(self) -> None:
-        """Ensure the collection exists with proper configuration"""
+        """Ensure the collection exists with proper configuration (sync version)"""
         try:
-            collections = self.qdrant_client.get_collections()
+            collections = self._qdrant_client.get_collections()
             collection_names = [c.name for c in collections.collections]
 
             if self.collection_name not in collection_names:
-                self.qdrant_client.create_collection(
+                self._qdrant_client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(
                         size=self.embedding_service.model_config.dimensions,
@@ -106,6 +137,31 @@ class RetrievalService:
                 )
                 logger.info(
                     "Created Qdrant collection",
+                    collection=self.collection_name,
+                    dimensions=self.embedding_service.model_config.dimensions,
+                )
+        except Exception as e:
+            logger.error("Failed to ensure collection exists", error=str(e))
+            raise
+
+    async def _ensure_collection_exists_async(self) -> None:
+        """Ensure the collection exists with proper configuration (async version)"""
+        try:
+            client = await self.get_qdrant_client()
+            collections = await asyncio.to_thread(client.get_collections)
+            collection_names = [c.name for c in collections.collections]
+
+            if self.collection_name not in collection_names:
+                await asyncio.to_thread(
+                    client.create_collection,
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(
+                        size=self.embedding_service.model_config.dimensions,
+                        distance=Distance.COSINE,
+                    ),
+                )
+                logger.info(
+                    "Created Qdrant collection (async)",
                     collection=self.collection_name,
                     dimensions=self.embedding_service.model_config.dimensions,
                 )
@@ -129,13 +185,14 @@ class RetrievalService:
                 batch = documents[i : i + batch_size]
 
                 # Add unique IDs if not present
-                for j, doc in enumerate(batch):
+                for doc in batch:
                     if "id" not in doc.metadata:
                         # Use deterministic SHA-256 digest of content for stable IDs
+                        # This enables content-based deduplication
                         digest = hashlib.sha256(
                             doc.page_content.encode("utf-8")
                         ).hexdigest()
-                        doc.metadata["id"] = f"doc_{i}_{j}_{digest[:32]}"
+                        doc.metadata["id"] = f"doc_{digest[:32]}"
 
                 # Use LangChain's optimized document addition
                 ids = await self.vectorstore.aadd_documents(batch, **kwargs)

@@ -27,7 +27,10 @@ async def create_cost_tracking_collections(db: AsyncIOMotorDatabase):
     # Cost quotas collection
     quota_collection = db.cost_quotas
     await quota_collection.create_index(
-        [("tenant_id", 1), ("is_active", 1)], unique=True
+        [("tenant_id", 1), ("is_active", 1)],
+        unique=True,
+        name="tenant_id_is_active_uniqueness_on_active",
+        partialFilterExpression={"is_active": True},
     )
     await quota_collection.create_index([("tier", 1)])
     await quota_collection.create_index([("last_daily_reset", 1)])
@@ -48,14 +51,12 @@ async def create_default_quotas(db: AsyncIOMotorDatabase):
 
     # Get existing users to create quotas for
     users_collection = db.users
-    users = await users_collection.find(
-        {"role": {"$in": ["TUTOR", "STUDENT", "PARENT"]}}
-    ).to_list(None)
+    cursor = users_collection.find({"role": {"$in": ["TUTOR", "STUDENT", "PARENT"]}})
 
     quota_collection = db.cost_quotas
     quotas_created = 0
 
-    for user in users:
+    async for user in cursor:
         tenant_id = str(user["_id"])
 
         # Check if quota already exists
@@ -104,12 +105,12 @@ async def update_existing_files_with_cost_metadata(db: AsyncIOMotorDatabase):
     """Update existing files with cost tracking metadata"""
 
     files_collection = db.files
-    files = await files_collection.find({"embedding_status": "completed"}).to_list(None)
+    cursor = files_collection.find({"embedding_status": "completed"})
 
     cost_collection = db.cost_tracking
     records_created = 0
 
-    for file in files:
+    async for file in cursor:
         tenant_raw = file.get("tutor_id") or file.get("uploaded_by")
         if tenant_raw is None:
             logger.warning(

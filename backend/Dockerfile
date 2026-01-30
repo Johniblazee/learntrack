@@ -35,7 +35,7 @@ COPY uv.lock* .
 # Install Python dependencies using UV into the system Python environment so
 # `uvicorn` launched from CMD can import installed packages.
 # Do not require a lockfile at build time so builds don't fail when uv.lock is not committed.
-RUN uv sync --system
+RUN uv sync --system --no-dev --frozen
 
 # Copy the rest of the application code
 COPY . .

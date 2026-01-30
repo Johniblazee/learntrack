@@ -275,6 +275,12 @@ async def update_tenant_quota_admin(
         raise AuthorizationError("admin.quota.write")
 
     service = CostTrackingService(db)
+
+    # Verify quota exists before updating
+    existing_quota = await service.get_quota(tenant_id)
+    if not existing_quota:
+        raise HTTPException(status_code=404, detail="Quota not found")
+
     return await service.update_quota(
         tenant_id=tenant_id,
         monthly_limit=quota_data.monthly_limit,

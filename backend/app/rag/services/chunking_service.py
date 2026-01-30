@@ -111,25 +111,30 @@ class ChunkingService:
                 chunk_type=chunk_type,
                 docs_count=len(documents),
             )
-            # Fallback to recursive chunking
+            # Fallback to recursive chunking, but avoid infinite recursion
+            if chunk_type == "recursive":
+                logger.error("Recursive chunking also failed, returning empty list")
+                raise  # Re-raise the exception since fallback also failed
             logger.info("Falling back to recursive chunking")
             return await self.chunk_documents(documents, chunk_type="recursive")
 
     def _get_chunker(self, chunk_type: str, **kwargs) -> BaseDocumentTransformer:
         """Get the appropriate chunker based on type"""
-        chunkers = {
-            "semantic": self.semantic_chunker,
-            "recursive": self.recursive_splitter,
-            "markdown": self.markdown_splitter,
-            "python": self.python_splitter,
+        # Use lambdas to defer attribute access and avoid triggering lazy init
+        chunker_factories = {
+            "semantic": lambda: self.semantic_chunker,
+            "recursive": lambda: self.recursive_splitter,
+            "markdown": lambda: self.markdown_splitter,
+            "python": lambda: self.python_splitter,
         }
 
-        if chunk_type not in chunkers:
+        if chunk_type not in chunker_factories:
             raise ValueError(
-                f"Unknown chunk type: {chunk_type}. Available: {list(chunkers.keys())}"
+                f"Unknown chunk type: {chunk_type}. Available: {list(chunker_factories.keys())}"
             )
 
-        chunker = chunkers[chunk_type]
+        # Only access the chosen chunker after validating chunk_type
+        chunker = chunker_factories[chunk_type]()
 
         # Apply custom parameters if provided
         if kwargs:
@@ -170,14 +175,21 @@ class ChunkingService:
                 }
             )
 
-            # Preserve original document metadata
-            if original_documents and i < len(original_documents):
-                orig_doc = original_documents[i]
+            # Preserve original document metadata from chunk's own metadata first
+            # Fall back to original_documents lookup only when needed
+            if chunk.metadata.get("source_filename"):
+                # Chunk already has source info from the chunking process
+                pass
+            elif original_documents:
+                # Try to get source info from chunk's metadata or fallback
                 chunk.metadata.update(
                     {
-                        "source_document_id": orig_doc.metadata.get("id"),
-                        "source_filename": orig_doc.metadata.get("filename"),
-                        "source_filetype": orig_doc.metadata.get("filetype"),
+                        "source_document_id": chunk.metadata.get("source_document_id")
+                        or chunk.metadata.get("id"),
+                        "source_filename": chunk.metadata.get("filename")
+                        or chunk.metadata.get("source_file"),
+                        "source_filetype": chunk.metadata.get("filetype")
+                        or chunk.metadata.get("file_extension"),
                     }
                 )
 
@@ -236,8 +248,10 @@ class ChunkingService:
         # Binary search for optimal chunk size
         low, high = 100, 5000
         best_size = 1000
+        iteration = 0
 
-        while low <= high:
+        while low <= high and iteration < max_iterations:
+            iteration += 1
             mid = (low + high) // 2
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=mid,
@@ -283,6 +297,14 @@ def get_chunking_service(
     global _default_chunking_service
     if _default_chunking_service is None:
         _default_chunking_service = ChunkingService(embedding_service)
+    elif embedding_service is not None:
+        # Detect when different embedding_service is provided
+        existing_service = _default_chunking_service.embedding_service
+        if existing_service is not embedding_service:
+            logger.warning(
+                "get_chunking_service called with different embedding_service, "
+                "but singleton instance already exists. Ignoring new embedding_service."
+            )
     return _default_chunking_service
 
 

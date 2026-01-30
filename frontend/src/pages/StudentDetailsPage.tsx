@@ -796,14 +796,21 @@ export default function StudentDetailsPage() {
                       {pendingAssignments.slice(0, 5).map((assignment) => {
                         const dueDate = new Date(assignment.dueDate)
                         const now = new Date()
-                        const diffMs = dueDate.getTime() - now.getTime()
-                        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+                        
+                        // Validate dueDate is a valid date
+                        const isValidDate = !isNaN(dueDate.getTime())
+                        const diffMs = isValidDate ? dueDate.getTime() - now.getTime() : NaN
+                        const diffDays = isValidDate ? Math.ceil(diffMs / (1000 * 60 * 60 * 24)) : NaN
 
                         let dueDateText = ''
                         let dueDateColor = 'text-muted-foreground'
                         let badgeVariant: 'outline' | 'destructive' | 'secondary' = 'outline'
 
-                        if (diffDays < 0) {
+                        if (!isValidDate || isNaN(diffDays)) {
+                          dueDateText = 'No due date'
+                          dueDateColor = 'text-muted-foreground'
+                          badgeVariant = 'outline'
+                        } else if (diffDays < 0) {
                           dueDateText = 'Overdue'
                           dueDateColor = 'text-red-500'
                           badgeVariant = 'destructive'

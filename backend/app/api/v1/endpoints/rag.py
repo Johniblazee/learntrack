@@ -468,5 +468,9 @@ async def get_available_providers(
     current_user: ClerkUserContext = Depends(require_tutor),
 ):
     """Get list of available AI providers"""
-    manager = AIManager()
-    return manager.get_available_providers()
+    try:
+        manager = get_ai_manager_for_tenant(current_user.tenant_id)
+        return manager.get_available_providers()
+    except Exception as e:
+        logger.exception("Failed to get available providers")
+        raise HTTPException(status_code=500, detail="Failed to retrieve providers")

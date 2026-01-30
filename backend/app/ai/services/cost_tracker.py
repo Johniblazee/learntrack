@@ -62,26 +62,26 @@ MODEL_COSTS: Dict[str, Dict[str, Dict[str, Decimal]]] = {
     },
     "gemini": {
         "gemini-1.5-pro": {
-            "input": Decimal("1.25"),  # $1.25 per 1M tokens = $0.00125 per 1K
-            "output": Decimal("3.75"),  # $3.75 per 1M tokens = $0.00375 per 1K
+            "input": Decimal("0.00125"),  # $1.25 per 1M tokens = $0.00125 per 1K
+            "output": Decimal("0.00375"),  # $3.75 per 1M tokens = $0.00375 per 1K
         },
         "gemini-1.5-flash": {
-            "input": Decimal("0.075"),  # $0.075 per 1M tokens = $0.000075 per 1K
-            "output": Decimal("0.15"),  # $0.15 per 1M tokens = $0.00015 per 1K
+            "input": Decimal("0.000075"),  # $0.075 per 1M tokens = $0.000075 per 1K
+            "output": Decimal("0.00015"),  # $0.15 per 1M tokens = $0.00015 per 1K
         },
         "text-embedding-004": {
-            "input": Decimal("0.025"),  # $0.025 per 1M tokens = $0.000025 per 1K
+            "input": Decimal("0.000025"),  # $0.025 per 1M tokens = $0.000025 per 1K
             "output": Decimal("0"),
         },
     },
     "anthropic": {
         "claude-3.5-sonnet": {
-            "input": Decimal("3.00"),  # $3.00 per 1M tokens = $0.003 per 1K
-            "output": Decimal("15.00"),  # $15.00 per 1M tokens = $0.015 per 1K
+            "input": Decimal("0.003"),  # $3.00 per 1M tokens = $0.003 per 1K
+            "output": Decimal("0.015"),  # $15.00 per 1M tokens = $0.015 per 1K
         },
         "claude-3-haiku": {
-            "input": Decimal("0.25"),  # $0.25 per 1M tokens = $0.00025 per 1K
-            "output": Decimal("1.25"),  # $1.25 per 1M tokens = $0.00125 per 1K
+            "input": Decimal("0.00025"),  # $0.25 per 1M tokens = $0.00025 per 1K
+            "output": Decimal("0.00125"),  # $1.25 per 1M tokens = $0.00125 per 1K
         },
     },
 }
@@ -144,16 +144,32 @@ class CostTrackingService:
         Returns:
             CostTracking record
         """
+        # Validate input tokens
+        if not isinstance(input_tokens, int) or input_tokens < 0:
+            raise ValueError(
+                f"input_tokens must be a non-negative integer, got {input_tokens}"
+            )
+        if not isinstance(output_tokens, int) or output_tokens < 0:
+            raise ValueError(
+                f"output_tokens must be a non-negative integer, got {output_tokens}"
+            )
+
         # Calculate costs
         input_cost = self._calculate_cost(provider, model, input_tokens, "input")
         output_cost = self._calculate_cost(provider, model, output_tokens, "output")
         total_cost = input_cost + output_cost
 
+        # Validate and convert provider/model enums with fallback
+        cost_provider = self._safe_enum_convert(
+            CostProvider, provider, CostProvider.OTHER
+        )
+        cost_model = self._safe_enum_convert(CostModel, model, CostModel.OTHER)
+
         # Create cost record
         cost_record = CostTracking(
             tenant_id=tenant_id,
-            provider=CostProvider(provider),
-            model=CostModel(model),
+            provider=cost_provider,
+            model=cost_model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             input_cost=input_cost,
@@ -182,6 +198,20 @@ class CostTrackingService:
         await self._check_quota_and_alerts(tenant_id, total_cost)
 
         return cost_record
+
+    def _safe_enum_convert(self, enum_class, value: str, default):
+        """Safely convert string to enum value with fallback to default"""
+        if value in enum_class.__members__.values():
+            try:
+                return enum_class(value)
+            except ValueError:
+                pass
+        logger.warning(
+            f"Invalid {enum_class.__name__} value: {value}, using default",
+            value=value,
+            default=default.value,
+        )
+        return default
 
     def _calculate_cost(
         self, provider: str, model: str, tokens: int, token_type: str
@@ -282,13 +312,22 @@ class CostTrackingService:
             update_data["alert_threshold"] = alert_threshold
         if tier is not None:
             update_data["tier"] = tier
-            update_data["updated_at"] = datetime.now(timezone.utc)
+        update_data["updated_at"] = datetime.now(timezone.utc)
 
         if update_data:
-            await self.quota_collection.update_one(
-                {"tenant_id": tenant_id}, {"$set": update_data}
+            updated_doc = await self.quota_collection.find_one_and_update(
+                {"tenant_id": tenant_id},
+                {"$set": update_data},
+                return_document=ReturnDocument.AFTER,
             )
-            quota = await self.get_quota(tenant_id)
+            if updated_doc:
+                updated_doc["_id"] = str(updated_doc["_id"])
+                quota = CostQuota(**updated_doc)
+            else:
+                # Fallback in case update failed
+                quota = await self.get_quota(tenant_id)
+                if not quota:
+                    quota = await self.create_default_quota(tenant_id)
 
         return quota
 
@@ -342,11 +381,17 @@ class CostTrackingService:
             updates["current_daily_usage"] = Decimal("0")
             updates["last_daily_reset"] = now
 
-        # Reset monthly usage if new month
-        if (
-            now.month != quota.last_monthly_reset.month
-            or now.year != quota.last_monthly_reset.year
-        ):
+        # Reset monthly usage if new month (with timezone normalization)
+        try:
+            if quota.last_monthly_reset.tzinfo is None:
+                last_monthly = quota.last_monthly_reset.replace(tzinfo=timezone.utc)
+            else:
+                last_monthly = quota.last_monthly_reset
+        except (AttributeError, TypeError):
+            last_monthly = quota.last_monthly_reset.replace(tzinfo=timezone.utc)
+
+        last_monthly_utc = last_monthly.astimezone(timezone.utc)
+        if now.month != last_monthly_utc.month or now.year != last_monthly_utc.year:
             updates["current_monthly_usage"] = Decimal("0")
             updates["last_monthly_reset"] = now
 
@@ -366,21 +411,120 @@ class CostTrackingService:
         if not quota:
             return
 
-        # Reset usage counters if needed before applying increment
-        quota = await self._reset_usage_if_needed(quota)
-
-        # Atomically increment usage counters to avoid lost updates under concurrency
-        # Use Decimal128 for precise decimal arithmetic in MongoDB
+        now = datetime.now(timezone.utc)
         inc_value = Decimal128(cost)
+
+        # Build timezone-aware reset timestamps for comparison in aggregation
+        last_daily = quota.last_daily_reset
+        if last_daily.tzinfo is None:
+            last_daily = last_daily.replace(tzinfo=timezone.utc)
+        last_daily_reset_ts = last_daily.astimezone(timezone.utc)
+
+        last_monthly = quota.last_monthly_reset
+        if last_monthly.tzinfo is None:
+            last_monthly = last_monthly.replace(tzinfo=timezone.utc)
+        last_monthly_reset_ts = last_monthly.astimezone(timezone.utc)
+
+        # Atomically reset (if needed) and increment to avoid race conditions
+        # Use aggregation pipeline to conditionally reset counters before incrementing
+        pipeline = [
+            {
+                "$set": {
+                    "current_daily_usage": {
+                        "$cond": {
+                            "if": {
+                                "$ne": [
+                                    {
+                                        "$dateToString": {
+                                            "format": "%Y-%m-%d",
+                                            "date": last_daily_reset_ts,
+                                        }
+                                    },
+                                    {
+                                        "$dateToString": {
+                                            "format": "%Y-%m-%d",
+                                            "date": now,
+                                        }
+                                    },
+                                ]
+                            },
+                            "then": inc_value,
+                            "else": {"$add": ["$current_daily_usage", inc_value]},
+                        }
+                    },
+                    "current_monthly_usage": {
+                        "$cond": {
+                            "if": {
+                                "$or": [
+                                    {
+                                        "$ne": [
+                                            {"$year": last_monthly_reset_ts},
+                                            {"$year": now},
+                                        ]
+                                    },
+                                    {
+                                        "$ne": [
+                                            {"$month": last_monthly_reset_ts},
+                                            {"$month": now},
+                                        ]
+                                    },
+                                ]
+                            },
+                            "then": inc_value,
+                            "else": {"$add": ["$current_monthly_usage", inc_value]},
+                        }
+                    },
+                    "last_daily_reset": {
+                        "$cond": {
+                            "if": {
+                                "$ne": [
+                                    {
+                                        "$dateToString": {
+                                            "format": "%Y-%m-%d",
+                                            "date": last_daily_reset_ts,
+                                        }
+                                    },
+                                    {
+                                        "$dateToString": {
+                                            "format": "%Y-%m-%d",
+                                            "date": now,
+                                        }
+                                    },
+                                ]
+                            },
+                            "then": now,
+                            "else": "$last_daily_reset",
+                        }
+                    },
+                    "last_monthly_reset": {
+                        "$cond": {
+                            "if": {
+                                "$or": [
+                                    {
+                                        "$ne": [
+                                            {"$year": last_monthly_reset_ts},
+                                            {"$year": now},
+                                        ]
+                                    },
+                                    {
+                                        "$ne": [
+                                            {"$month": last_monthly_reset_ts},
+                                            {"$month": now},
+                                        ]
+                                    },
+                                ]
+                            },
+                            "then": now,
+                            "else": "$last_monthly_reset",
+                        }
+                    },
+                }
+            }
+        ]
 
         updated = await self.quota_collection.find_one_and_update(
             {"tenant_id": tenant_id},
-            {
-                "$inc": {
-                    "current_daily_usage": inc_value,
-                    "current_monthly_usage": inc_value,
-                }
-            },
+            pipeline,
             return_document=ReturnDocument.AFTER,
         )
 

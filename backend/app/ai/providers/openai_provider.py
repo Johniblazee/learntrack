@@ -108,6 +108,11 @@ class OpenAIProvider(BaseAIProvider):
                 response_format={"type": "json_object"},
             )
 
+            # Defensive checks for response structure
+            if not response.choices or len(response.choices) == 0:
+                raise AIProviderError("OpenAI returned empty response", "openai")
+            if not response.choices[0].message:
+                raise AIProviderError("OpenAI returned empty response", "openai")
             response_text = response.choices[0].message.content
             if response_text is None:
                 raise AIProviderError("OpenAI returned empty response", "openai")
@@ -169,7 +174,12 @@ class OpenAIProvider(BaseAIProvider):
 
             import json
 
-            content_text = getattr(response.choices[0].message, "content", "")
+            # Defensive check before accessing response.choices
+            choices = getattr(response, "choices", None)
+            if not choices or len(choices) == 0:
+                content_text = ""
+            else:
+                content_text = getattr(choices[0].message, "content", "")
             try:
                 validation_result = json.loads(content_text)
             except json.JSONDecodeError as je:
@@ -211,7 +221,14 @@ class OpenAIProvider(BaseAIProvider):
                 messages=[{"role": "user", "content": "Hello"}],
                 max_tokens=5,
             )
-            return response.choices[0].message.content is not None
+            # Defensive check before returning
+            choices = getattr(response, "choices", None)
+            if not choices or len(choices) == 0:
+                return False
+            message = getattr(choices[0], "message", None)
+            if not message:
+                return False
+            return getattr(message, "content", None) is not None
         except Exception as e:
             logger.error("OpenAI health check failed", error=str(e))
             return False

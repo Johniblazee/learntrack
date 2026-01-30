@@ -6,6 +6,7 @@ A "student" is a user with the role "student".
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from bson import ObjectId
 import structlog
 
 from app.core.database import get_database
@@ -450,10 +451,20 @@ async def unlink_parent_from_student(
         # Use the student's actual clerk_id from the database
         actual_student_id = student.clerk_id
 
-        # Find the parent by clerk_id or _id
+        # Find the parent by clerk_id or _id (convert to ObjectId if valid)
+        parent_query = {"$or": [{"clerk_id": parent_id}]}
+
+        # Try to convert parent_id to ObjectId for _id match
+        try:
+            object_id = ObjectId(parent_id)
+            parent_query["$or"].append({"_id": object_id})
+        except Exception:
+            # parent_id is not a valid ObjectId, skip _id match
+            pass
+
         parent = await db.parents.find_one(
             {
-                "$or": [{"clerk_id": parent_id}, {"_id": parent_id}],
+                **parent_query,
                 "tutor_id": current_user.clerk_id,
             }
         )

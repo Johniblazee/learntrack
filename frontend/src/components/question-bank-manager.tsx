@@ -952,7 +952,7 @@ export default function QuestionBankManager() {
                   type="number"
                   min={1}
                   value={formData.points}
-                  onChange={(e) => setFormData({ ...formData, points: parseInt(e.target.value) || 1 })}
+                  onChange={(e) => setFormData({ ...formData, points: Math.max(parseInt(e.target.value) || 1, 1) })}
                   className="mt-1"
                 />
               </div>
@@ -1146,7 +1146,7 @@ export default function QuestionBankManager() {
                   type="number"
                   min={1}
                   value={formData.points}
-                  onChange={(e) => setFormData({ ...formData, points: parseInt(e.target.value) || 1 })}
+                  onChange={(e) => setFormData({ ...formData, points: Math.max(parseInt(e.target.value) || 1, 1) })}
                   className="mt-1"
                 />
               </div>
@@ -1168,7 +1168,7 @@ export default function QuestionBankManager() {
             </Button>
             <Button 
               onClick={handleCreateQuestion} 
-              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer)}
+              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer) || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE && (formData.options?.filter(o => o.trim()).length || 0) < 2)}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {isSubmitting ? 'Creating...' : 'Create Question'}

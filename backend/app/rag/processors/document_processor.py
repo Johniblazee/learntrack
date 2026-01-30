@@ -251,18 +251,21 @@ class DocumentProcessor:
             if not documents:
                 return {}
 
-            # Combine metadata from all documents
-            combined_metadata = {
-                "total_documents": len(documents),
-                "total_characters": sum(len(doc.page_content) for doc in documents),
-                "source_file": str(file_path),
-                "filename": Path(file_path).name,
-                "file_extension": Path(file_path).suffix.lower(),
-                "processor": "langchain-docling",
-            }
+            # Start with first document's metadata, then add explicit keys
+            # This prevents document metadata from overwriting explicit keys
+            combined_metadata = dict(documents[0].metadata)
 
-            # Add first document's metadata
-            combined_metadata.update(documents[0].metadata)
+            # Add explicit metadata keys (these take precedence)
+            combined_metadata.update(
+                {
+                    "total_documents": len(documents),
+                    "total_characters": sum(len(doc.page_content) for doc in documents),
+                    "source_file": str(file_path),
+                    "filename": Path(file_path).name,
+                    "file_extension": Path(file_path).suffix.lower(),
+                    "processor": "langchain-docling",
+                }
+            )
 
             return combined_metadata
 

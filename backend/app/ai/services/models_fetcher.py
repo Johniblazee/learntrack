@@ -44,7 +44,7 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
     """Fetch models from Groq API (OpenAI compatible endpoint)."""
     cached = _get_cache("groq")
     if cached:
-        return cached
+        return cached[:limit]
 
     must_include_prefixes = ["openai/gpt-oss", "llama-3.3"]
 

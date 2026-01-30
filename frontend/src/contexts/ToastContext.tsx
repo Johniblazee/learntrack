@@ -17,6 +17,10 @@ interface ToastContextValue {
   dismissAll: () => void
 }
 
+interface ToastWithDedupeKey extends ToastProps {
+  dedupeKey: string
+}
+
 const ToastContext = createContext<ToastContextValue | undefined>(undefined)
 
 // Use ref for toast ID to avoid issues with StrictMode double-mounting
@@ -26,18 +30,20 @@ let toastIdCounter = 0
 let globalToastCallback: ToastContextValue | null = null
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<ToastProps[]>([])
+  const [toasts, setToasts] = useState<ToastWithDedupeKey[]>([])
 
   const pendingToastsRef = useRef<Set<string>>(new Set())
+  const timeoutIdsRef = useRef<Set<NodeJS.Timeout>>(new Set())
 
   const removeToast = useCallback((id: string) => {
-    const toastToRemove = toasts.find((toast) => toast.id === id)
-    if (toastToRemove) {
-      const dedupeKey = `${toastToRemove.type}-${toastToRemove.message}-${toastToRemove.description || ''}`
-      pendingToastsRef.current.delete(dedupeKey)
-    }
-    setToasts((prev) => prev.filter((toast) => toast.id !== id))
-  }, [toasts])
+    setToasts((prev) => {
+      const toastToRemove = prev.find((toast) => toast.id === id)
+      if (toastToRemove) {
+        pendingToastsRef.current.delete(toastToRemove.dedupeKey)
+      }
+      return prev.filter((toast) => toast.id !== id)
+    })
+  }, [])
 
   const addToast = useCallback(
     (message: string, type: ToastType, options?: ToastOptions) => {
@@ -50,28 +56,39 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       }
 
       const id = `toast-${++toastIdCounter}`
-      const newToast: ToastProps = {
+      const newToast: ToastWithDedupeKey = {
         id,
         message,
         type,
         description: options?.description,
         duration: options?.duration ?? 3000,
         isVisible: true,
+        dedupeKey,
       }
 
       // Mark this toast as pending
       pendingToastsRef.current.add(dedupeKey)
 
       // Remove from pending set after a short delay (allows same toast to be shown again later)
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         pendingToastsRef.current.delete(dedupeKey)
+        timeoutIdsRef.current.delete(timeoutId)
       }, 100)
+      timeoutIdsRef.current.add(timeoutId)
 
       setToasts((prev) => [...prev, newToast])
       return id
     },
     []
   )
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      timeoutIdsRef.current.forEach((id) => clearTimeout(id))
+      timeoutIdsRef.current.clear()
+    }
+  }, [])
 
   const success = useCallback(
     (message: string, options?: ToastOptions) => addToast(message, "success", options),
@@ -149,4 +166,3 @@ export const toast = {
     if (globalToastCallback) globalToastCallback.info(message, options)
   },
 }
-
