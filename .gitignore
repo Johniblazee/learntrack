@@ -59,12 +59,12 @@ build/*.toml
 /.clerk/
 
 # Development scripts and mock data (exclude from commits)
-
-tests/
+# Note: Keep test scripts and reports for end-to-end testing
+# tests/  <- Commented out to allow test scripts
+# test_reports/  <- Commented out to allow test reports
 docs/
 scripts/
 notebooks/
-test_reports/
 
 # Agent guidelines (local file)
 AGENTS.md
