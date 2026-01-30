@@ -63,6 +63,7 @@ build/*.toml
 tests/
 docs/
 scripts/
+notebooks/
 
 # Agent guidelines (local file)
 AGENTS.md

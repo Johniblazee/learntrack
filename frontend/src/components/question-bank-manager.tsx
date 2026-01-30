@@ -212,7 +212,9 @@ export default function QuestionBankManager() {
     const question = questions.find(q => q.id === id)
     if (question) {
       setSelectedQuestion(question)
-      const options = question.options?.length ? question.options : ['', '', '', '']
+      const options = question.options?.length 
+        ? question.options.filter((o: any) => typeof o === 'string')
+        : ['', '', '', '']
       const correctAnswer = question.correctAnswer || ''
       // Find index of correct answer in options for multiple choice
       const correctAnswerIndex = question.type === QUESTION_TYPES.MULTIPLE_CHOICE
@@ -436,7 +438,7 @@ export default function QuestionBankManager() {
           type: q.question_type || q.type,
           difficulty: q.difficulty,
           topic: q.topic,
-          options: q.options,
+          options: Array.isArray(q.options) ? q.options.filter((o: any) => typeof o === 'string') : [],
           correctAnswer: q.correct_answer || q.correctAnswer,
           explanation: q.explanation,
           points: q.points,
@@ -913,7 +915,7 @@ export default function QuestionBankManager() {
                   </SelectTrigger>
                   <SelectContent>
                     {formData.options.map((option, idx) => (
-                      option.trim() && (
+                      typeof option === 'string' && option.trim() && (
                         <SelectItem key={idx} value={idx.toString()}>
                           {String.fromCharCode(65 + idx)}. {option.substring(0, 50)}{option.length > 50 ? '...' : ''}
                         </SelectItem>
@@ -974,7 +976,7 @@ export default function QuestionBankManager() {
             </Button>
             <Button 
               onClick={handleUpdateQuestion} 
-              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer) || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE && (formData.options?.filter(o => o.trim()).length || 0) < 2)}
+              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer) || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE && (formData.options?.filter(o => typeof o === 'string' && o.trim()).length || 0) < 2)}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {isSubmitting ? 'Saving...' : 'Save Changes'}
@@ -1107,7 +1109,7 @@ export default function QuestionBankManager() {
                   </SelectTrigger>
                   <SelectContent>
                     {formData.options.map((option, idx) => (
-                      option.trim() && (
+                      typeof option === 'string' && option.trim() && (
                         <SelectItem key={idx} value={idx.toString()}>
                           {String.fromCharCode(65 + idx)}. {option.substring(0, 50)}{option.length > 50 ? '...' : ''}
                         </SelectItem>
@@ -1168,7 +1170,7 @@ export default function QuestionBankManager() {
             </Button>
             <Button 
               onClick={handleCreateQuestion} 
-              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer) || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE && (formData.options?.filter(o => o.trim()).length || 0) < 2)}
+              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer) || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE && (formData.options?.filter(o => typeof o === 'string' && o.trim()).length || 0) < 2)}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {isSubmitting ? 'Creating...' : 'Create Question'}

@@ -1,0 +1,98 @@
+{
+  "total": 15,
+  "passed": 15,
+  "failed": 0,
+  "success_rate": 100.0,
+  "results": [
+    {
+      "test": "GET /subjects/ (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:31.228429"
+    },
+    {
+      "test": "POST /subjects/ (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:31.231950"
+    },
+    {
+      "test": "GET /questions/ (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:31.694325"
+    },
+    {
+      "test": "POST /questions/ (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:31.697329"
+    },
+    {
+      "test": "GET /assignments/ (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:32.157027"
+    },
+    {
+      "test": "POST /assignments/ (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:32.159641"
+    },
+    {
+      "test": "GET /progress/assignment/{id} (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:32.618578"
+    },
+    {
+      "test": "POST /progress/assignment/{id}/answer (no auth)",
+      "passed": true,
+      "details": "Status: 403",
+      "timestamp": "2026-01-30T13:39:32.620568"
+    },
+    {
+      "test": "Endpoint /api/v1/subjects/",
+      "passed": true,
+      "details": "Found in API spec",
+      "timestamp": "2026-01-30T13:39:33.111765"
+    },
+    {
+      "test": "Endpoint /api/v1/questions/",
+      "passed": true,
+      "details": "Found in API spec",
+      "timestamp": "2026-01-30T13:39:33.111765"
+    },
+    {
+      "test": "Endpoint /api/v1/assignments/",
+      "passed": true,
+      "details": "Found in API spec",
+      "timestamp": "2026-01-30T13:39:33.111765"
+    },
+    {
+      "test": "Endpoint /api/v1/progress/",
+      "passed": true,
+      "details": "Found (with variants)",
+      "timestamp": "2026-01-30T13:39:33.111765"
+    },
+    {
+      "test": "Endpoint /api/v1/topics/",
+      "passed": true,
+      "details": "Found in API spec",
+      "timestamp": "2026-01-30T13:39:33.111765"
+    },
+    {
+      "test": "Endpoint /api/v1/groups/",
+      "passed": true,
+      "details": "Found in API spec",
+      "timestamp": "2026-01-30T13:39:33.111765"
+    },
+    {
+      "test": "Endpoint /api/v1/students/",
+      "passed": true,
+      "details": "Found in API spec",
+      "timestamp": "2026-01-30T13:39:33.111765"
+    }
+  ]
+}
