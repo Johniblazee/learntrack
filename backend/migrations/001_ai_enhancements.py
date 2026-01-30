@@ -91,10 +91,11 @@ async def create_default_quotas(db: AsyncIOMotorDatabase):
         }
 
         # Upsert to avoid duplicates
-        await quota_collection.update_one(
+        result = await quota_collection.update_one(
             {"tenant_id": tenant_id}, {"$setOnInsert": quota}, upsert=True
         )
-        quotas_created += 1
+        if result.upserted_id is not None:
+            quotas_created += 1
 
     logger.info(f"Created default quotas for {quotas_created} tenants")
 
@@ -111,7 +112,9 @@ async def update_existing_files_with_cost_metadata(db: AsyncIOMotorDatabase):
     for file in files:
         tenant_raw = file.get("tutor_id") or file.get("uploaded_by")
         if tenant_raw is None:
-            logger.warning("Skipping file with missing tenant info", file_id=str(file.get("_id")))
+            logger.warning(
+                "Skipping file with missing tenant info", file_id=str(file.get("_id"))
+            )
             continue
         tenant_id = str(tenant_raw)
         file_id = str(file["_id"])
@@ -122,7 +125,7 @@ async def update_existing_files_with_cost_metadata(db: AsyncIOMotorDatabase):
 
         # Create historical cost record
         # Prepare cost_record using Decimal128 for numeric fields
-        input_cost_val = token_estimate * 0.00000002
+        input_cost_val = Decimal(str(token_estimate)) * Decimal("0.00000002")
         cost_record = {
             "tenant_id": tenant_id,
             "provider": "openai",
@@ -154,7 +157,9 @@ async def update_existing_files_with_cost_metadata(db: AsyncIOMotorDatabase):
             }
         )
         if existing:
-            logger.debug("Historical cost record already exists for file", file_id=file_id)
+            logger.debug(
+                "Historical cost record already exists for file", file_id=file_id
+            )
             continue
 
         await cost_collection.insert_one(cost_record)

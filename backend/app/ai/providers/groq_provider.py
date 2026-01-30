@@ -1,6 +1,7 @@
 """
 Groq AI Provider using LangChain
 """
+
 from typing import List, Dict, Any, Optional
 import structlog
 import json
@@ -13,6 +14,7 @@ from app.agents.prompts import get_prompt
 from app.core.ai_models_config import get_default_model
 
 logger = structlog.get_logger()
+
 
 class GroqProvider(BaseAIProvider):
     """Groq AI provider using LangChain"""
@@ -36,7 +38,9 @@ class GroqProvider(BaseAIProvider):
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Extract the main text from this {file_type} content:\n\n{content[:8000]}")
+                HumanMessage(
+                    content=f"Extract the main text from this {file_type} content:\n\n{content[:8000]}"
+                ),
             ]
             response = await self.llm.ainvoke(messages)
             return response.content
@@ -45,15 +49,21 @@ class GroqProvider(BaseAIProvider):
             return content
 
     async def generate_questions(
-        self, text_content: str, subject: str, topic: str, question_count: int = 10,
+        self,
+        text_content: str,
+        subject: str,
+        topic: str,
+        question_count: int = 10,
         difficulty: QuestionDifficulty = QuestionDifficulty.MEDIUM,
-        question_types: Optional[List[QuestionType]] = None
+        question_types: Optional[List[QuestionType]] = None,
     ) -> List[QuestionCreate]:
         """Generate questions using Groq"""
         if question_types is None:
             question_types = [QuestionType.MULTIPLE_CHOICE]
-        
-        prompt = self._build_question_prompt(text_content, subject, topic, question_count, difficulty, question_types)
+
+        prompt = self._build_question_prompt(
+            text_content, subject, topic, question_count, difficulty, question_types
+        )
 
         try:
             # Use centralized prompt from registry
@@ -61,7 +71,7 @@ class GroqProvider(BaseAIProvider):
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
+                HumanMessage(content=prompt),
             ]
             response = await self.llm.ainvoke(messages)
             return self._parse_ai_response(response.content, subject, topic)
@@ -75,8 +85,8 @@ class GroqProvider(BaseAIProvider):
             prompt = f"""Validate this question for quality and correctness:
 Question: {question.question_text}
 Type: {question.question_type.value}
-Options: {question.options if question.options else 'N/A'}
-Correct Answer: {question.correct_answer if question.correct_answer else 'See options'}
+Options: {question.options if question.options else "N/A"}
+Correct Answer: {question.correct_answer if question.correct_answer else "See options"}
 
 Respond with JSON: {{"is_valid": true/false, "issues": [], "suggestions": [], "quality_score": 0-100}}"""
 
@@ -85,14 +95,33 @@ Respond with JSON: {{"is_valid": true/false, "issues": [], "suggestions": [], "q
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=prompt)
+                HumanMessage(content=prompt),
             ]
             response = await self.llm.ainvoke(messages)
-            
+
+            content = response.content
+            # Strip markdown code fences and normalize
+            content = content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            elif content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            # Handle single backtick inline JSON
+            if content.startswith("`") and content.endswith("`"):
+                content = content[1:-1].strip()
+
             try:
-                return json.loads(response.content)
+                return json.loads(content)
             except json.JSONDecodeError as je:
-                logger.error("Groq validate_question JSON parse error", error=str(je), exc_info=True)
+                logger.error(
+                    "Groq validate_question JSON parse error",
+                    error=str(je),
+                    cleaned_content=content[:500],
+                    exc_info=True,
+                )
                 return {
                     "is_valid": False,
                     "issues": ["AI validation failed: invalid JSON response"],
@@ -117,4 +146,3 @@ Respond with JSON: {{"is_valid": true/false, "issues": [], "suggestions": [], "q
         except Exception as e:
             logger.error(f"Groq health check failed: {e}")
             return False
-

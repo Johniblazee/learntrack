@@ -138,7 +138,10 @@ class AIManager:
                     else AIProvider(preferred_provider)
                 )
             except Exception:
-                logger.debug("preferred_provider could not be mapped to AIProvider", preferred=preferred_provider)
+                logger.debug(
+                    "preferred_provider could not be mapped to AIProvider",
+                    preferred=preferred_provider,
+                )
 
         if preferred_enum and preferred_enum in self.providers:
             providers_to_try.append(preferred_enum)
@@ -404,7 +407,7 @@ class AIManager:
                 "output_tokens": Decimal("0.00375"),
             },
         }
-    
+
     async def generate_questions_with_rag(
         self,
         rag_context: str,
@@ -418,8 +421,10 @@ class AIManager:
     ) -> List[QuestionCreate]:
         """Generate questions using RAG context"""
         # Combine RAG context with original content
-        combined_content = f"RAG Context:\n{rag_context}\n\nOriginal Content:\n{text_content}"
-        
+        combined_content = (
+            f"RAG Context:\n{rag_context}\n\nOriginal Content:\n{text_content}"
+        )
+
         return await self.generate_questions(
             text_content=combined_content,
             subject=subject,
@@ -429,22 +434,22 @@ class AIManager:
             question_types=question_types,
             preferred_provider=preferred_provider,
         )
-    
-    async def set_provider_model(
-        self,
-        provider_name: str,
-        model_name: str
-    ) -> bool:
+
+    async def set_provider_model(self, provider_name: str, model_name: str) -> bool:
         """Set the model for a specific provider"""
         if provider_name in self.providers:
             provider = self.providers[provider_name]
-            if hasattr(provider, 'model_name'):
+            if hasattr(provider, "model_name"):
                 provider.model_name = model_name
-                logger.info("Set provider model", provider=provider_name, model=model_name)
+                logger.info(
+                    "Set provider model", provider=provider_name, model=model_name
+                )
                 return True
         return False
-    
-    def get_available_models(self, provider_name: Optional[str] = None) -> Dict[str, List[str]]:
+
+    def get_available_models(
+        self, provider_name: Optional[str] = None
+    ) -> Dict[str, List[str]]:
         """Get available models for providers. If provider_name is provided, return only that provider's models."""
         models_map = {
             "openai": [
@@ -477,19 +482,31 @@ async def get_ai_manager_for_tenant(
     tenant_config: Optional[Dict[str, Any]] = None,
 ) -> AIManager:
     """Get or create AI manager for a specific tenant (async and guarded). If tenant_config differs, recreate the manager."""
+    # First check: see if we can return existing without any heavy work
     async with _tenant_cache_lock:
         existing = _tenant_ai_managers.get(tenant_id)
         if existing:
-            # If a new tenant_config is passed and differs, recreate manager
+            if not tenant_config or existing.tenant_config == tenant_config:
+                return existing
+            # tenant_config differs, need to recreate - fall through to outside lock
+
+    # Create new manager outside the lock to avoid I/O contention
+    new_mgr = AIManager(tenant_config=tenant_config)
+
+    # Second check (double-check pattern): re-acquire lock and verify state
+    async with _tenant_cache_lock:
+        existing = _tenant_ai_managers.get(tenant_id)
+        if existing:
             if tenant_config and existing.tenant_config != tenant_config:
-                _tenant_ai_managers[tenant_id] = AIManager(tenant_config=tenant_config)
-                return _tenant_ai_managers[tenant_id]
+                # Replace with new manager since config differs
+                _tenant_ai_managers[tenant_id] = new_mgr
+                return new_mgr
+            # Another thread already created it with same config, use existing
             return existing
 
-        # Create and cache
-        mgr = AIManager(tenant_config=tenant_config)
-        _tenant_ai_managers[tenant_id] = mgr
-        return mgr
+        # Store and return new manager
+        _tenant_ai_managers[tenant_id] = new_mgr
+        return new_mgr
 
 
 def create_ai_manager(

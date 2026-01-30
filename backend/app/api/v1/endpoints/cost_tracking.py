@@ -79,16 +79,22 @@ async def create_cost_quota(
         quota_data.tenant_id, tier=quota_data.tier
     )
 
-    # If the request provided explicit limits, update them
-    await service.update_quota(
-        tenant_id=quota_data.tenant_id,
-        monthly_limit=quota_data.monthly_limit,
-        daily_limit=quota_data.daily_limit,
-        alert_threshold=quota_data.alert_threshold,
-        tier=quota_data.tier,
-    )
+    # Only update if any explicit limits were provided
+    if (
+        quota_data.monthly_limit is not None
+        or quota_data.daily_limit is not None
+        or quota_data.alert_threshold is not None
+        or quota_data.tier is not None
+    ):
+        quota = await service.update_quota(
+            tenant_id=quota_data.tenant_id,
+            monthly_limit=quota_data.monthly_limit,
+            daily_limit=quota_data.daily_limit,
+            alert_threshold=quota_data.alert_threshold,
+            tier=quota_data.tier,
+        )
 
-    return await service.get_quota(quota_data.tenant_id)
+    return quota
 
 
 @router.put("/quota", response_model=CostQuota)

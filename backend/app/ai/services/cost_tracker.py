@@ -5,7 +5,7 @@ Tracks AI usage costs per tenant with configurable quotas and alerts
 
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from bson.decimal128 import Decimal128
 from pymongo import ReturnDocument
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -253,7 +253,12 @@ class CostTrackingService:
             )
 
         # Return the current quota document
-        return await self.get_quota(tenant_id)
+        result_quota = await self.get_quota(tenant_id)
+        if result_quota is None:
+            raise RuntimeError(
+                f"Failed to retrieve or create quota for tenant {tenant_id} after upsert operation"
+            )
+        return result_quota
 
     async def update_quota(
         self,
@@ -326,13 +331,12 @@ class CostTrackingService:
 
         # Reset daily usage if a new calendar day has started
         try:
-            last_daily = (
-                quota.last_daily_reset
-                if quota.last_daily_reset.tzinfo is not None
-                else quota.last_daily_reset.replace(tzinfo=timezone.utc)
-            )
-        except Exception:
-            last_daily = quota.last_daily_reset
+            if quota.last_daily_reset.tzinfo is None:
+                last_daily = quota.last_daily_reset.replace(tzinfo=timezone.utc)
+            else:
+                last_daily = quota.last_daily_reset
+        except (AttributeError, TypeError):
+            last_daily = quota.last_daily_reset.replace(tzinfo=timezone.utc)
 
         if now.date() != last_daily.astimezone(timezone.utc).date():
             updates["current_daily_usage"] = Decimal("0")
@@ -385,10 +389,23 @@ class CostTrackingService:
             return
 
         # Convert returned usage values into Decimal for threshold checks
+        raw_daily = updated.get("current_daily_usage")
+        raw_monthly = updated.get("current_monthly_usage")
         try:
-            new_daily_usage = Decimal(str(updated.get("current_daily_usage", 0)))
-            new_monthly_usage = Decimal(str(updated.get("current_monthly_usage", 0)))
-        except Exception:
+            new_daily_usage = (
+                Decimal(str(raw_daily)) if raw_daily is not None else Decimal("0")
+            )
+            new_monthly_usage = (
+                Decimal(str(raw_monthly)) if raw_monthly is not None else Decimal("0")
+            )
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            logger.exception(
+                "Failed to convert usage values to Decimal",
+                tenant_id=tenant_id,
+                raw_daily_usage=raw_daily,
+                raw_monthly_usage=raw_monthly,
+                exc_info=exc,
+            )
             new_daily_usage = Decimal("0")
             new_monthly_usage = Decimal("0")
 

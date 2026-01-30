@@ -134,6 +134,7 @@ export default function QuestionBankManager() {
     difficulty: string
     options: string[]
     correctAnswer: string
+    correctAnswerIndex: number
     explanation: string
     points: number
     tags: string
@@ -145,6 +146,7 @@ export default function QuestionBankManager() {
     difficulty: DIFFICULTIES.MEDIUM,
     options: ['', '', '', ''],
     correctAnswer: '',
+    correctAnswerIndex: -1,
     explanation: '',
     points: 1,
     tags: '',
@@ -164,6 +166,7 @@ export default function QuestionBankManager() {
       difficulty: DIFFICULTIES.MEDIUM,
       options: ['', '', '', ''],
       correctAnswer: '',
+      correctAnswerIndex: -1,
       explanation: '',
       points: 1,
       tags: '',
@@ -209,14 +212,21 @@ export default function QuestionBankManager() {
     const question = questions.find(q => q.id === id)
     if (question) {
       setSelectedQuestion(question)
+      const options = question.options?.length ? question.options : ['', '', '', '']
+      const correctAnswer = question.correctAnswer || ''
+      // Find index of correct answer in options for multiple choice
+      const correctAnswerIndex = question.type === QUESTION_TYPES.MULTIPLE_CHOICE
+        ? options.findIndex(opt => opt === correctAnswer)
+        : -1
       setFormData({
         text: question.text || '',
         subjectId: question.subjectId || '',
         topic: question.topic || '',
         type: question.type || QUESTION_TYPES.MULTIPLE_CHOICE,
         difficulty: question.difficulty || DIFFICULTIES.MEDIUM,
-        options: question.options?.length ? question.options : ['', '', '', ''],
-        correctAnswer: question.correctAnswer || '',
+        options: options,
+        correctAnswer: correctAnswer,
+        correctAnswerIndex: correctAnswerIndex >= 0 ? correctAnswerIndex : -1,
         explanation: question.explanation || '',
         points: question.points || 1,
         tags: question.tags?.join(', ') || '',
@@ -228,8 +238,29 @@ export default function QuestionBankManager() {
   const handleUpdateQuestion = async () => {
     if (!selectedQuestion) return
 
+    if (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE) {
+      const nonEmptyOptions = formData.options?.filter(o => o.trim()) || []
+      if (nonEmptyOptions.length < 2) {
+        toast.error('MCQ questions require at least 2 options')
+        return
+      }
+      if (formData.correctAnswerIndex < 0 || formData.correctAnswerIndex >= formData.options.length) {
+        toast.error('Please select a valid correct answer')
+        return
+      }
+      if (!formData.options[formData.correctAnswerIndex]?.trim()) {
+        toast.error('Selected correct answer cannot be empty')
+        return
+      }
+    }
+
     try {
       setIsSubmitting(true)
+      // Convert correctAnswerIndex to the actual option text for MCQ
+      const correctAnswerValue = formData.type === QUESTION_TYPES.MULTIPLE_CHOICE
+        ? formData.options[formData.correctAnswerIndex]
+        : formData.correctAnswer
+      
       const updateData = {
         question_text: formData.text,
         subject_id: formData.subjectId,
@@ -237,7 +268,7 @@ export default function QuestionBankManager() {
         question_type: formData.type,
         difficulty: formData.difficulty,
         options: formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.options.filter(o => o.trim()) : undefined,
-        correct_answer: formData.correctAnswer,
+        correct_answer: correctAnswerValue,
         explanation: formData.explanation,
         points: formData.points,
         tags: formData.tags.split(',').map(t => t.trim()).filter(t => t),
@@ -280,8 +311,29 @@ export default function QuestionBankManager() {
   }
 
   const handleCreateQuestion = async () => {
+    if (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE) {
+      const nonEmptyOptions = formData.options?.filter(o => o.trim()) || []
+      if (nonEmptyOptions.length < 2) {
+        toast.error('MCQ questions require at least 2 options')
+        return
+      }
+      if (formData.correctAnswerIndex < 0 || formData.correctAnswerIndex >= formData.options.length) {
+        toast.error('Please select a valid correct answer')
+        return
+      }
+      if (!formData.options[formData.correctAnswerIndex]?.trim()) {
+        toast.error('Selected correct answer cannot be empty')
+        return
+      }
+    }
+
     try {
       setIsSubmitting(true)
+      // Convert correctAnswerIndex to the actual option text for MCQ
+      const correctAnswerValue = formData.type === QUESTION_TYPES.MULTIPLE_CHOICE
+        ? formData.options[formData.correctAnswerIndex]
+        : formData.correctAnswer
+      
       const createData = {
         question_text: formData.text,
         subject_id: formData.subjectId,
@@ -289,7 +341,7 @@ export default function QuestionBankManager() {
         question_type: formData.type,
         difficulty: formData.difficulty,
         options: formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.options.filter(o => o.trim()) : undefined,
-        correct_answer: formData.correctAnswer,
+        correct_answer: correctAnswerValue,
         explanation: formData.explanation,
         points: formData.points,
         tags: formData.tags.split(',').map(t => t.trim()).filter(t => t),
@@ -331,7 +383,21 @@ export default function QuestionBankManager() {
   // Remove option
   const removeOption = (index: number) => {
     const newOptions = formData.options.filter((_, i) => i !== index)
-    setFormData({ ...formData, options: newOptions })
+    let newCorrectAnswerIndex = formData.correctAnswerIndex
+    
+    // If the removed option was selected, reset the correct answer
+    if (index === formData.correctAnswerIndex) {
+      newCorrectAnswerIndex = -1
+    } else if (index < formData.correctAnswerIndex) {
+      // If removed option was before the selected one, decrement the index
+      newCorrectAnswerIndex = formData.correctAnswerIndex - 1
+    }
+    
+    setFormData({ 
+      ...formData, 
+      options: newOptions,
+      correctAnswerIndex: newCorrectAnswerIndex
+    })
   }
 
   // Fetch questions function (extracted for reuse)
@@ -838,15 +904,20 @@ export default function QuestionBankManager() {
             <div>
               <Label htmlFor="edit-correct">Correct Answer *</Label>
               {formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? (
-                <Select value={formData.correctAnswer} onValueChange={(value) => setFormData({ ...formData, correctAnswer: value })}>
+                <Select 
+                  value={formData.correctAnswerIndex >= 0 ? formData.correctAnswerIndex.toString() : ''} 
+                  onValueChange={(value) => setFormData({ ...formData, correctAnswerIndex: parseInt(value) })}
+                >
                   <SelectTrigger id="edit-correct" className="mt-1">
                     <SelectValue placeholder="Select correct answer" />
                   </SelectTrigger>
                   <SelectContent>
-                    {formData.options.filter(o => o.trim()).map((option, idx) => (
-                      <SelectItem key={idx} value={option}>
-                        {String.fromCharCode(65 + idx)}. {option.substring(0, 50)}{option.length > 50 ? '...' : ''}
-                      </SelectItem>
+                    {formData.options.map((option, idx) => (
+                      option.trim() && (
+                        <SelectItem key={idx} value={idx.toString()}>
+                          {String.fromCharCode(65 + idx)}. {option.substring(0, 50)}{option.length > 50 ? '...' : ''}
+                        </SelectItem>
+                      )
                     ))}
                   </SelectContent>
                 </Select>
@@ -903,7 +974,7 @@ export default function QuestionBankManager() {
             </Button>
             <Button 
               onClick={handleUpdateQuestion} 
-              disabled={isSubmitting || !formData.text || !formData.subjectId || !formData.correctAnswer}
+              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer) || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE && (formData.options?.filter(o => o.trim()).length || 0) < 2)}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {isSubmitting ? 'Saving...' : 'Save Changes'}
@@ -1027,15 +1098,20 @@ export default function QuestionBankManager() {
             <div>
               <Label htmlFor="create-correct">Correct Answer *</Label>
               {formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? (
-                <Select value={formData.correctAnswer} onValueChange={(value) => setFormData({ ...formData, correctAnswer: value })}>
+                <Select 
+                  value={formData.correctAnswerIndex >= 0 ? formData.correctAnswerIndex.toString() : ''} 
+                  onValueChange={(value) => setFormData({ ...formData, correctAnswerIndex: parseInt(value) })}
+                >
                   <SelectTrigger id="create-correct" className="mt-1">
                     <SelectValue placeholder="Select correct answer" />
                   </SelectTrigger>
                   <SelectContent>
-                    {formData.options.filter(o => o.trim()).map((option, idx) => (
-                      <SelectItem key={idx} value={option}>
-                        {String.fromCharCode(65 + idx)}. {option.substring(0, 50)}{option.length > 50 ? '...' : ''}
-                      </SelectItem>
+                    {formData.options.map((option, idx) => (
+                      option.trim() && (
+                        <SelectItem key={idx} value={idx.toString()}>
+                          {String.fromCharCode(65 + idx)}. {option.substring(0, 50)}{option.length > 50 ? '...' : ''}
+                        </SelectItem>
+                      )
                     ))}
                   </SelectContent>
                 </Select>
@@ -1092,7 +1168,7 @@ export default function QuestionBankManager() {
             </Button>
             <Button 
               onClick={handleCreateQuestion} 
-              disabled={isSubmitting || !formData.text || !formData.subjectId || !formData.correctAnswer}
+              disabled={isSubmitting || !formData.text || !formData.subjectId || (formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.correctAnswerIndex < 0 : !formData.correctAnswer)}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {isSubmitting ? 'Creating...' : 'Create Question'}

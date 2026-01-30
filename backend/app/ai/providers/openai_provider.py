@@ -61,7 +61,10 @@ class OpenAIProvider(BaseAIProvider):
                 temperature=0.1,
             )
 
-            content_resp = getattr(response.choices[0].message, "content", None)
+            choices = getattr(response, "choices", None)
+            if not choices or len(choices) == 0:
+                return ""
+            content_resp = getattr(choices[0].message, "content", None)
             if content_resp is None:
                 return ""
             return content_resp.strip()
@@ -174,9 +177,9 @@ class OpenAIProvider(BaseAIProvider):
                     "OpenAI validation JSON parse error", error=str(je), exc_info=True
                 )
                 return {
-                    "quality_score": 10,
-                    "clarity_score": 10,
-                    "difficulty_score": 10,
+                    "quality_score": 5,
+                    "clarity_score": 5,
+                    "difficulty_score": 5,
                     "issues": ["Validation failed: invalid JSON response"],
                     "acceptable": False,
                 }
