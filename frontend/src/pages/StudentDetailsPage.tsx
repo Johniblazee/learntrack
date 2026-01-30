@@ -28,7 +28,15 @@ import {
   X,
   UserPlus,
   Mail,
-  Loader2
+  Loader2,
+  TrendingUp,
+  Target,
+  BookOpen,
+  Award,
+  BarChart3,
+  Activity,
+  GraduationCap,
+  User
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useApiClient } from '@/lib/api-client'
@@ -419,51 +427,142 @@ export default function StudentDetailsPage() {
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <h2 className="text-2xl font-bold mb-4">Student not found</h2>
-                <Button onClick={() => navigate('/dashboard/students')}>Back to Students</Button>
+                <Button
+                  onClick={() => navigate('/dashboard/students')}
+                  className="bg-[#C8A882] text-white hover:bg-[#B89872]"
+                >
+                  Back to Students
+                </Button>
               </div>
             </div>
           ) : (
             // Actual content
             <>
               {/* Header */}
-              <div className="mb-8">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16">
-                  {student.avatar ? (
-                    <AvatarImage src={student.avatar} alt={student.name} />
-                  ) : (
-                    <AvatarFallback className="bg-[#C8A882] text-white text-xl">
-                      {getInitials(student.name)}
-                    </AvatarFallback>
-                  )}
-                </Avatar>
-                <div>
-                  <h1 className="text-3xl font-bold text-white">{student.name}</h1>
-                  <p className="text-gray-400 mt-1">
-                    Joined: {format(new Date(student.joinedDate), 'MMMM dd, yyyy')}
-                  </p>
+              <div className="mb-6">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-4">
+                    <Avatar className="h-20 w-20 border-4 border-[#C8A882]/20">
+                      {student.avatar ? (
+                        <AvatarImage src={student.avatar} alt={student.name} />
+                      ) : (
+                        <AvatarFallback className="bg-gradient-to-br from-[#C8A882] to-[#B89872] text-white text-2xl font-semibold">
+                          {getInitials(student.name)}
+                        </AvatarFallback>
+                      )}
+                    </Avatar>
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <h1 className="text-3xl font-bold text-foreground">{student.name}</h1>
+                        <Badge variant="outline" className="border-[#C8A882] text-[#C8A882]">
+                          <GraduationCap className="h-3 w-3 mr-1" />
+                          {student.grade}
+                        </Badge>
+                      </div>
+                      <p className="text-muted-foreground mt-1 flex items-center gap-2">
+                        <Calendar className="h-4 w-4" />
+                        Joined {format(new Date(student.joinedDate), 'MMMM dd, yyyy')}
+                      </p>
+                      <p className="text-muted-foreground text-sm flex items-center gap-2 mt-1">
+                        <Mail className="h-3 w-3" />
+                        {student.email}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={handleSendMessage}
+                      className="border-[#C8A882] text-[#C8A882] hover:bg-[#C8A882] hover:text-white"
+                    >
+                      <MessageCircle className="h-4 w-4 mr-2" />
+                      Send Message
+                    </Button>
+                    <Button
+                      onClick={handleEditProfile}
+                      className="bg-[#C8A882] text-white hover:bg-[#B89872]"
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit Profile
+                    </Button>
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  onClick={handleSendMessage}
-                  className="border-[#C8A882] text-[#C8A882] hover:bg-[#C8A882] hover:text-white"
-                >
-                  <MessageCircle className="h-4 w-4 mr-2" />
-                  Send Message
-                </Button>
-                <Button
-                  onClick={handleEditProfile}
-                  className="bg-[#C8A882] text-white hover:bg-[#B89872]"
-                >
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit Profile
-                </Button>
+
+              {/* Stats Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <Card className="border-border bg-card hover:shadow-md transition-shadow">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Average Score</p>
+                        <p className="text-2xl font-bold text-foreground">{student.averageScore}%</p>
+                      </div>
+                      <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center">
+                        <TrendingUp className="h-6 w-6 text-green-500" />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center text-xs text-muted-foreground">
+                      <Award className="h-3 w-3 mr-1" />
+                      Based on completed assignments
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border bg-card hover:shadow-md transition-shadow">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Completion Rate</p>
+                        <p className="text-2xl font-bold text-foreground">{student.completionRate}%</p>
+                      </div>
+                      <div className="h-12 w-12 rounded-full bg-blue-500/10 flex items-center justify-center">
+                        <Target className="h-6 w-6 text-blue-500" />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center text-xs text-muted-foreground">
+                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                      {student.completedAssignments} of {student.totalAssignments} completed
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border bg-card hover:shadow-md transition-shadow">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Pending Tasks</p>
+                        <p className="text-2xl font-bold text-foreground">{pendingAssignments.length}</p>
+                      </div>
+                      <div className="h-12 w-12 rounded-full bg-orange-500/10 flex items-center justify-center">
+                        <Clock className="h-6 w-6 text-orange-500" />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center text-xs text-muted-foreground">
+                      <BookOpen className="h-3 w-3 mr-1" />
+                      Assignments awaiting completion
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border bg-card hover:shadow-md transition-shadow">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Active Groups</p>
+                        <p className="text-2xl font-bold text-foreground">{groups.length}</p>
+                      </div>
+                      <div className="h-12 w-12 rounded-full bg-purple-500/10 flex items-center justify-center">
+                        <Users className="h-6 w-6 text-purple-500" />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center text-xs text-muted-foreground">
+                      <Users className="h-3 w-3 mr-1" />
+                      Study groups enrolled
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-            </div>
-          </div>
 
           {/* Main Content Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -471,120 +570,138 @@ export default function StudentDetailsPage() {
             <div className="lg:col-span-2 space-y-6">
               {/* Academic Progress Summary */}
               <Card className="border-border bg-card">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Academic Progress Summary</CardTitle>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-foreground flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5 text-[#C8A882]" />
+                    Academic Progress
+                  </CardTitle>
+                  {progressData.length > 0 && (
+                    <Badge variant="outline" className="text-xs">
+                      Last {progressData.length} months
+                    </Badge>
+                  )}
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={progressData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis
-                        dataKey="month"
-                        className="text-muted-foreground"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                      />
-                      <YAxis
-                        className="text-muted-foreground"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                        domain={[60, 100]}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'hsl(var(--card))',
-                          border: '1px solid hsl(var(--border))',
-                          borderRadius: '8px',
-                          color: 'hsl(var(--foreground))'
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="score"
-                        stroke="#C8A882"
-                        strokeWidth={2}
-                        dot={{ fill: '#C8A882', r: 4 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  {progressData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <LineChart data={progressData}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis
+                          dataKey="month"
+                          className="text-muted-foreground"
+                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                        />
+                        <YAxis
+                          className="text-muted-foreground"
+                          tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                          domain={[0, 100]}
+                          tickFormatter={(value) => `${value}%`}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(var(--card))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px',
+                            color: 'hsl(var(--foreground))'
+                          }}
+                          formatter={(value: number) => [`${value}%`, 'Score']}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="score"
+                          stroke="#C8A882"
+                          strokeWidth={3}
+                          dot={{ fill: '#C8A882', r: 5, strokeWidth: 2, stroke: '#fff' }}
+                          activeDot={{ r: 7, stroke: '#C8A882', strokeWidth: 2 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <div className="h-16 w-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                        <BarChart3 className="h-8 w-8 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-foreground font-medium mb-1">No Progress Data Yet</h3>
+                      <p className="text-muted-foreground text-sm max-w-xs">
+                        Progress data will appear here once the student completes assignments.
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
               {/* Recent Activity */}
               <Card className="border-border bg-card">
                 <CardHeader>
-                  <CardTitle className="text-foreground">Recent Activity</CardTitle>
+                  <CardTitle className="text-foreground flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-blue-500" />
+                    Recent Activity
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {activities.length > 0 ? (
-                      activities.map((activity) => (
-                        <div key={activity.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border border-border">
-                          {activity.type === 'completed' ? (
-                            <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
-                          ) : (
-                            <FileText className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
-                          )}
+                  {activities.length > 0 ? (
+                    <div className="space-y-3">
+                      {activities.map((activity) => (
+                        <div key={activity.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border border-border hover:bg-muted/70 transition-colors">
+                          <div className={`h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            activity.type === 'completed' ? 'bg-green-500/10' : 'bg-blue-500/10'
+                          }`}>
+                            {activity.type === 'completed' ? (
+                              <CheckCircle2 className="h-5 w-5 text-green-500" />
+                            ) : (
+                              <FileText className="h-5 w-5 text-blue-500" />
+                            )}
+                          </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-foreground font-medium">
-                              {activity.type === 'completed' ? 'Completed Assignment: ' : 'Submitted: '}
-                              "{activity.title}"
+                              {activity.type === 'completed' ? 'Completed: ' : 'Submitted: '}
+                              {activity.title}
                             </p>
-                            <p className="text-muted-foreground text-sm">
-                              {format(new Date(activity.timestamp), 'PPp')}
-                              {activity.score && ` · Score: ${activity.score}`}
-                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <p className="text-muted-foreground text-sm">
+                                {format(new Date(activity.timestamp), 'PPp')}
+                              </p>
+                              {activity.score && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Score: {activity.score}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      <p className="text-muted-foreground text-center py-8">No recent activity</p>
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <div className="h-16 w-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                        <Activity className="h-8 w-8 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-foreground font-medium mb-1">No Recent Activity</h3>
+                      <p className="text-muted-foreground text-sm max-w-xs">
+                        Activity will appear here when the student starts working on assignments.
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
 
-            {/* Right Column - Personal Info & Assignments */}
+            {/* Right Column - Parent Management & Assignments */}
             <div className="space-y-6">
-              {/* Personal Information */}
-              <Card className="border-border bg-card">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Personal Information</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <p className="text-muted-foreground text-sm">Full Name:</p>
-                    <p className="text-foreground font-medium">{student.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-sm">Student ID:</p>
-                    <p className="text-foreground font-medium">{student.studentId}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-sm">Email:</p>
-                    <p className="text-foreground font-medium break-all">{student.email}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-sm">Grade Level:</p>
-                    <p className="text-foreground font-medium">{student.grade}</p>
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Parent Management */}
               <Card className="border-border bg-card">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-foreground flex items-center gap-2">
-                    <LinkIcon className="h-5 w-5" />
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <CardTitle className="text-foreground flex items-center gap-2 text-base">
+                    <Users className="h-5 w-5 text-[#C8A882]" />
                     Linked Parents
                   </CardTitle>
                   <Button
                     size="sm"
                     onClick={() => setLinkParentModalOpen(true)}
-                    className="bg-[#C8A882] text-white hover:bg-[#B89872]"
+                    className="bg-[#C8A882] text-white hover:bg-[#B89872] h-8"
                   >
                     <UserPlus className="h-4 w-4 mr-1" />
-                    Link Parent
+                    Link
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -592,21 +709,23 @@ export default function StudentDetailsPage() {
                     linkedParents.map((parent) => (
                       <div
                         key={parent.id}
-                        className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border"
+                        className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border hover:bg-muted/70 transition-colors"
                       >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-foreground font-medium text-sm">{parent.name}</p>
-                          <p className="text-muted-foreground text-xs flex items-center gap-1">
-                            <Mail className="h-3 w-3" />
-                            {parent.email}
-                          </p>
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="h-9 w-9 rounded-full bg-[#C8A882]/10 flex items-center justify-center flex-shrink-0">
+                            <User className="h-4 w-4 text-[#C8A882]" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-foreground font-medium text-sm truncate">{parent.name}</p>
+                            <p className="text-muted-foreground text-xs truncate">{parent.email}</p>
+                          </div>
                         </div>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleUnlinkParent(parent.id)}
                           disabled={unlinkingParentId === parent.id}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10 ml-2"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8 p-0"
                         >
                           {unlinkingParentId === parent.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -617,87 +736,124 @@ export default function StudentDetailsPage() {
                       </div>
                     ))
                   ) : (
-                    <p className="text-muted-foreground text-sm text-center py-4">
-                      No parents linked to this student
-                    </p>
+                    <div className="flex flex-col items-center justify-center py-6 text-center">
+                      <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
+                        <Users className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                      <p className="text-muted-foreground text-sm">No parents linked yet</p>
+                      <p className="text-muted-foreground text-xs mt-1">
+                        Click "Link" to add a parent
+                      </p>
+                    </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Assignments & Groups */}
+              {/* Pending Assignments */}
               <Card className="border-border bg-card">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Assignments & Groups</CardTitle>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-foreground flex items-center gap-2 text-base">
+                    <Clock className="h-5 w-5 text-orange-500" />
+                    Pending Assignments
+                    {pendingAssignments.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto text-xs">
+                        {pendingAssignments.length}
+                      </Badge>
+                    )}
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Pending Assignments */}
-                  <div>
-                    <h3 className="text-foreground font-semibold mb-3 flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      Pending Assignments ({pendingAssignments.length})
-                    </h3>
-                    <div className="space-y-3">
-                      {pendingAssignments.length > 0 ? (
-                        pendingAssignments.map((assignment) => {
-                          const dueDate = new Date(assignment.dueDate)
-                          const now = new Date()
-                          const diffMs = dueDate.getTime() - now.getTime()
-                          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
-
-                          let dueDateText = ''
-                          let dueDateColor = 'text-muted-foreground'
-
-                          if (diffDays === 0) {
-                            dueDateText = 'Due Today'
-                            dueDateColor = 'text-orange-500'
-                          } else if (diffDays === 1) {
-                            dueDateText = 'Due Tomorrow'
-                            dueDateColor = 'text-red-500'
-                          } else if (diffDays > 1) {
-                            dueDateText = `Due in ${diffDays} days`
-                            dueDateColor = 'text-muted-foreground'
-                          } else {
-                            dueDateText = 'Overdue'
-                            dueDateColor = 'text-red-500'
-                          }
-
-                          return (
-                            <div key={assignment.id} className="flex items-start justify-between p-3 rounded-lg bg-muted/50 border border-border">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-foreground font-medium text-sm">{assignment.title}</p>
-                                <p className="text-muted-foreground text-xs">{assignment.subject}</p>
-                              </div>
-                              <Badge variant="outline" className={`text-xs ${dueDateColor} ml-2 flex-shrink-0`}>
-                                {dueDateText}
-                              </Badge>
-                            </div>
-                          )
-                        })
-                      ) : (
-                        <p className="text-muted-foreground text-sm text-center py-4">No pending assignments</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Active Groups */}
-                  <div>
-                    <h3 className="text-foreground font-semibold mb-3 flex items-center gap-2">
-                      <Users className="h-4 w-4" />
-                      Active Groups ({groups.length})
-                    </h3>
+                <CardContent>
+                  {pendingAssignments.length > 0 ? (
                     <div className="space-y-2">
-                      {groups.length > 0 ? (
-                        groups.map((group) => (
-                          <div key={group.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50 border border-border">
-                            <Users className="h-4 w-4 text-[#C8A882] flex-shrink-0" />
-                            <p className="text-foreground text-sm">{group.name}</p>
+                      {pendingAssignments.slice(0, 5).map((assignment) => {
+                        const dueDate = new Date(assignment.dueDate)
+                        const now = new Date()
+                        const diffMs = dueDate.getTime() - now.getTime()
+                        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+
+                        let dueDateText = ''
+                        let dueDateColor = 'text-muted-foreground'
+                        let badgeVariant: 'outline' | 'destructive' | 'secondary' = 'outline'
+
+                        if (diffDays < 0) {
+                          dueDateText = 'Overdue'
+                          dueDateColor = 'text-red-500'
+                          badgeVariant = 'destructive'
+                        } else if (diffDays === 0) {
+                          dueDateText = 'Today'
+                          dueDateColor = 'text-orange-500'
+                        } else if (diffDays === 1) {
+                          dueDateText = 'Tomorrow'
+                          dueDateColor = 'text-orange-500'
+                        } else {
+                          dueDateText = `${diffDays}d`
+                        }
+
+                        return (
+                          <div key={assignment.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-muted/50 border border-border hover:bg-muted/70 transition-colors">
+                            <div className="h-8 w-8 rounded-full bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+                              <BookOpen className="h-4 w-4 text-orange-500" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-foreground font-medium text-sm truncate">{assignment.title}</p>
+                              <p className="text-muted-foreground text-xs truncate">{assignment.subject}</p>
+                            </div>
+                            <Badge variant={badgeVariant} className={`text-xs ${dueDateColor} flex-shrink-0`}>
+                              {dueDateText}
+                            </Badge>
                           </div>
-                        ))
-                      ) : (
-                        <p className="text-muted-foreground text-sm text-center py-4">No active groups</p>
+                        )
+                      })}
+                      {pendingAssignments.length > 5 && (
+                        <p className="text-muted-foreground text-xs text-center pt-2">
+                          +{pendingAssignments.length - 5} more assignments
+                        </p>
                       )}
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-6 text-center">
+                      <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center mb-2">
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                      </div>
+                      <p className="text-muted-foreground text-sm">All caught up!</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Active Groups */}
+              <Card className="border-border bg-card">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-foreground flex items-center gap-2 text-base">
+                    <Users className="h-5 w-5 text-purple-500" />
+                    Study Groups
+                    {groups.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto text-xs">
+                        {groups.length}
+                      </Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {groups.length > 0 ? (
+                    <div className="space-y-2">
+                      {groups.map((group) => (
+                        <div key={group.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-muted/50 border border-border hover:bg-muted/70 transition-colors">
+                          <div className="h-8 w-8 rounded-full bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                            <Users className="h-4 w-4 text-purple-500" />
+                          </div>
+                          <p className="text-foreground text-sm font-medium">{group.name}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-6 text-center">
+                      <div className="h-10 w-10 rounded-full bg-muted/50 flex items-center justify-center mb-2">
+                        <Users className="h-5 w-5 text-muted-foreground" />
+                      </div>
+                      <p className="text-muted-foreground text-sm">No groups yet</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -802,13 +958,14 @@ export default function StudentDetailsPage() {
                 variant="outline"
                 onClick={() => setLinkParentModalOpen(false)}
                 disabled={linkingParent}
+                className="border-[#C8A882] text-[#C8A882] hover:bg-[#C8A882] hover:text-white"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={linkingParent || !parentEmail.trim() || !parentName.trim()}
-                className="bg-[#C8A882] text-white hover:bg-[#B89872]"
+                className="bg-[#C8A882] text-white hover:bg-[#B89872] disabled:bg-[#C8A882]/50"
               >
                 {linkingParent ? (
                   <>
