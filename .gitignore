@@ -64,6 +64,7 @@ tests/
 docs/
 scripts/
 notebooks/
+test_reports/
 
 # Agent guidelines (local file)
 AGENTS.md
