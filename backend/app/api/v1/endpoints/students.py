@@ -220,7 +220,7 @@ async def delete_student(
 
 # ============ Parent-Student Relationship Management ============
 
-@router.get("/{student_clerk_id}/parents")
+@router.get("/{student_clerk_id}/parents", response_model=List[User])
 async def get_student_parents(
     student_clerk_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
@@ -248,7 +248,8 @@ async def get_student_parents(
         })
         parents = await parent_cursor.to_list(length=50)
 
-        return parents
+        # Convert to Pydantic models for proper ObjectId serialization
+        return [User(**parent) for parent in parents]
     except HTTPException:
         raise
     except Exception as e:
