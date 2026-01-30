@@ -187,27 +187,31 @@ class CostTrackingService:
         self, provider: str, model: str, tokens: int, token_type: str
     ) -> Decimal:
         """Calculate cost for given tokens"""
-            provider_costs = MODEL_COSTS.get(provider)
-            if provider_costs is None:
-                logger.warning("Unknown provider in cost calculation", provider=provider, model=model)
-                return Decimal("0")
+        provider_costs = MODEL_COSTS.get(provider)
+        if provider_costs is None:
+            logger.warning(
+                "Unknown provider in cost calculation", provider=provider, model=model
+            )
+            return Decimal("0")
 
-            model_costs = provider_costs.get(model)
-            if model_costs is None:
-                logger.warning("Unknown model in cost calculation", provider=provider, model=model)
-                return Decimal("0")
+        model_costs = provider_costs.get(model)
+        if model_costs is None:
+            logger.warning(
+                "Unknown model in cost calculation", provider=provider, model=model
+            )
+            return Decimal("0")
 
-            cost_per_token = model_costs.get(token_type, Decimal("0"))
+        cost_per_token = model_costs.get(token_type, Decimal("0"))
 
-            # Convert to cost per token (costs may be stored per 1K or 1M tokens depending on provider)
-            if provider in ["openai", "anthropic", "groq"]:
-                # Costs are per 1K tokens
-                cost_per_token = cost_per_token / Decimal("1000")
-            elif provider == "gemini":
-                # Costs are per 1M tokens
-                cost_per_token = cost_per_token / Decimal("1000000")
+        # Convert to cost per token (costs may be stored per 1K or 1M tokens depending on provider)
+        if provider in ["openai", "anthropic", "groq"]:
+            # Costs are per 1K tokens
+            cost_per_token = cost_per_token / Decimal("1000")
+        elif provider == "gemini":
+            # Costs are per 1M tokens
+            cost_per_token = cost_per_token / Decimal("1000000")
 
-            return cost_per_token * Decimal(str(tokens))
+        return cost_per_token * Decimal(str(tokens))
 
     async def get_quota(self, tenant_id: str) -> Optional[CostQuota]:
         """Get quota configuration for tenant"""
@@ -251,7 +255,9 @@ class CostTrackingService:
         if result.upserted_id:
             logger.info("Created default quota", tenant_id=tenant_id, tier=tier)
         else:
-            logger.debug("Default quota already exists, returning existing", tenant_id=tenant_id)
+            logger.debug(
+                "Default quota already exists, returning existing", tenant_id=tenant_id
+            )
 
         # Return the current quota document
         return await self.get_quota(tenant_id)
@@ -371,7 +377,12 @@ class CostTrackingService:
 
         updated = await self.quota_collection.find_one_and_update(
             {"tenant_id": tenant_id},
-            {"$inc": {"current_daily_usage": inc_value, "current_monthly_usage": inc_value}},
+            {
+                "$inc": {
+                    "current_daily_usage": inc_value,
+                    "current_monthly_usage": inc_value,
+                }
+            },
             return_document=ReturnDocument.AFTER,
         )
 
@@ -585,12 +596,16 @@ class CostTrackingService:
 
         return alerts
 
-    async def dismiss_alert(self, alert_id: str, tenant_id: Optional[str] = None) -> bool:
+    async def dismiss_alert(
+        self, alert_id: str, tenant_id: Optional[str] = None
+    ) -> bool:
         """Dismiss a cost alert. Optionally validate tenant ownership."""
         try:
             oid = ObjectId(alert_id)
         except Exception:
-            logger.warning("Invalid alert_id passed to dismiss_alert", alert_id=alert_id)
+            logger.warning(
+                "Invalid alert_id passed to dismiss_alert", alert_id=alert_id
+            )
             return False
 
         query = {"_id": oid}
