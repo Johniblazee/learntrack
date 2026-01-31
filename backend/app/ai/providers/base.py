@@ -63,7 +63,7 @@ class BaseAIProvider(ABC):
         """
         if not text:
             return text
-        # Strip/escape common directive patterns
+        # Strip/escape common directive patterns (case-insensitive)
         dangerous_patterns = [
             "ignore previous instructions",
             "ignore all previous instructions",
@@ -74,10 +74,11 @@ class BaseAIProvider(ABC):
             "you are now",
             "role:",
         ]
-        lower_text = text.lower()
+        import re
+
         for pattern in dangerous_patterns:
-            lower_text = lower_text.replace(pattern, "[FILTERED]")
-        return lower_text
+            text = re.sub(pattern, "[FILTERED]", text, flags=re.IGNORECASE)
+        return text
 
     def _build_question_prompt(
         self,

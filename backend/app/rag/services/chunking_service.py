@@ -181,17 +181,36 @@ class ChunkingService:
                 # Chunk already has source info from the chunking process
                 pass
             elif original_documents:
-                # Try to get source info from chunk's metadata or fallback
-                chunk.metadata.update(
-                    {
-                        "source_document_id": chunk.metadata.get("source_document_id")
-                        or chunk.metadata.get("id"),
-                        "source_filename": chunk.metadata.get("filename")
-                        or chunk.metadata.get("source_file"),
-                        "source_filetype": chunk.metadata.get("filetype")
-                        or chunk.metadata.get("file_extension"),
-                    }
-                )
+                # Look up the original document using chunk's identifier
+                source_id = chunk.metadata.get(
+                    "source_document_id"
+                ) or chunk.metadata.get("id")
+                if source_id and source_id in original_documents:
+                    doc = original_documents[source_id]
+                    # Use document metadata when chunk metadata lacks values
+                    chunk.metadata.update(
+                        {
+                            "source_document_id": source_id,
+                            "source_filename": chunk.metadata.get("filename")
+                            or chunk.metadata.get("source_file")
+                            or doc.metadata.get("filename"),
+                            "source_filetype": chunk.metadata.get("filetype")
+                            or chunk.metadata.get("file_extension")
+                            or doc.metadata.get("file_extension")
+                            or doc.metadata.get("filetype"),
+                        }
+                    )
+                else:
+                    # Fallback to chunk metadata only
+                    chunk.metadata.update(
+                        {
+                            "source_document_id": source_id,
+                            "source_filename": chunk.metadata.get("filename")
+                            or chunk.metadata.get("source_file"),
+                            "source_filetype": chunk.metadata.get("filetype")
+                            or chunk.metadata.get("file_extension"),
+                        }
+                    )
 
         return chunks
 

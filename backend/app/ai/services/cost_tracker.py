@@ -201,11 +201,12 @@ class CostTrackingService:
 
     def _safe_enum_convert(self, enum_class, value: str, default):
         """Safely convert string to enum value with fallback to default"""
-        if value in enum_class.__members__.values():
-            try:
-                return enum_class(value)
-            except ValueError:
-                pass
+        if value in enum_class.__members__:
+            return enum_class[value]
+        try:
+            return enum_class(value)
+        except ValueError:
+            pass
         logger.warning(
             f"Invalid {enum_class.__name__} value: {value}, using default",
             value=value,
@@ -427,6 +428,7 @@ class CostTrackingService:
 
         # Atomically reset (if needed) and increment to avoid race conditions
         # Use aggregation pipeline to conditionally reset counters before incrementing
+        # Reference document fields directly to avoid stale reads during find_one_and_update
         pipeline = [
             {
                 "$set": {
@@ -437,7 +439,7 @@ class CostTrackingService:
                                     {
                                         "$dateToString": {
                                             "format": "%Y-%m-%d",
-                                            "date": last_daily_reset_ts,
+                                            "date": "$last_daily_reset",
                                         }
                                     },
                                     {
@@ -458,13 +460,13 @@ class CostTrackingService:
                                 "$or": [
                                     {
                                         "$ne": [
-                                            {"$year": last_monthly_reset_ts},
+                                            {"$year": "$last_monthly_reset"},
                                             {"$year": now},
                                         ]
                                     },
                                     {
                                         "$ne": [
-                                            {"$month": last_monthly_reset_ts},
+                                            {"$month": "$last_monthly_reset"},
                                             {"$month": now},
                                         ]
                                     },
@@ -481,7 +483,7 @@ class CostTrackingService:
                                     {
                                         "$dateToString": {
                                             "format": "%Y-%m-%d",
-                                            "date": last_daily_reset_ts,
+                                            "date": "$last_daily_reset",
                                         }
                                     },
                                     {
@@ -502,13 +504,13 @@ class CostTrackingService:
                                 "$or": [
                                     {
                                         "$ne": [
-                                            {"$year": last_monthly_reset_ts},
+                                            {"$year": "$last_monthly_reset"},
                                             {"$year": now},
                                         ]
                                     },
                                     {
                                         "$ne": [
-                                            {"$month": last_monthly_reset_ts},
+                                            {"$month": "$last_monthly_reset"},
                                             {"$month": now},
                                         ]
                                     },

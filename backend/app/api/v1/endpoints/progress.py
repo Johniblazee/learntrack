@@ -268,6 +268,45 @@ async def get_student_assignment_progress(
 ):
     """Get specific student's progress on an assignment"""
     try:
+        from app.services.user_service import UserService
+        from app.models.user import UserRole
+
+        user_service = UserService(database)
+
+        # Get the student for authorization check
+        student = await user_service.get_user_by_clerk_id(student_id)
+        if not student or student.role != UserRole.STUDENT:
+            raise HTTPException(status_code=404, detail="Student not found")
+
+        # Authorization check - same logic as get_student_progress_analytics_by_id
+        if current_user.is_super_admin:
+            pass  # Super admins can view any student
+        elif current_user.role == UserRole.TUTOR:
+            # Tutors can view their students
+            if student.tutor_id != current_user.clerk_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access forbidden: Student does not belong to your tenant",
+                )
+        elif current_user.role == UserRole.STUDENT:
+            # Students can only view themselves
+            if student_id != current_user.clerk_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access forbidden: You can only view your own progress",
+                )
+        elif current_user.role == UserRole.PARENT:
+            # Parents can view their children
+            if student_id not in (current_user.student_ids or []):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access forbidden: This student is not your child",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Access forbidden"
+            )
+
         progress_service = ProgressService(database)
         progress = await progress_service.get_student_assignment_progress(
             student_id, assignment_id
@@ -281,6 +320,8 @@ async def get_student_assignment_progress(
                 )
             )
         return progress
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to get student assignment progress", error=str(e))
         raise HTTPException(

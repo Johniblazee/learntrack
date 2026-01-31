@@ -27,9 +27,6 @@ from .embedding_service import EmbeddingService
 
 logger = structlog.get_logger()
 
-# Global lock for retrieval service singleton creation
-_retrieval_service_lock = asyncio.Lock()
-
 
 class RetrievalService:
     """
@@ -57,6 +54,7 @@ class RetrievalService:
         self._qdrant_client = None
         self._vectorstore = None
         self._qdrant_client_lock = asyncio.Lock()
+        self._vectorstore_lock = asyncio.Lock()
 
         logger.info(
             "Initialized RetrievalService",
@@ -107,17 +105,19 @@ class RetrievalService:
         return self._vectorstore
 
     async def get_vectorstore(self) -> Qdrant:
-        """Async initialization of LangChain Qdrant vectorstore"""
+        """Async initialization of LangChain Qdrant vectorstore (async thread-safe)"""
         if self._vectorstore is None:
-            client = await self.get_qdrant_client()
-            self._vectorstore = Qdrant(
-                client=client,
-                collection_name=self.collection_name,
-                embeddings=self.embedding_service.embeddings,
-            )
+            async with self._vectorstore_lock:
+                if self._vectorstore is None:
+                    client = await self.get_qdrant_client()
+                    self._vectorstore = Qdrant(
+                        client=client,
+                        collection_name=self.collection_name,
+                        embeddings=self.embedding_service.embeddings,
+                    )
 
-            # Create collection if it doesn't exist
-            await self._ensure_collection_exists_async()
+                    # Create collection if it doesn't exist
+                    await self._ensure_collection_exists_async()
 
         return self._vectorstore
 
@@ -179,6 +179,9 @@ class RetrievalService:
             return []
 
         try:
+            # Get async-initialized vectorstore
+            vectorstore = await self.get_vectorstore()
+
             # Process in batches to avoid memory issues
             all_ids = []
             for i in range(0, len(documents), batch_size):
@@ -195,7 +198,7 @@ class RetrievalService:
                         doc.metadata["id"] = f"doc_{digest[:32]}"
 
                 # Use LangChain's optimized document addition
-                ids = await self.vectorstore.aadd_documents(batch, **kwargs)
+                ids = await vectorstore.aadd_documents(batch, **kwargs)
                 all_ids.extend(ids)
 
                 logger.debug(

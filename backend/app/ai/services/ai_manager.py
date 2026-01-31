@@ -498,12 +498,15 @@ async def get_ai_manager_for_tenant(
         # Check if another coroutine is already creating the manager for this tenant
         creation_future = _tenant_creation_futures.get(tenant_id)
         if creation_future is not None:
-            # Another coroutine is creating it, await the result
-            async with _tenant_cache_lock:
-                pass  # Release lock while awaiting
-            return await creation_future
+            # Release lock before awaiting to avoid deadlock
+            future_to_await = creation_future
+
+    # If another coroutine is creating it, await the result outside the lock
+    if creation_future is not None:
+        return await future_to_await
 
     # We are the first caller - create a future to signal other coroutines
+    future = None
     async with _tenant_cache_lock:
         # Double-check after acquiring lock
         existing = _tenant_ai_managers.get(tenant_id)
@@ -513,40 +516,42 @@ async def get_ai_manager_for_tenant(
 
         # Check again for creation future (race condition check)
         if tenant_id in _tenant_creation_futures:
-            future = _tenant_creation_futures[tenant_id]
-            async with _tenant_cache_lock:
-                pass  # Release lock while awaiting
-            return await future
+            future_to_await = _tenant_creation_futures[tenant_id]
+            return await future_to_await
 
         # Create the future to block other coroutines
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         _tenant_creation_futures[tenant_id] = future
 
+    # Create new manager outside the lock to avoid I/O contention
     try:
-        # Create new manager outside the lock to avoid I/O contention
         new_mgr = AIManager(tenant_config=tenant_config)
-
-        # Store the result
-        async with _tenant_cache_lock:
-            existing = _tenant_ai_managers.get(tenant_id)
-            if existing:
-                if tenant_config and existing.tenant_config != tenant_config:
-                    # Replace with new manager since config differs
-                    _tenant_ai_managers[tenant_id] = new_mgr
-                    future.set_result(new_mgr)
-                    return new_mgr
-                # Another coroutine already created it with same config, use existing
-                future.set_result(existing)
-                return existing
-
-            # Store and return new manager
-            _tenant_ai_managers[tenant_id] = new_mgr
-            future.set_result(new_mgr)
-            return new_mgr
+    except Exception as err:
+        # Signal failure to waiting coroutines
+        future.set_exception(err)
+        raise
     finally:
         # Clean up the creation future
         async with _tenant_cache_lock:
             _tenant_creation_futures.pop(tenant_id, None)
+
+    # Store the result
+    async with _tenant_cache_lock:
+        existing = _tenant_ai_managers.get(tenant_id)
+        if existing:
+            if tenant_config and existing.tenant_config != tenant_config:
+                # Replace with new manager since config differs
+                _tenant_ai_managers[tenant_id] = new_mgr
+                future.set_result(new_mgr)
+                return new_mgr
+            # Another coroutine already created it with same config, use existing
+            future.set_result(existing)
+            return existing
+
+        # Store and return new manager
+        _tenant_ai_managers[tenant_id] = new_mgr
+        future.set_result(new_mgr)
+        return new_mgr
 
 
 def create_ai_manager(
