@@ -1,6 +1,7 @@
 """
 Invitation service for managing user invitations
 """
+
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
@@ -16,7 +17,7 @@ from app.models.invitation import (
     InvitationRole,
     InvitationVerifyResponse,
     InvitationListResponse,
-    InvitationStats
+    InvitationStats,
 )
 from app.models.user import UserRole, UserCreate, User
 from app.core.exceptions import NotFoundError, ValidationError, DatabaseException
@@ -51,29 +52,38 @@ class InvitationService:
         return secrets.token_urlsafe(32)
 
     async def create_invitation(
-        self,
-        invitation_data: InvitationCreate,
-        tutor_id: str
+        self, invitation_data: InvitationCreate, tutor_id: str
     ) -> Invitation:
         """Create a new invitation"""
         try:
             # Check if user with this email already exists
-            existing_user = await self.user_service.get_user_by_email(invitation_data.invitee_email)
+            existing_user = await self.user_service.get_user_by_email(
+                invitation_data.invitee_email
+            )
             if existing_user:
-                raise ValidationError(f"User with email {invitation_data.invitee_email} already exists")
+                raise ValidationError(
+                    f"User with email {invitation_data.invitee_email} already exists"
+                )
 
             # Check for existing pending invitation
-            existing_invitation = await self.collection.find_one({
-                "invitee_email": invitation_data.invitee_email,
-                "tutor_id": tutor_id,
-                "status": InvitationStatus.PENDING.value
-            })
-            
+            existing_invitation = await self.collection.find_one(
+                {
+                    "invitee_email": invitation_data.invitee_email,
+                    "tutor_id": tutor_id,
+                    "status": InvitationStatus.PENDING.value,
+                }
+            )
+
             if existing_invitation:
-                raise ValidationError(f"Pending invitation already exists for {invitation_data.invitee_email}")
+                raise ValidationError(
+                    f"Pending invitation already exists for {invitation_data.invitee_email}"
+                )
 
             # Validate student_ids for parent invitations
-            if invitation_data.role == InvitationRole.PARENT and invitation_data.student_ids:
+            if (
+                invitation_data.role == InvitationRole.PARENT
+                and invitation_data.student_ids
+            ):
                 for student_id in invitation_data.student_ids:
                     student = await self.user_service.get_user_by_clerk_id(student_id)
                     if not student:
@@ -82,23 +92,28 @@ class InvitationService:
                         raise ValidationError(f"User {student_id} is not a student")
                     # Verify student belongs to this tutor
                     if student.tutor_id != tutor_id:
-                        raise ValidationError(f"Student {student_id} does not belong to this tutor")
+                        raise ValidationError(
+                            f"Student {student_id} does not belong to this tutor"
+                        )
 
             # Create invitation
             token = self._generate_token()
             now = datetime.now(timezone.utc)
-            expires_at = now + timedelta(days=7)  # 7 days expiration
+            expires_at = now + timedelta(days=14)  # 2 weeks expiration
 
             invitation_dict = invitation_data.model_dump()
-            invitation_dict.update({
-                "tutor_id": tutor_id,
-                "token": token,
-                "status": InvitationStatus.PENDING.value,
-                "created_at": now,
-                "expires_at": expires_at,
-                "accepted_at": None,
-                "revoked_at": None
-            })
+            invitation_dict.update(
+                {
+                    "tutor_id": tutor_id,
+                    "token": token,
+                    "status": InvitationStatus.PENDING.value,
+                    "created_at": now,
+                    "expires_at": expires_at,
+                    "accepted_at": None,
+                    "revoked_at": None,
+                    "rejected_at": None,
+                }
+            )
 
             result = await self.collection.insert_one(invitation_dict)
             invitation_dict["_id"] = result.inserted_id
@@ -108,7 +123,7 @@ class InvitationService:
                 invitation_id=str(result.inserted_id),
                 tutor_id=tutor_id,
                 invitee_email=invitation_data.invitee_email,
-                role=invitation_data.role
+                role=invitation_data.role,
             )
 
             # Send invitation email
@@ -124,13 +139,13 @@ class InvitationService:
                     to_name=invitation_data.invitee_name or "there",
                     from_name=tutor_name,
                     role=invitation_data.role.value,
-                    invitation_link=invitation_link
+                    invitation_link=invitation_link,
                 )
             except Exception as e:
                 logger.warning(
                     "Failed to send invitation email",
                     error=str(e),
-                    invitee_email=invitation_data.invitee_email
+                    invitee_email=invitation_data.invitee_email,
                 )
 
             return self._to_invitation_model(invitation_dict)
@@ -157,22 +172,19 @@ class InvitationService:
 
             if not invitation:
                 return InvitationVerifyResponse(
-                    valid=False,
-                    error="Invitation not found"
+                    valid=False, error="Invitation not found"
                 )
 
             # Check if already accepted
             if invitation.status == InvitationStatus.ACCEPTED:
                 return InvitationVerifyResponse(
-                    valid=False,
-                    error="Invitation has already been accepted"
+                    valid=False, error="Invitation has already been accepted"
                 )
 
             # Check if revoked
             if invitation.status == InvitationStatus.REVOKED:
                 return InvitationVerifyResponse(
-                    valid=False,
-                    error="Invitation has been revoked"
+                    valid=False, error="Invitation has been revoked"
                 )
 
             # Check if expired
@@ -180,28 +192,26 @@ class InvitationService:
                 # Update status to expired
                 await self.collection.update_one(
                     {"token": token},
-                    {"$set": {"status": InvitationStatus.EXPIRED.value}}
+                    {"$set": {"status": InvitationStatus.EXPIRED.value}},
                 )
                 return InvitationVerifyResponse(
-                    valid=False,
-                    error="Invitation has expired"
+                    valid=False, error="Invitation has expired"
                 )
 
             # Get tutor info
             tutor = await self.user_service.get_user_by_clerk_id(invitation.tutor_id)
-            
+
             return InvitationVerifyResponse(
                 valid=True,
                 invitation=invitation,
                 tutor_name=tutor.name if tutor else "Unknown",
-                tutor_email=tutor.email if tutor else None
+                tutor_email=tutor.email if tutor else None,
             )
 
         except Exception as e:
             logger.error("Failed to verify invitation", error=str(e))
             return InvitationVerifyResponse(
-                valid=False,
-                error="Failed to verify invitation"
+                valid=False, error="Failed to verify invitation"
             )
 
     async def accept_invitation(
@@ -210,7 +220,7 @@ class InvitationService:
         clerk_id: str,
         email: str,
         name: str,
-        selected_student_ids: Optional[List[str]] = None
+        selected_student_ids: Optional[List[str]] = None,
     ) -> User:
         """Accept an invitation and create user account"""
         try:
@@ -228,7 +238,11 @@ class InvitationService:
                 raise ValidationError("Email does not match invitation")
 
             # Determine role
-            user_role = UserRole.STUDENT if invitation.role == InvitationRole.STUDENT else UserRole.PARENT
+            user_role = (
+                UserRole.STUDENT
+                if invitation.role == InvitationRole.STUDENT
+                else UserRole.PARENT
+            )
 
             # Create user
             user_data = UserCreate(
@@ -237,7 +251,7 @@ class InvitationService:
                 name=name,
                 role=user_role,
                 tutor_id=invitation.tutor_id,
-                is_active=True
+                is_active=True,
             )
 
             user = await self.user_service.create_user(user_data)
@@ -246,7 +260,9 @@ class InvitationService:
             if user_role == UserRole.PARENT:
                 student_ids_to_link = selected_student_ids or invitation.student_ids
                 for student_id in student_ids_to_link:
-                    await self.user_service.assign_child_to_parent(student_id, user.clerk_id)
+                    await self.user_service.assign_child_to_parent(
+                        student_id, user.clerk_id
+                    )
 
             # Mark invitation as accepted
             await self.collection.update_one(
@@ -254,16 +270,16 @@ class InvitationService:
                 {
                     "$set": {
                         "status": InvitationStatus.ACCEPTED.value,
-                        "accepted_at": datetime.now(timezone.utc)
+                        "accepted_at": datetime.now(timezone.utc),
                     }
-                }
+                },
             )
 
             logger.info(
                 "Invitation accepted",
                 invitation_id=str(invitation.id),
                 user_id=user.clerk_id,
-                role=user_role
+                role=user_role,
             )
 
             return user
@@ -274,13 +290,45 @@ class InvitationService:
             logger.error("Failed to accept invitation", error=str(e))
             raise DatabaseException(f"Failed to accept invitation: {str(e)}")
 
-    async def get_invitations_for_tutor(
-        self,
-        tutor_id: str,
-        status: Optional[InvitationStatus] = None
-    ) -> InvitationListResponse:
-        """Get all invitations sent by a tutor"""
+    async def _mark_expired_invitations(self, tutor_id: str) -> int:
+        """Automatically mark expired pending invitations for a tutor"""
         try:
+            now = datetime.now(timezone.utc)
+
+            # Find all pending invitations that have expired
+            expired_query = {
+                "tutor_id": tutor_id,
+                "status": InvitationStatus.PENDING.value,
+                "expires_at": {"$lt": now},
+            }
+
+            # Update them to expired status
+            result = await self.collection.update_many(
+                expired_query, {"$set": {"status": InvitationStatus.EXPIRED.value}}
+            )
+
+            if result.modified_count > 0:
+                logger.info(
+                    "Auto-marked invitations as expired",
+                    tutor_id=tutor_id,
+                    count=result.modified_count,
+                )
+
+            return result.modified_count
+        except Exception as e:
+            logger.error(
+                "Failed to mark expired invitations", error=str(e), tutor_id=tutor_id
+            )
+            return 0
+
+    async def get_invitations_for_tutor(
+        self, tutor_id: str, status: Optional[InvitationStatus] = None
+    ) -> InvitationListResponse:
+        """Get all invitations sent by a tutor with automatic expiration"""
+        try:
+            # First, automatically mark any expired pending invitations
+            await self._mark_expired_invitations(tutor_id)
+
             query = {"tutor_id": tutor_id}
             if status:
                 query["status"] = status.value
@@ -292,10 +340,21 @@ class InvitationService:
 
             # Calculate stats
             total = len(invitations)
-            pending = sum(1 for inv in invitations if inv.status == InvitationStatus.PENDING)
-            accepted = sum(1 for inv in invitations if inv.status == InvitationStatus.ACCEPTED)
-            expired = sum(1 for inv in invitations if inv.status == InvitationStatus.EXPIRED)
-            revoked = sum(1 for inv in invitations if inv.status == InvitationStatus.REVOKED)
+            pending = sum(
+                1 for inv in invitations if inv.status == InvitationStatus.PENDING
+            )
+            accepted = sum(
+                1 for inv in invitations if inv.status == InvitationStatus.ACCEPTED
+            )
+            expired = sum(
+                1 for inv in invitations if inv.status == InvitationStatus.EXPIRED
+            )
+            revoked = sum(
+                1 for inv in invitations if inv.status == InvitationStatus.REVOKED
+            )
+            rejected = sum(
+                1 for inv in invitations if inv.status == InvitationStatus.REJECTED
+            )
 
             return InvitationListResponse(
                 invitations=invitations,
@@ -303,7 +362,8 @@ class InvitationService:
                 pending=pending,
                 accepted=accepted,
                 expired=expired,
-                revoked=revoked
+                revoked=revoked,
+                rejected=rejected,
             )
 
         except Exception as e:
@@ -314,12 +374,12 @@ class InvitationService:
         """Revoke an invitation"""
         try:
             oid = to_object_id(invitation_id)
-            
+
             # Verify ownership
             invitation = await self.collection.find_one({"_id": oid})
             if not invitation:
                 raise NotFoundError("Invitation", invitation_id)
-            
+
             if invitation["tutor_id"] != tutor_id:
                 raise ValidationError("Not authorized to revoke this invitation")
 
@@ -331,12 +391,14 @@ class InvitationService:
                 {
                     "$set": {
                         "status": InvitationStatus.REVOKED.value,
-                        "revoked_at": datetime.now(timezone.utc)
+                        "revoked_at": datetime.now(timezone.utc),
                     }
-                }
+                },
             )
 
-            logger.info("Invitation revoked", invitation_id=invitation_id, tutor_id=tutor_id)
+            logger.info(
+                "Invitation revoked", invitation_id=invitation_id, tutor_id=tutor_id
+            )
             return result.modified_count > 0
 
         except (NotFoundError, ValidationError):
@@ -349,4 +411,3 @@ class InvitationService:
         """Convert database document to Invitation model"""
         invitation_dict["id"] = str(invitation_dict.pop("_id"))
         return Invitation(**invitation_dict)
-

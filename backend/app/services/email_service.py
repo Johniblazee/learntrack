@@ -1,6 +1,7 @@
 """
 Email service using Plunk for sending transactional emails
 """
+
 from typing import Optional, Dict, Any, List
 import os
 from datetime import datetime
@@ -11,6 +12,7 @@ PLUNK_API_KEY = os.getenv("PLUNK_API_KEY", "")
 # Try to import Plunk, but don't fail if not available
 try:
     import plunk
+
     plunk_client = plunk.Plunk(PLUNK_API_KEY) if PLUNK_API_KEY else None
 except (ImportError, AttributeError):
     plunk_client = None
@@ -21,22 +23,18 @@ class EmailService:
 
     @staticmethod
     def send_invitation_email(
-        to_email: str,
-        to_name: str,
-        from_name: str,
-        role: str,
-        invitation_link: str
+        to_email: str, to_name: str, from_name: str, role: str, invitation_link: str
     ) -> bool:
         """
         Send invitation email to new user
-        
+
         Args:
             to_email: Recipient email address
             to_name: Recipient name
             from_name: Teacher/inviter name
             role: User role (student/parent)
             invitation_link: Full invitation URL
-            
+
         Returns:
             bool: True if email sent successfully
         """
@@ -46,7 +44,7 @@ class EmailService:
 
         try:
             subject = f"You're invited to join LearnTrack by {from_name}"
-            
+
             html_body = f"""
             <!DOCTYPE html>
             <html>
@@ -77,7 +75,7 @@ class EmailService:
                             <a href="{invitation_link}">{invitation_link}</a>
                         </p>
                         <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
-                            This invitation will expire in 7 days.
+                            This invitation will expire in 2 weeks (14 days).
                         </p>
                     </div>
                     <div class="footer">
@@ -88,11 +86,7 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(
-                to=to_email,
-                subject=subject,
-                body=html_body
-            )
+            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
 
             print(f"[EMAIL] Invitation sent to {to_email}")
             return True
@@ -103,30 +97,29 @@ class EmailService:
 
     @staticmethod
     def send_welcome_email(
-        to_email: str,
-        to_name: str,
-        role: str,
-        dashboard_link: str
+        to_email: str, to_name: str, role: str, dashboard_link: str
     ) -> bool:
         """
         Send welcome email after user completes onboarding
-        
+
         Args:
             to_email: User email address
             to_name: User name
             role: User role (tutor/student/parent)
             dashboard_link: Link to user's dashboard
-            
+
         Returns:
             bool: True if email sent successfully
         """
         if not plunk_client:
-            print(f"[EMAIL] Would send welcome email to {to_email} (Plunk not configured)")
+            print(
+                f"[EMAIL] Would send welcome email to {to_email} (Plunk not configured)"
+            )
             return False
 
         try:
             subject = "Welcome to LearnTrack! 🎉"
-            
+
             role_specific_content = {
                 "tutor": {
                     "emoji": "👨‍🏫",
@@ -136,8 +129,8 @@ class EmailService:
                         "Create assignments and questions",
                         "Chat with students and parents",
                         "Upload reference materials",
-                        "Track student progress"
-                    ]
+                        "Track student progress",
+                    ],
                 },
                 "student": {
                     "emoji": "📚",
@@ -147,8 +140,8 @@ class EmailService:
                         "Chat with your teacher and parents",
                         "Access learning materials",
                         "Track your progress",
-                        "Get instant feedback"
-                    ]
+                        "Get instant feedback",
+                    ],
                 },
                 "parent": {
                     "emoji": "👨‍👩‍👧",
@@ -158,14 +151,18 @@ class EmailService:
                         "Chat with the teacher",
                         "Monitor progress and grades",
                         "Receive deadline notifications",
-                        "Stay involved in learning"
-                    ]
-                }
+                        "Stay involved in learning",
+                    ],
+                },
             }
-            
-            content = role_specific_content.get(role.lower(), role_specific_content["student"])
-            features_html = "".join([f"<li>{feature}</li>" for feature in content["features"]])
-            
+
+            content = role_specific_content.get(
+                role.lower(), role_specific_content["student"]
+            )
+            features_html = "".join(
+                [f"<li>{feature}</li>" for feature in content["features"]]
+            )
+
             html_body = f"""
             <!DOCTYPE html>
             <html>
@@ -210,11 +207,7 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(
-                to=to_email,
-                subject=subject,
-                body=html_body
-            )
+            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
 
             print(f"[EMAIL] Welcome email sent to {to_email}")
             return True
@@ -230,11 +223,11 @@ class EmailService:
         assignment_title: str,
         teacher_name: str,
         due_date: datetime,
-        assignment_link: str
+        assignment_link: str,
     ) -> bool:
         """
         Send notification about new assignment
-        
+
         Args:
             to_email: Student email
             to_name: Student name
@@ -242,18 +235,20 @@ class EmailService:
             teacher_name: Teacher name
             due_date: Assignment due date
             assignment_link: Link to assignment
-            
+
         Returns:
             bool: True if email sent successfully
         """
         if not plunk_client:
-            print(f"[EMAIL] Would send assignment notification to {to_email} (Plunk not configured)")
+            print(
+                f"[EMAIL] Would send assignment notification to {to_email} (Plunk not configured)"
+            )
             return False
 
         try:
             subject = f"New Assignment: {assignment_title}"
             due_date_str = due_date.strftime("%B %d, %Y at %I:%M %p")
-            
+
             html_body = f"""
             <!DOCTYPE html>
             <html>
@@ -292,17 +287,15 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(
-                to=to_email,
-                subject=subject,
-                body=html_body
-            )
+            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
 
             print(f"[EMAIL] Assignment notification sent to {to_email}")
             return True
 
         except Exception as e:
-            print(f"[EMAIL] Failed to send assignment notification to {to_email}: {str(e)}")
+            print(
+                f"[EMAIL] Failed to send assignment notification to {to_email}: {str(e)}"
+            )
             return False
 
     @staticmethod
@@ -312,24 +305,26 @@ class EmailService:
         assignment_title: str,
         due_date: datetime,
         assignment_link: str,
-        hours_remaining: int
+        hours_remaining: int,
     ) -> bool:
         """Send reminder about upcoming assignment deadline"""
         if not plunk_client:
-            print(f"[EMAIL] Would send deadline reminder to {to_email} (Plunk not configured)")
+            print(
+                f"[EMAIL] Would send deadline reminder to {to_email} (Plunk not configured)"
+            )
             return False
 
         try:
             subject = f"Reminder: {assignment_title} due soon"
             due_date_str = due_date.strftime("%B %d, %Y at %I:%M %p")
-            
+
             urgency_message = ""
             if hours_remaining <= 24:
                 urgency_message = f"⚠️ Only {hours_remaining} hours remaining!"
             else:
                 days_remaining = hours_remaining // 24
                 urgency_message = f"📅 {days_remaining} days remaining"
-            
+
             html_body = f"""
             <!DOCTYPE html>
             <html>
@@ -369,11 +364,7 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(
-                to=to_email,
-                subject=subject,
-                body=html_body
-            )
+            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
 
             print(f"[EMAIL] Deadline reminder sent to {to_email}")
             return True
@@ -385,4 +376,3 @@ class EmailService:
 
 # Convenience functions
 email_service = EmailService()
-

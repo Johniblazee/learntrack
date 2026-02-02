@@ -3,6 +3,33 @@ import { SignIn } from '@clerk/clerk-react'
 export default function SignInPage() {
   return (
     <div className="min-h-screen flex">
+      {/* Custom styles to override Clerk's input backgrounds */}
+      <style>{`
+        .cl-input {
+          background-color: white !important;
+        }
+        .dark .cl-input {
+          background-color: #1a1a1a !important;
+        }
+        .cl-formFieldInput {
+          background-color: white !important;
+        }
+        .dark .cl-formFieldInput {
+          background-color: #1a1a1a !important;
+        }
+        input[data-testid="form-field-input"] {
+          background-color: white !important;
+        }
+        .dark input[data-testid="form-field-input"] {
+          background-color: #1a1a1a !important;
+        }
+        .cl-internal-1d5bp5m {
+          background-color: white !important;
+        }
+        .dark .cl-internal-1d5bp5m {
+          background-color: #1a1a1a !important;
+        }
+      `}</style>
       {/* Left Side - Image Section */}
       <div className="hidden lg:flex lg:w-1/2 relative bg-gradient-to-br from-slate-800 to-slate-900 overflow-hidden">
         {/* Background Image */}
@@ -13,8 +40,8 @@ export default function SignInPage() {
           }}
         />
 
-        {/* Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-br from-black/60 via-black/40 to-black/60" />
+        {/* Overlay - Subtle dark overlay for better text readability */}
+        <div className="absolute inset-0 bg-gradient-to-br from-black/30 via-black/20 to-black/30" />
 
         {/* Content */}
         <div className="relative z-10 flex flex-col items-center justify-center w-full px-12 text-white">
@@ -47,12 +74,12 @@ export default function SignInPage() {
             signUpUrl="/sign-up"
             appearance={{
               variables: {
-                colorBackground: '#ffffff',
-                colorInputBackground: '#ffffff',
+                colorBackground: 'transparent',
+                colorInputBackground: 'transparent',
                 colorInputText: '#111827',
                 colorText: '#111827',
                 colorTextSecondary: '#6b7280',
-                colorPrimary: '#C8A882',
+                colorPrimary: '#5c4a38',
                 borderRadius: '0.5rem',
               },
               elements: {
@@ -60,23 +87,24 @@ export default function SignInPage() {
                 card: "shadow-none bg-transparent",
                 headerTitle: "hidden",
                 headerSubtitle: "hidden",
-                socialButtonsBlockButton: "bg-white dark:bg-white border-0 hover:bg-gray-50 dark:hover:bg-gray-100 transition-colors text-sm font-semibold rounded-lg py-3",
-                socialButtonsBlockButtonText: "text-gray-900 font-semibold",
+                socialButtonsBlockButton: "bg-transparent border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-sm font-semibold rounded-lg py-3",
+                socialButtonsBlockButtonText: "text-gray-900 dark:text-white font-semibold",
                 socialButtonsBlockButtonArrow: "hidden",
                 dividerLine: "bg-gray-200 dark:bg-gray-700",
                 dividerText: "text-gray-500 dark:text-gray-400 text-xs uppercase",
-                formButtonPrimary: "bg-[#C8A882] hover:bg-[#B89872] text-gray-900 font-semibold py-3 rounded-lg transition-colors shadow-sm normal-case",
-                formFieldInput: "border-0 rounded-lg px-4 py-3 bg-white dark:bg-[#2a2a2a] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-[#C8A882] focus:border-transparent transition-all shadow-sm",
+                formButtonPrimary: "bg-[#5c4a38] hover:bg-[#4a3a2a] text-white font-semibold py-3 rounded-lg transition-colors shadow-sm normal-case",
+                formFieldInput: "border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3 !bg-white dark:!bg-[#1a1a1a] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-[#5c4a38] focus:border-transparent transition-all",
+                formFieldInputField: "!bg-white dark:!bg-[#1a1a1a] text-gray-900 dark:text-white",
                 formFieldLabel: "text-gray-900 dark:text-gray-300 font-medium mb-2 text-sm",
-                footerActionLink: "text-[#C8A882] hover:text-[#B89872] font-medium",
+                footerActionLink: "text-[#5c4a38] hover:text-[#4a3a2a] font-medium",
                 identityPreviewText: "text-gray-900 dark:text-white",
-                identityPreviewEditButton: "text-[#C8A882] hover:text-[#B89872]",
+                identityPreviewEditButton: "text-[#5c4a38] hover:text-[#4a3a2a]",
                 formFieldInputShowPasswordButton: "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200",
                 formHeaderTitle: "hidden",
                 formHeaderSubtitle: "hidden",
                 footer: "hidden",
                 formFieldRow: "gap-4",
-                formFieldAction: "text-[#C8A882] hover:text-[#B89872] text-sm font-medium",
+                formFieldAction: "text-[#5c4a38] hover:text-[#4a3a2a] text-sm font-medium",
                 // Hide the "Continue with Clerk" button
                 socialButtonsProviderIcon__clerk: "hidden",
                 socialButtonsBlockButton__clerk: "hidden",
@@ -98,7 +126,7 @@ export default function SignInPage() {
               Don't have an account?{' '}
               <a
                 href="/sign-up"
-                className="text-[#C8A882] hover:text-[#B89872] font-semibold transition-colors"
+                className="text-[#5c4a38] hover:text-[#4a3a2a] font-semibold transition-colors"
               >
                 Sign Up
               </a>

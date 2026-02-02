@@ -39,11 +39,13 @@ class BloomsLevel(str, Enum):
 # Agentic Workflow - Action Types
 # ============================================================================
 
+
 class ActionType(str, Enum):
     """
     The action type determines which path the agent takes.
     Based on conditional path routing.
     """
+
     # Generate new artifact (questions)
     GENERATE_ARTIFACT = "generateArtifact"
 
@@ -62,6 +64,7 @@ class ActionType(str, Enum):
 
 class ArtifactType(str, Enum):
     """Type of artifact being generated/modified"""
+
     QUESTION_SET = "question_set"
     SINGLE_QUESTION = "single_question"
 
@@ -71,6 +74,7 @@ class ArtifactContent(BaseModel):
     The artifact content - in our case, generated questions.
     This represents the output of the generation process.
     """
+
     artifact_id: str
     artifact_type: ArtifactType = ArtifactType.QUESTION_SET
     title: str = "Generated Questions"
@@ -82,6 +86,7 @@ class ArtifactContent(BaseModel):
 
 class FollowupSuggestion(BaseModel):
     """A follow-up action suggestion after generation"""
+
     suggestion_type: Literal["topic", "difficulty", "type", "regenerate", "expand"]
     title: str
     description: str
@@ -90,6 +95,7 @@ class FollowupSuggestion(BaseModel):
 
 class ReflectionResult(BaseModel):
     """Result of self-reflection on generated content"""
+
     overall_quality: float  # 0-1 score
     strengths: List[str] = []
     improvements: List[str] = []
@@ -99,6 +105,7 @@ class ReflectionResult(BaseModel):
 
 class ThinkingStep(BaseModel):
     """A single thinking step for transparency display"""
+
     step_type: Literal["thinking", "action", "observation"]
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -106,16 +113,20 @@ class ThinkingStep(BaseModel):
 
 
 class SourceChunk(BaseModel):
-    """A chunk of source material retrieved via RAG"""
+    """A chunk of source material retrieved via RAG or web search"""
+
     material_id: str
     material_title: str
     content: str
     location: Optional[str] = None  # Page number, section, etc.
     relevance_score: float = 0.0
+    source_type: Literal["rag", "web", "default"] = "rag"  # Source of the chunk
+    url: Optional[str] = None  # For web search results
 
 
 class SourceCitation(BaseModel):
     """Citation linking a question to its source"""
+
     material_id: str
     material_title: str
     excerpt: str
@@ -124,6 +135,7 @@ class SourceCitation(BaseModel):
 
 class GeneratedQuestion(BaseModel):
     """A single generated question with all metadata"""
+
     question_id: str
     type: QuestionType
     difficulty: Difficulty
@@ -141,6 +153,7 @@ class GeneratedQuestion(BaseModel):
 
 class PromptAnalysis(BaseModel):
     """Result of analyzing the user's prompt"""
+
     subject: str
     topic: str
     question_count: int = 5
@@ -155,6 +168,7 @@ class PromptAnalysis(BaseModel):
 
 class GenerationConfig(BaseModel):
     """Configuration for question generation"""
+
     question_count: int = 1
     question_types: List[QuestionType] = [QuestionType.MULTIPLE_CHOICE]
     difficulty: Difficulty = Difficulty.MEDIUM
@@ -169,6 +183,7 @@ class GenerationConfig(BaseModel):
 
 class GenerationSession(BaseModel):
     """Persisted generation session for resume capability"""
+
     session_id: str
     user_id: str
     tenant_id: str
@@ -192,6 +207,7 @@ class AgentState(TypedDict):
     This state is passed between nodes and accumulates information
     as the agent processes the generation request.
     """
+
     # =========================================================================
     # Session info
     # =========================================================================
@@ -232,10 +248,15 @@ class AgentState(TypedDict):
     prompt_analysis: Optional[PromptAnalysis]
 
     # =========================================================================
-    # Materials (RAG)
+    # Materials (RAG) and Web Search
     # =========================================================================
     selected_material_ids: List[str]
     retrieved_chunks: List[SourceChunk]
+    context_source: Literal["rag", "web", "default", "mixed"] = (
+        "default"  # Which source was used
+    )
+    web_search_enabled: bool = True  # Whether web search is enabled for this tenant
+    web_search_query: Optional[str] = None  # Custom web search query if provided
 
     # =========================================================================
     # Generation state (legacy - kept for compatibility)

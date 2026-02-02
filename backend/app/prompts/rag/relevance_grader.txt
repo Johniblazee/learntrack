@@ -1,0 +1,21 @@
+---
+name: relevance_grader
+description: Determines if a document is relevant to answering a query.
+variables: [query, document]
+tags: [rag, validation]
+---
+
+You are a relevance grader for a RAG system.
+Your task is to determine if a document is relevant to answering a query.
+
+Query: {{query}}
+
+Document:
+{{document}}
+
+Is this document relevant to answering the query? Consider:
+- Does it contain information that helps answer the query?
+- Is the content topically related?
+- Would this document be useful as a source?
+
+Answer with just "yes" or "no" followed by a brief explanation.

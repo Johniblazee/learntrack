@@ -26,15 +26,11 @@ import { ThemeToggle } from "@/components/ui/theme-toggle"
 function ElegantShape({
   className,
   delay = 0,
-  width = 400,
-  height = 100,
   rotate = 0,
   gradient = "from-primary/[0.08]",
 }: {
   className?: string
   delay?: number
-  width?: number
-  height?: number
   rotate?: number
   gradient?: string
 }) {
@@ -57,8 +53,7 @@ function ElegantShape({
           repeat: Infinity,
           ease: "easeInOut",
         }}
-        style={{ width, height }}
-        className="relative"
+        className="relative w-full h-full"
       >
         <div
           className={cn(
@@ -303,41 +298,33 @@ export default function HomePage() {
 
       {/* Hero Section with Animated Shapes */}
       <section className="relative min-h-[90vh] md:min-h-screen w-full flex items-center justify-center overflow-hidden bg-background">
-        <div className="absolute inset-0 -z-10 size-full [background:radial-gradient(125%_125%_at_50%_100%,transparent_0%,hsl(var(--background))_75%)]" />
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.05] via-transparent to-accent/[0.05] blur-3xl" />
+        <div className="absolute inset-0 -z-10 size-full [background:radial-gradient(100%_100%_at_50%_100%,transparent_0%,hsl(var(--background))_70%)] sm:[background:radial-gradient(125%_125%_at_50%_100%,transparent_0%,hsl(var(--background))_75%)]" />
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.03] sm:from-primary/[0.04] md:from-primary/[0.05] via-transparent to-accent/[0.03] sm:to-accent/[0.04] md:to-accent/[0.05] blur-3xl" />
 
         <div className="absolute inset-0 overflow-hidden">
           <ElegantShape
             delay={0.3}
-            width={600}
-            height={140}
             rotate={12}
-            gradient="from-primary/[0.15]"
-            className="left-[-10%] md:left-[-5%] top-[15%] md:top-[20%]"
+            gradient="from-primary/[0.08] sm:from-primary/[0.12] md:from-primary/[0.15]"
+            className="w-[280px] h-[60px] sm:w-[400px] sm:h-[100px] md:w-[500px] md:h-[120px] lg:w-[600px] lg:h-[140px] left-[-15%] sm:left-[-10%] md:left-[-5%] top-[12%] sm:top-[15%] md:top-[20%] opacity-60 sm:opacity-80 md:opacity-100"
           />
           <ElegantShape
             delay={0.5}
-            width={500}
-            height={120}
             rotate={-15}
-            gradient="from-accent/[0.15]"
-            className="right-[-5%] md:right-[0%] top-[70%] md:top-[75%]"
+            gradient="from-accent/[0.08] sm:from-accent/[0.12] md:from-accent/[0.15]"
+            className="w-[240px] h-[50px] sm:w-[350px] sm:h-[90px] md:w-[450px] md:h-[110px] lg:w-[500px] lg:h-[120px] right-[-10%] sm:right-[-5%] md:right-[0%] top-[65%] sm:top-[70%] md:top-[75%] opacity-60 sm:opacity-80 md:opacity-100"
           />
           <ElegantShape
             delay={0.4}
-            width={300}
-            height={80}
             rotate={-8}
-            gradient="from-primary/[0.12]"
-            className="left-[5%] md:left-[10%] bottom-[5%] md:bottom-[10%]"
+            gradient="from-primary/[0.06] sm:from-primary/[0.10] md:from-primary/[0.12]"
+            className="hidden sm:block w-[200px] h-[50px] md:w-[280px] md:h-[70px] lg:w-[300px] lg:h-[80px] left-[0%] md:left-[10%] bottom-[8%] md:bottom-[10%] opacity-50 sm:opacity-70 md:opacity-100"
           />
           <ElegantShape
             delay={0.6}
-            width={200}
-            height={60}
             rotate={20}
-            gradient="from-accent/[0.10]"
-            className="right-[15%] md:right-[20%] top-[25%] md:top-[30%]"
+            gradient="from-accent/[0.05] sm:from-accent/[0.08] md:from-accent/[0.10]"
+            className="hidden md:block w-[150px] h-[40px] lg:w-[200px] lg:h-[60px] right-[10%] lg:right-[20%] top-[20%] lg:top-[30%] opacity-50 md:opacity-80"
           />
         </div>
 

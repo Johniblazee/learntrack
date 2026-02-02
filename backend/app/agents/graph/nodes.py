@@ -17,16 +17,33 @@ import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agents.graph.state import (
-    AgentState, ThinkingStep, SourceChunk, GeneratedQuestion,
-    PromptAnalysis, QuestionType, Difficulty, BloomsLevel, SourceCitation,
-    ActionType, ArtifactType, ArtifactContent, FollowupSuggestion, ReflectionResult
+    AgentState,
+    ThinkingStep,
+    SourceChunk,
+    GeneratedQuestion,
+    PromptAnalysis,
+    QuestionType,
+    Difficulty,
+    BloomsLevel,
+    SourceCitation,
+    ActionType,
+    ArtifactType,
+    ArtifactContent,
+    FollowupSuggestion,
+    ReflectionResult,
 )
-from app.agents.prompts import get_prompt
+from app.core.prompt_manager import get_prompt
 from app.agents.streaming.sse_handler import SSEHandler
 from app.agents.tools.material_retriever import retrieve_materials
-from app.utils.enums import normalize_question_type, normalize_difficulty, normalize_blooms_level
+from app.agents.tools.web_search_tool import perform_web_search
+from app.utils.enums import (
+    normalize_question_type,
+    normalize_difficulty,
+    normalize_blooms_level,
+)
 
 logger = structlog.get_logger()
+
 
 def sanitize_json_string(content: str) -> str:
     """
@@ -52,27 +69,27 @@ def sanitize_json_string(content: str) -> str:
         result = []
         i = 0
         while i < len(s):
-            if s[i] == '\\':
+            if s[i] == "\\":
                 if i + 1 < len(s):
                     next_char = s[i + 1]
                     # Valid JSON escape sequences
                     if next_char in '"\\bfnrtu/':
-                        result.append(s[i:i+2])
+                        result.append(s[i : i + 2])
                         i += 2
                         continue
                     else:
                         # Invalid escape - double the backslash
-                        result.append('\\\\')
+                        result.append("\\\\")
                         i += 1
                         continue
                 else:
                     # Trailing backslash
-                    result.append('\\\\')
+                    result.append("\\\\")
                     i += 1
             else:
                 result.append(s[i])
                 i += 1
-        return ''.join(result)
+        return "".join(result)
 
     # Process string contents (between quotes)
     # This regex matches JSON string contents
@@ -99,10 +116,7 @@ class BaseNode:
             await self.sse_handler.send_action(step)
 
     def add_thinking_step(
-        self,
-        state: AgentState,
-        step_type: str,
-        content: str
+        self, state: AgentState, step_type: str, content: str
     ) -> None:
         """Add a thinking step to state"""
         state["thinking_steps"].append(
@@ -118,10 +132,12 @@ class PromptAnalyzerNode(BaseNode):
         await self.emit_thinking("Analyzing your request...")
 
         try:
-            system_prompt = get_prompt("prompt_analyzer")
+            system_prompt = await get_prompt("prompt_analyzer")
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Analyze this prompt: {state['original_prompt']}")
+                HumanMessage(
+                    content=f"Analyze this prompt: {state['original_prompt']}"
+                ),
             ]
 
             response = await self.llm.ainvoke(messages)
@@ -140,14 +156,25 @@ class PromptAnalyzerNode(BaseNode):
             analysis = PromptAnalysis(
                 subject=analysis_data.get("subject", "General"),
                 topic=analysis_data.get("topic", ""),
-                question_count=analysis_data.get("question_count", state["config"].question_count),
-                question_types=[normalize_question_type(t) for t in analysis_data.get("question_types", ["multiple-choice"])],
-                difficulty=normalize_difficulty(analysis_data.get("difficulty", "medium")),
+                question_count=analysis_data.get(
+                    "question_count", state["config"].question_count
+                ),
+                question_types=[
+                    normalize_question_type(t)
+                    for t in analysis_data.get("question_types", ["multiple-choice"])
+                ],
+                difficulty=normalize_difficulty(
+                    analysis_data.get("difficulty", "medium")
+                ),
                 blooms_levels=analysis_data.get("blooms_levels", "AUTO"),
                 special_requirements=analysis_data.get("special_requirements", []),
                 needs_clarification=analysis_data.get("needs_clarification", False),
-                clarification_questions=analysis_data.get("clarification_questions", []),
-                enhanced_prompt=analysis_data.get("enhanced_prompt", state["original_prompt"])
+                clarification_questions=analysis_data.get(
+                    "clarification_questions", []
+                ),
+                enhanced_prompt=analysis_data.get(
+                    "enhanced_prompt", state["original_prompt"]
+                ),
             )
 
             state["prompt_analysis"] = analysis
@@ -161,7 +188,11 @@ class PromptAnalyzerNode(BaseNode):
             state["config"].difficulty = analysis.difficulty
             state["config"].blooms_levels = analysis.blooms_levels
 
-            self.add_thinking_step(state, "observation", f"Understood: {analysis.topic} ({analysis.subject})")
+            self.add_thinking_step(
+                state,
+                "observation",
+                f"Understood: {analysis.topic} ({analysis.subject})",
+            )
 
         except Exception as e:
             logger.error("Prompt analysis failed", error=str(e))
@@ -183,7 +214,9 @@ class MaterialRetrieverNode(BaseNode):
         material_ids = state.get("selected_material_ids", [])
 
         if not material_ids:
-            await self.emit_thinking("No materials selected, generating from prompt only...")
+            await self.emit_thinking(
+                "No materials selected, generating from prompt only..."
+            )
             state["retrieved_chunks"] = []
             return state
 
@@ -197,7 +230,7 @@ class MaterialRetrieverNode(BaseNode):
                 tenant_id=state["tenant_id"],
                 query=query,
                 material_ids=material_ids,
-                top_k=10
+                top_k=10,
             )
 
             state["retrieved_chunks"] = chunks
@@ -208,12 +241,11 @@ class MaterialRetrieverNode(BaseNode):
                     await self.sse_handler.send_source_found(
                         source_id=chunk.material_id,
                         title=chunk.material_title,
-                        excerpt=chunk.content[:200]
+                        excerpt=chunk.content[:200],
                     )
 
             self.add_thinking_step(
-                state, "observation",
-                f"Found {len(chunks)} relevant sections"
+                state, "observation", f"Found {len(chunks)} relevant sections"
             )
 
         except Exception as e:
@@ -234,7 +266,7 @@ class QuestionGeneratorNode(BaseNode):
         await self.emit_action(f"Generating {total} question(s)...")
 
         try:
-            system_prompt = get_prompt("question_generator")
+            system_prompt = await get_prompt("question_generator")
 
             # Build context from retrieved chunks
             context = self._build_context(state.get("retrieved_chunks", []))
@@ -244,7 +276,8 @@ class QuestionGeneratorNode(BaseNode):
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"""
+                HumanMessage(
+                    content=f"""
 ## Source Materials
 {context}
 
@@ -262,11 +295,15 @@ Example format:
   {{"question_id": "q3", "type": "multiple-choice", ...}}
 ]
 ```
-""")
+"""
+                ),
             ]
 
             response = await self.llm.ainvoke(messages)
-            logger.debug("LLM response for question generation", response_length=len(response.content))
+            logger.debug(
+                "LLM response for question generation",
+                response_length=len(response.content),
+            )
             questions = self._parse_questions(response.content, state)
             logger.info("Parsed questions", count=len(questions), expected=total)
 
@@ -278,13 +315,12 @@ Example format:
                 if self.sse_handler:
                     await self.sse_handler.send_question_complete(
                         question_id=q.question_id,
-                        question_data=q.model_dump(mode='json'),
-                        score=q.quality_score or 0.85
+                        question_data=q.model_dump(mode="json"),
+                        score=q.quality_score or 0.85,
                     )
 
             self.add_thinking_step(
-                state, "observation",
-                f"Generated {len(questions)} questions"
+                state, "observation", f"Generated {len(questions)} questions"
             )
 
         except Exception as e:
@@ -314,17 +350,19 @@ Example format:
         types = ", ".join([t.value for t in config.question_types])
 
         return f"""
-Subject: {config.subject or 'Not specified'}
-Topic: {config.topic or 'From prompt'}
+Subject: {config.subject or "Not specified"}
+Topic: {config.topic or "From prompt"}
 Question Types: {types}
 Difficulty: {config.difficulty.value}
 Bloom's Levels: {config.blooms_levels}
 Count: {config.question_count}
-Special Requirements: {', '.join(config.special_requirements) or 'None'}
-Enhanced Prompt: {state.get('enhanced_prompt', state['original_prompt'])}
+Special Requirements: {", ".join(config.special_requirements) or "None"}
+Enhanced Prompt: {state.get("enhanced_prompt", state["original_prompt"])}
 """
 
-    def _parse_questions(self, content: str, state: AgentState) -> List[GeneratedQuestion]:
+    def _parse_questions(
+        self, content: str, state: AgentState
+    ) -> List[GeneratedQuestion]:
         """Parse generated questions from LLM response"""
         questions = []
         import re
@@ -353,7 +391,7 @@ Enhanced Prompt: {state.get('enhanced_prompt', state['original_prompt'])}
                 except json.JSONDecodeError:
                     # Fallback: find individual JSON objects
                     items = []
-                    for match in re.finditer(r'\{[^{}]*\}', json_content, re.DOTALL):
+                    for match in re.finditer(r"\{[^{}]*\}", json_content, re.DOTALL):
                         try:
                             item_str = match.group()
                             try:
@@ -365,23 +403,29 @@ Enhanced Prompt: {state.get('enhanced_prompt', state['original_prompt'])}
                             continue
 
             for i, item in enumerate(items):
-                raw_type = item.get("type") or item.get("question_type") or "multiple-choice"
+                raw_type = (
+                    item.get("type") or item.get("question_type") or "multiple-choice"
+                )
                 raw_difficulty = item.get("difficulty", "medium")
                 q = GeneratedQuestion(
-                    question_id=item.get("question_id", f"q{i+1}"),
+                    question_id=item.get("question_id", f"q{i + 1}"),
                     type=normalize_question_type(raw_type),
                     difficulty=normalize_difficulty(raw_difficulty),
-                    blooms_level=normalize_blooms_level(item.get("blooms_level", "UNDERSTAND")),
+                    blooms_level=normalize_blooms_level(
+                        item.get("blooms_level", "UNDERSTAND")
+                    ),
                     question_text=item.get("question_text", ""),
                     options=item.get("options"),
                     correct_answer=item.get("correct_answer", ""),
                     explanation=item.get("explanation", ""),
                     source_citations=[
                         SourceCitation(**c) for c in item.get("source_citations", [])
-                    ] if item.get("source_citations") else [],
+                    ]
+                    if item.get("source_citations")
+                    else [],
                     tags=item.get("tags", []),
                     quality_score=0.85,
-                    is_valid=True
+                    is_valid=True,
                 )
                 questions.append(q)
 
@@ -421,7 +465,7 @@ class QuestionEditorNode(BaseNode):
         state: AgentState,
         question_id: str,
         edit_instruction: str,
-        new_source_ids: Optional[List[str]] = None
+        new_source_ids: Optional[List[str]] = None,
     ) -> GeneratedQuestion:
         """
         Edit a single question based on instruction.
@@ -447,23 +491,24 @@ class QuestionEditorNode(BaseNode):
 
         await self.emit_action(f"Editing question {question_id}...")
 
-        system_prompt = get_prompt("question_editor")
+        system_prompt = await get_prompt("question_editor")
 
         # Get new sources if provided
         source_context = ""
         if new_source_ids:
             chunks = await retrieve_materials(
-                rag_service=getattr(self, 'rag_service', None),
+                rag_service=getattr(self, "rag_service", None),
                 tenant_id=state["tenant_id"],
                 query=edit_instruction,
                 material_ids=new_source_ids,
-                top_k=5
+                top_k=5,
             )
             source_context = "\n".join([c.content for c in chunks])
 
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"""
+            HumanMessage(
+                content=f"""
 ## Original Question
 {json.dumps(original.model_dump(), indent=2)}
 
@@ -474,7 +519,8 @@ class QuestionEditorNode(BaseNode):
 {source_context or "Use existing sources"}
 
 Apply the edit and return the updated question as JSON.
-""")
+"""
+            ),
         ]
 
         response = await self.llm.ainvoke(messages)
@@ -494,17 +540,27 @@ Apply the edit and return the updated question as JSON.
 
             edited = GeneratedQuestion(
                 question_id=original.question_id,
-                type=normalize_question_type(edited_data.get("type") or edited_data.get("question_type") or original.type.value),
-                difficulty=normalize_difficulty(edited_data.get("difficulty", original.difficulty.value)),
-                blooms_level=normalize_blooms_level(edited_data.get("blooms_level", original.blooms_level.value)),
+                type=normalize_question_type(
+                    edited_data.get("type")
+                    or edited_data.get("question_type")
+                    or original.type.value
+                ),
+                difficulty=normalize_difficulty(
+                    edited_data.get("difficulty", original.difficulty.value)
+                ),
+                blooms_level=normalize_blooms_level(
+                    edited_data.get("blooms_level", original.blooms_level.value)
+                ),
                 question_text=edited_data.get("question_text", original.question_text),
                 options=edited_data.get("options", original.options),
-                correct_answer=edited_data.get("correct_answer", original.correct_answer),
+                correct_answer=edited_data.get(
+                    "correct_answer", original.correct_answer
+                ),
                 explanation=edited_data.get("explanation", original.explanation),
                 source_citations=original.source_citations,
                 tags=edited_data.get("tags", original.tags),
                 quality_score=0.85,
-                is_valid=True
+                is_valid=True,
             )
 
             return edited
@@ -512,7 +568,6 @@ Apply the edit and return the updated question as JSON.
         except Exception as e:
             logger.error("Failed to parse edited question", error=str(e))
             raise ValueError(f"Failed to edit question: {e}")
-
 
 
 # =============================================================================
@@ -552,7 +607,9 @@ class GeneratePathNode(BaseNode):
             elif target_id and new_theme:
                 # Updating with new style/parameters
                 action = ActionType.REWRITE_ARTIFACT_THEME
-                await self.emit_thinking(f"Detected: Rewriting question {target_id} with new style")
+                await self.emit_thinking(
+                    f"Detected: Rewriting question {target_id} with new style"
+                )
 
             elif target_id and user_query:
                 # Editing existing question with instructions
@@ -585,11 +642,20 @@ class GenerateArtifactNode(BaseNode):
     Generates new question artifact (full question set).
     This is the main generation node for creating new questions.
     Streams questions to the UI one at a time as they are generated.
+
+    Implements fallback sequence: RAG → Web Search → Default Knowledge
     """
 
-    def __init__(self, llm, rag_service=None, sse_handler: Optional[SSEHandler] = None):
+    def __init__(
+        self,
+        llm,
+        rag_service=None,
+        web_search_service=None,
+        sse_handler: Optional[SSEHandler] = None,
+    ):
         super().__init__(llm, sse_handler)
         self.rag_service = rag_service
+        self.web_search_service = web_search_service
 
     async def __call__(self, state: AgentState) -> AgentState:
         """Generate new question set artifact with progressive streaming"""
@@ -601,31 +667,14 @@ class GenerateArtifactNode(BaseNode):
         state["iteration_count"] = current_iteration + 1
         max_iterations = state.get("max_iterations", config.max_iterations)
 
-        await self.emit_action(f"Creating artifact with {total} question(s)... (iteration {state['iteration_count']}/{max_iterations})")
+        await self.emit_action(
+            f"Creating artifact with {total} question(s)... (iteration {state['iteration_count']}/{max_iterations})"
+        )
 
         try:
-            # First, retrieve materials if needed
-            material_ids = state.get("selected_material_ids", [])
-            if material_ids and self.rag_service:
-                await self.emit_thinking("Retrieving relevant source materials...")
-                query = state.get("enhanced_prompt") or state["original_prompt"]
-                chunks = await retrieve_materials(
-                    rag_service=self.rag_service,
-                    tenant_id=state["tenant_id"],
-                    query=query,
-                    material_ids=material_ids,
-                    top_k=10
-                )
-                state["retrieved_chunks"] = chunks
-
-                # Emit sources found
-                for chunk in chunks[:3]:
-                    if self.sse_handler:
-                        await self.sse_handler.send_source_found(
-                            source_id=chunk.material_id,
-                            title=chunk.material_title,
-                            excerpt=chunk.content[:200]
-                        )
+            # Retrieve context using fallback sequence: RAG → Web → Default
+            chunks = await self._retrieve_context_with_fallback(state)
+            state["retrieved_chunks"] = chunks
 
             # Build context
             context = self._build_context(state.get("retrieved_chunks", []))
@@ -633,7 +682,9 @@ class GenerateArtifactNode(BaseNode):
 
             # Generate questions one at a time with streaming
             for question_num in range(1, total + 1):
-                await self.emit_action(f"Generating question {question_num} of {total}...")
+                await self.emit_action(
+                    f"Generating question {question_num} of {total}..."
+                )
 
                 # Generate single question with streaming
                 question = await self._generate_single_question(
@@ -641,7 +692,7 @@ class GenerateArtifactNode(BaseNode):
                     context=context,
                     question_number=question_num,
                     total_questions=total,
-                    existing_questions=questions
+                    existing_questions=questions,
                 )
 
                 if question:
@@ -652,8 +703,8 @@ class GenerateArtifactNode(BaseNode):
                     if self.sse_handler:
                         await self.sse_handler.send_question_complete(
                             question_id=question.question_id,
-                            question_data=question.model_dump(mode='json'),
-                            score=question.quality_score or 0.85
+                            question_data=question.model_dump(mode="json"),
+                            score=question.quality_score or 0.85,
                         )
 
             # Create artifact with all questions
@@ -662,7 +713,7 @@ class GenerateArtifactNode(BaseNode):
                 artifact_type=ArtifactType.QUESTION_SET,
                 title=f"Questions: {config.topic or state['original_prompt'][:50]}",
                 current_index=1,
-                contents=[q.model_dump(mode='json') for q in questions]
+                contents=[q.model_dump(mode="json") for q in questions],
             )
 
             state["artifact"] = artifact
@@ -671,8 +722,9 @@ class GenerateArtifactNode(BaseNode):
             state["should_reflect"] = True  # Enable reflection
 
             self.add_thinking_step(
-                state, "observation",
-                f"Created artifact with {len(questions)} questions"
+                state,
+                "observation",
+                f"Created artifact with {len(questions)} questions",
             )
 
         except Exception as e:
@@ -681,16 +733,96 @@ class GenerateArtifactNode(BaseNode):
 
         return state
 
+    async def _retrieve_context_with_fallback(
+        self, state: AgentState
+    ) -> List[SourceChunk]:
+        """
+        Retrieve context using fallback sequence:
+        1. RAG (if materials attached)
+        2. Web Search (if no RAG results and web search enabled)
+        3. Default Knowledge (empty context - LLM uses its training)
+
+        Returns:
+            List of SourceChunk with context from the best available source
+        """
+        query = state.get("enhanced_prompt") or state["original_prompt"]
+        material_ids = state.get("selected_material_ids", [])
+        tenant_id = state["tenant_id"]
+        web_search_enabled = state.get("web_search_enabled", True)
+
+        chunks = []
+
+        # Step 1: Try RAG if materials are attached
+        if material_ids and self.rag_service:
+            await self.emit_thinking(
+                "Retrieving relevant source materials from your documents..."
+            )
+            try:
+                chunks = await retrieve_materials(
+                    rag_service=self.rag_service,
+                    tenant_id=tenant_id,
+                    query=query,
+                    material_ids=material_ids,
+                    top_k=10,
+                )
+                if chunks:
+                    state["context_source"] = "rag"
+                    await self.emit_thinking(
+                        f"✓ Found {len(chunks)} relevant sections from your materials"
+                    )
+                    return chunks
+                else:
+                    await self.emit_thinking(
+                        "No relevant content found in attached materials"
+                    )
+            except Exception as e:
+                logger.error("RAG retrieval failed", error=str(e))
+                await self.emit_thinking("Could not retrieve from attached materials")
+
+        # Step 2: Try Web Search (if enabled and no RAG results)
+        if web_search_enabled and self.web_search_service:
+            await self.emit_thinking("Searching the web for relevant content...")
+            try:
+                web_query = (
+                    state.get("web_search_query")
+                    or f"{state['config'].subject or ''} {state['config'].topic or ''} {query}"
+                )
+                web_chunks = await perform_web_search(
+                    web_search_service=self.web_search_service,
+                    tenant_id=tenant_id,
+                    query=web_query.strip(),
+                    max_results=5,
+                )
+                if web_chunks:
+                    chunks = web_chunks
+                    state["context_source"] = "web"
+                    await self.emit_thinking(
+                        f"✓ Found {len(chunks)} relevant web sources"
+                    )
+                    return chunks
+                else:
+                    await self.emit_thinking("No relevant web content found")
+            except Exception as e:
+                logger.error("Web search failed", error=str(e))
+                await self.emit_thinking("Web search not available")
+
+        # Step 3: Default to LLM Knowledge
+        state["context_source"] = "default"
+        await self.emit_thinking("Using general knowledge - no external sources found")
+        return []
+
     def _build_context(self, chunks: List[SourceChunk]) -> str:
-        """Build context string from chunks"""
+        """Build context string from chunks, handling different source types"""
         if not chunks:
             return "No source materials provided. Generate based on general knowledge."
 
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
             location = f" (Page {chunk.location})" if chunk.location else ""
+            source_type_label = "[Web]" if chunk.source_type == "web" else ""
+            url_info = f"\nURL: {chunk.url}" if chunk.url else ""
             context_parts.append(
-                f"### Source {i}: {chunk.material_title}{location}\n{chunk.content}\n"
+                f"### Source {i}: {chunk.material_title}{location} {source_type_label}\n{chunk.content}{url_info}\n"
             )
         return "\n".join(context_parts)
 
@@ -700,14 +832,14 @@ class GenerateArtifactNode(BaseNode):
         types = ", ".join([t.value for t in config.question_types])
 
         return f"""
-Subject: {config.subject or 'Not specified'}
-Topic: {config.topic or 'From prompt'}
+Subject: {config.subject or "Not specified"}
+Topic: {config.topic or "From prompt"}
 Question Types: {types}
 Difficulty: {config.difficulty.value}
 Bloom's Levels: {config.blooms_levels}
 Count: {config.question_count}
-Special Requirements: {', '.join(config.special_requirements) or 'None'}
-Enhanced Prompt: {state.get('enhanced_prompt', state['original_prompt'])}
+Special Requirements: {", ".join(config.special_requirements) or "None"}
+Enhanced Prompt: {state.get("enhanced_prompt", state["original_prompt"])}
 """
 
     async def _generate_single_question(
@@ -716,7 +848,7 @@ Enhanced Prompt: {state.get('enhanced_prompt', state['original_prompt'])}
         context: str,
         question_number: int,
         total_questions: int,
-        existing_questions: List[GeneratedQuestion]
+        existing_questions: List[GeneratedQuestion],
     ) -> Optional[GeneratedQuestion]:
         """Generate a single question with streaming content to UI"""
         config = state["config"]
@@ -726,21 +858,25 @@ Enhanced Prompt: {state.get('enhanced_prompt', state['original_prompt'])}
         q_type = q_types[(question_number - 1) % len(q_types)]
 
         # Build prompt for single question
-        system_prompt = get_prompt("question_generator")
+        system_prompt = await get_prompt("question_generator")
         existing_texts = [q.question_text[:100] for q in existing_questions]
-        existing_str = "\n".join([f"- {t}" for t in existing_texts]) if existing_texts else "None yet"
+        existing_str = (
+            "\n".join([f"- {t}" for t in existing_texts])
+            if existing_texts
+            else "None yet"
+        )
 
         prompt_text = f"""
 ## Source Materials
 {context}
 
 ## Generation Request
-Subject: {config.subject or 'Not specified'}
-Topic: {config.topic or state['original_prompt']}
+Subject: {config.subject or "Not specified"}
+Topic: {config.topic or state["original_prompt"]}
 Question Type: {q_type.value}
 Difficulty: {config.difficulty.value}
 Bloom's Levels: {config.blooms_levels}
-Enhanced Prompt: {state.get('enhanced_prompt', state['original_prompt'])}
+Enhanced Prompt: {state.get("enhanced_prompt", state["original_prompt"])}
 
 ## Already Generated Questions (do not repeat):
 {existing_str}
@@ -752,7 +888,7 @@ Output as a single JSON object (not an array).
 
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=prompt_text)
+            HumanMessage(content=prompt_text),
         ]
 
         try:
@@ -761,16 +897,16 @@ Output as a single JSON object (not an array).
             question_id = f"q{question_number}"
 
             # Check if LLM supports streaming
-            if hasattr(self.llm, 'astream'):
+            if hasattr(self.llm, "astream"):
                 async for chunk in self.llm.astream(messages):
-                    if hasattr(chunk, 'content') and chunk.content:
+                    if hasattr(chunk, "content") and chunk.content:
                         streamed_content += chunk.content
                         # Stream content chunks to frontend
                         if self.sse_handler:
                             await self.sse_handler.send_chunk(
                                 question_id=question_id,
                                 content=chunk.content,
-                                question_number=question_number
+                                question_number=question_number,
                             )
             else:
                 # Fallback to non-streaming
@@ -778,7 +914,9 @@ Output as a single JSON object (not an array).
                 streamed_content = response.content
 
             # Parse the single question
-            question = self._parse_single_question(streamed_content, question_number, state)
+            question = self._parse_single_question(
+                streamed_content, question_number, state
+            )
             return question
 
         except Exception as e:
@@ -800,7 +938,8 @@ Output as a single JSON object (not an array).
 
             # Find JSON object
             import re
-            match = re.search(r'\{[\s\S]*\}', json_content)
+
+            match = re.search(r"\{[\s\S]*\}", json_content)
             if not match:
                 logger.error("No JSON object found in response")
                 return None
@@ -813,35 +952,43 @@ Output as a single JSON object (not an array).
             except json.JSONDecodeError as parse_error:
                 logger.warning(
                     f"JSON parse error for question {question_number}, attempting to sanitize",
-                    error=str(parse_error)
+                    error=str(parse_error),
                 )
                 # Try to fix common escape sequence issues
                 sanitized = sanitize_json_string(json_str)
                 try:
                     item = json.loads(sanitized)
-                    logger.info(f"Successfully parsed question {question_number} after sanitization")
+                    logger.info(
+                        f"Successfully parsed question {question_number} after sanitization"
+                    )
                 except json.JSONDecodeError:
                     # Last resort: try removing problematic characters
-                    cleaned = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_str)
+                    cleaned = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", json_str)
                     item = json.loads(cleaned)
 
-            raw_type = item.get("type") or item.get("question_type") or "multiple-choice"
+            raw_type = (
+                item.get("type") or item.get("question_type") or "multiple-choice"
+            )
             raw_difficulty = item.get("difficulty", "medium")
             question = GeneratedQuestion(
                 question_id=item.get("question_id", f"q{question_number}"),
                 type=normalize_question_type(raw_type),
                 difficulty=normalize_difficulty(raw_difficulty),
-                blooms_level=normalize_blooms_level(item.get("blooms_level", "UNDERSTAND")),
+                blooms_level=normalize_blooms_level(
+                    item.get("blooms_level", "UNDERSTAND")
+                ),
                 question_text=item.get("question_text", ""),
                 options=item.get("options"),
                 correct_answer=item.get("correct_answer", ""),
                 explanation=item.get("explanation", ""),
                 source_citations=[
                     SourceCitation(**c) for c in item.get("source_citations", [])
-                ] if item.get("source_citations") else [],
+                ]
+                if item.get("source_citations")
+                else [],
                 tags=item.get("tags", []),
                 quality_score=0.85,
-                is_valid=True
+                is_valid=True,
             )
             return question
 
@@ -849,7 +996,9 @@ Output as a single JSON object (not an array).
             logger.error(f"Failed to parse question {question_number}", error=str(e))
             return None
 
-    def _parse_questions(self, content: str, state: AgentState) -> List[GeneratedQuestion]:
+    def _parse_questions(
+        self, content: str, state: AgentState
+    ) -> List[GeneratedQuestion]:
         """Parse generated questions from LLM response"""
         questions = []
         import re
@@ -877,7 +1026,7 @@ Output as a single JSON object (not an array).
                 except json.JSONDecodeError:
                     # Fallback to finding individual JSON objects
                     items = []
-                    for match in re.finditer(r'\{[^{}]*\}', json_content, re.DOTALL):
+                    for match in re.finditer(r"\{[^{}]*\}", json_content, re.DOTALL):
                         try:
                             item_str = match.group()
                             try:
@@ -889,23 +1038,29 @@ Output as a single JSON object (not an array).
                             continue
 
             for i, item in enumerate(items):
-                raw_type = item.get("type") or item.get("question_type") or "multiple-choice"
+                raw_type = (
+                    item.get("type") or item.get("question_type") or "multiple-choice"
+                )
                 raw_difficulty = item.get("difficulty", "medium")
                 q = GeneratedQuestion(
-                    question_id=item.get("question_id", f"q{i+1}"),
+                    question_id=item.get("question_id", f"q{i + 1}"),
                     type=normalize_question_type(raw_type),
                     difficulty=normalize_difficulty(raw_difficulty),
-                    blooms_level=normalize_blooms_level(item.get("blooms_level", "UNDERSTAND")),
+                    blooms_level=normalize_blooms_level(
+                        item.get("blooms_level", "UNDERSTAND")
+                    ),
                     question_text=item.get("question_text", ""),
                     options=item.get("options"),
                     correct_answer=item.get("correct_answer", ""),
                     explanation=item.get("explanation", ""),
                     source_citations=[
                         SourceCitation(**c) for c in item.get("source_citations", [])
-                    ] if item.get("source_citations") else [],
+                    ]
+                    if item.get("source_citations")
+                    else [],
                     tags=item.get("tags", []),
                     quality_score=0.85,
-                    is_valid=True
+                    is_valid=True,
                 )
                 questions.append(q)
 
@@ -913,7 +1068,6 @@ Output as a single JSON object (not an array).
             logger.error("Failed to parse questions", error=str(e))
 
         return questions
-
 
 
 class UpdateArtifactNode(BaseNode):
@@ -951,11 +1105,12 @@ class UpdateArtifactNode(BaseNode):
                 state["error"] = f"Question {target_id} not found"
                 return state
 
-            system_prompt = get_prompt("question_editor")
+            system_prompt = await get_prompt("question_editor")
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"""
+                HumanMessage(
+                    content=f"""
 ## Original Question
 {json.dumps(original.model_dump(), indent=2)}
 
@@ -963,7 +1118,8 @@ class UpdateArtifactNode(BaseNode):
 {instruction}
 
 Apply the edit and return the updated question as JSON.
-""")
+"""
+                ),
             ]
 
             response = await self.llm.ainvoke(messages)
@@ -974,7 +1130,9 @@ Apply the edit and return the updated question as JSON.
 
             # Update artifact
             if state.get("artifact"):
-                state["artifact"].contents[original_idx] = edited.model_dump(mode='json')
+                state["artifact"].contents[original_idx] = edited.model_dump(
+                    mode="json"
+                )
                 state["artifact"].current_index += 1
                 state["artifact"].updated_at = datetime.utcnow()
 
@@ -983,11 +1141,13 @@ Apply the edit and return the updated question as JSON.
             if self.sse_handler:
                 await self.sse_handler.send_question_complete(
                     question_id=edited.question_id,
-                    question_data=edited.model_dump(mode='json'),
-                    score=edited.quality_score or 0.85
+                    question_data=edited.model_dump(mode="json"),
+                    score=edited.quality_score or 0.85,
                 )
 
-            self.add_thinking_step(state, "observation", f"Updated question {target_id}")
+            self.add_thinking_step(
+                state, "observation", f"Updated question {target_id}"
+            )
 
         except Exception as e:
             logger.error("updateArtifact failed", error=str(e))
@@ -995,7 +1155,9 @@ Apply the edit and return the updated question as JSON.
 
         return state
 
-    def _parse_edited_question(self, content: str, original: GeneratedQuestion) -> GeneratedQuestion:
+    def _parse_edited_question(
+        self, content: str, original: GeneratedQuestion
+    ) -> GeneratedQuestion:
         """Parse edited question from LLM response"""
         try:
             if "```json" in content:
@@ -1010,17 +1172,27 @@ Apply the edit and return the updated question as JSON.
 
             return GeneratedQuestion(
                 question_id=original.question_id,
-                type=normalize_question_type(edited_data.get("type") or edited_data.get("question_type") or original.type.value),
-                difficulty=normalize_difficulty(edited_data.get("difficulty", original.difficulty.value)),
-                blooms_level=normalize_blooms_level(edited_data.get("blooms_level", original.blooms_level.value)),
+                type=normalize_question_type(
+                    edited_data.get("type")
+                    or edited_data.get("question_type")
+                    or original.type.value
+                ),
+                difficulty=normalize_difficulty(
+                    edited_data.get("difficulty", original.difficulty.value)
+                ),
+                blooms_level=normalize_blooms_level(
+                    edited_data.get("blooms_level", original.blooms_level.value)
+                ),
                 question_text=edited_data.get("question_text", original.question_text),
                 options=edited_data.get("options", original.options),
-                correct_answer=edited_data.get("correct_answer", original.correct_answer),
+                correct_answer=edited_data.get(
+                    "correct_answer", original.correct_answer
+                ),
                 explanation=edited_data.get("explanation", original.explanation),
                 source_citations=original.source_citations,
                 tags=edited_data.get("tags", original.tags),
                 quality_score=0.85,
-                is_valid=True
+                is_valid=True,
             )
         except Exception as e:
             logger.error("Failed to parse edited question", error=str(e))
@@ -1064,11 +1236,12 @@ class RewriteArtifactNode(BaseNode):
             # Get context
             context = self._build_context(state.get("retrieved_chunks", []))
 
-            system_prompt = get_prompt("question_generator")
+            system_prompt = await get_prompt("question_generator")
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"""
+                HumanMessage(
+                    content=f"""
 ## Source Materials
 {context}
 
@@ -1077,13 +1250,14 @@ Create a NEW, DIFFERENT question that replaces this one:
 - Type: {original.type.value}
 - Difficulty: {original.difficulty.value}
 - Bloom's Level: {original.blooms_level.value}
-- Topic: {state.get('enhanced_prompt', state['original_prompt'])}
+- Topic: {state.get("enhanced_prompt", state["original_prompt"])}
 
 The new question should cover similar concepts but be distinctly different from:
 "{original.question_text}"
 
 Output a single question as JSON.
-""")
+"""
+                ),
             ]
 
             response = await self.llm.ainvoke(messages)
@@ -1094,7 +1268,9 @@ Output a single question as JSON.
 
             # Update artifact
             if state.get("artifact"):
-                state["artifact"].contents[original_idx] = new_question.model_dump(mode='json')
+                state["artifact"].contents[original_idx] = new_question.model_dump(
+                    mode="json"
+                )
                 state["artifact"].current_index += 1
                 state["artifact"].updated_at = datetime.utcnow()
 
@@ -1103,11 +1279,13 @@ Output a single question as JSON.
             if self.sse_handler:
                 await self.sse_handler.send_question_complete(
                     question_id=new_question.question_id,
-                    question_data=new_question.model_dump(mode='json'),
-                    score=new_question.quality_score or 0.85
+                    question_data=new_question.model_dump(mode="json"),
+                    score=new_question.quality_score or 0.85,
                 )
 
-            self.add_thinking_step(state, "observation", f"Regenerated question {target_id}")
+            self.add_thinking_step(
+                state, "observation", f"Regenerated question {target_id}"
+            )
 
         except Exception as e:
             logger.error("rewriteArtifact failed", error=str(e))
@@ -1120,7 +1298,9 @@ Output a single question as JSON.
             return "Generate based on general knowledge."
         return "\n".join([f"### {c.material_title}\n{c.content}" for c in chunks[:5]])
 
-    def _parse_single_question(self, content: str, original: GeneratedQuestion) -> GeneratedQuestion:
+    def _parse_single_question(
+        self, content: str, original: GeneratedQuestion
+    ) -> GeneratedQuestion:
         """Parse a single question from response"""
         try:
             if "```json" in content:
@@ -1136,21 +1316,26 @@ Output a single question as JSON.
 
             return GeneratedQuestion(
                 question_id=original.question_id,  # Keep same ID
-                type=normalize_question_type(data.get("type") or data.get("question_type") or original.type.value),
-                difficulty=normalize_difficulty(data.get("difficulty", original.difficulty.value)),
-                blooms_level=normalize_blooms_level(data.get("blooms_level", original.blooms_level.value)),
+                type=normalize_question_type(
+                    data.get("type") or data.get("question_type") or original.type.value
+                ),
+                difficulty=normalize_difficulty(
+                    data.get("difficulty", original.difficulty.value)
+                ),
+                blooms_level=normalize_blooms_level(
+                    data.get("blooms_level", original.blooms_level.value)
+                ),
                 question_text=data.get("question_text", ""),
                 options=data.get("options"),
                 correct_answer=data.get("correct_answer", ""),
                 explanation=data.get("explanation", ""),
                 tags=data.get("tags", []),
                 quality_score=0.85,
-                is_valid=True
+                is_valid=True,
             )
         except Exception as e:
             logger.error("Failed to parse question", error=str(e))
             raise
-
 
 
 class RewriteArtifactThemeNode(BaseNode):
@@ -1194,11 +1379,12 @@ class RewriteArtifactThemeNode(BaseNode):
             new_blooms = new_theme.get("blooms_level", original.blooms_level.value)
 
             context = self._build_context(state.get("retrieved_chunks", []))
-            system_prompt = get_prompt("question_generator")
+            system_prompt = await get_prompt("question_generator")
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"""
+                HumanMessage(
+                    content=f"""
 ## Source Materials
 {context}
 
@@ -1211,11 +1397,12 @@ NEW PARAMETERS:
 - Question Type: {new_type}
 - Difficulty: {new_difficulty}
 - Bloom's Level: {new_blooms}
-- Topic: {state.get('enhanced_prompt', state['original_prompt'])}
+- Topic: {state.get("enhanced_prompt", state["original_prompt"])}
 
 Create a question that tests the same concept but with the new parameters.
 Output as JSON.
-""")
+"""
+                ),
             ]
 
             response = await self.llm.ainvoke(messages)
@@ -1225,7 +1412,9 @@ Output as JSON.
             state["questions"][original_idx] = new_question
 
             if state.get("artifact"):
-                state["artifact"].contents[original_idx] = new_question.model_dump(mode='json')
+                state["artifact"].contents[original_idx] = new_question.model_dump(
+                    mode="json"
+                )
                 state["artifact"].current_index += 1
                 state["artifact"].updated_at = datetime.utcnow()
 
@@ -1234,12 +1423,15 @@ Output as JSON.
             if self.sse_handler:
                 await self.sse_handler.send_question_complete(
                     question_id=new_question.question_id,
-                    question_data=new_question.model_dump(mode='json'),
-                    score=new_question.quality_score or 0.85
+                    question_data=new_question.model_dump(mode="json"),
+                    score=new_question.quality_score or 0.85,
                 )
 
-            self.add_thinking_step(state, "observation",
-                f"Rewrote question {target_id} as {new_type} ({new_difficulty})")
+            self.add_thinking_step(
+                state,
+                "observation",
+                f"Rewrote question {target_id} as {new_type} ({new_difficulty})",
+            )
 
         except Exception as e:
             logger.error("rewriteArtifactTheme failed", error=str(e))
@@ -1252,8 +1444,9 @@ Output as JSON.
             return "Generate based on general knowledge."
         return "\n".join([f"### {c.material_title}\n{c.content}" for c in chunks[:5]])
 
-    def _parse_question(self, content: str, original: GeneratedQuestion,
-                        new_theme: Dict) -> GeneratedQuestion:
+    def _parse_question(
+        self, content: str, original: GeneratedQuestion, new_theme: Dict
+    ) -> GeneratedQuestion:
         try:
             if "```json" in content:
                 json_content = content.split("```json")[1].split("```")[0]
@@ -1266,25 +1459,36 @@ Output as JSON.
             if isinstance(data, list):
                 data = data[0]
 
-            raw_type = new_theme.get("type") or data.get("type") or data.get("question_type") or original.type.value
-            raw_difficulty = new_theme.get("difficulty") or data.get("difficulty", original.difficulty.value)
+            raw_type = (
+                new_theme.get("type")
+                or data.get("type")
+                or data.get("question_type")
+                or original.type.value
+            )
+            raw_difficulty = new_theme.get("difficulty") or data.get(
+                "difficulty", original.difficulty.value
+            )
             return GeneratedQuestion(
                 question_id=original.question_id,
                 type=normalize_question_type(raw_type),
                 difficulty=normalize_difficulty(raw_difficulty),
-                blooms_level=normalize_blooms_level(new_theme.get("blooms_level", data.get("blooms_level", original.blooms_level.value))),
+                blooms_level=normalize_blooms_level(
+                    new_theme.get(
+                        "blooms_level",
+                        data.get("blooms_level", original.blooms_level.value),
+                    )
+                ),
                 question_text=data.get("question_text", ""),
                 options=data.get("options"),
                 correct_answer=data.get("correct_answer", ""),
                 explanation=data.get("explanation", ""),
                 tags=data.get("tags", []),
                 quality_score=0.85,
-                is_valid=True
+                is_valid=True,
             )
         except Exception as e:
             logger.error("Failed to parse question", error=str(e))
             raise
-
 
 
 class GenerateFollowupNode(BaseNode):
@@ -1313,57 +1517,72 @@ class GenerateFollowupNode(BaseNode):
             # Suggest different difficulty
             current_diff = config.difficulty.value
             if current_diff != "hard":
-                suggestions.append(FollowupSuggestion(
-                    suggestion_type="difficulty",
-                    title=f"Increase Difficulty",
-                    description=f"Generate harder questions on {topic}",
-                    action_params={"difficulty": "hard"}
-                ))
+                suggestions.append(
+                    FollowupSuggestion(
+                        suggestion_type="difficulty",
+                        title=f"Increase Difficulty",
+                        description=f"Generate harder questions on {topic}",
+                        action_params={"difficulty": "hard"},
+                    )
+                )
             if current_diff != "easy":
-                suggestions.append(FollowupSuggestion(
-                    suggestion_type="difficulty",
-                    title=f"Simplify Questions",
-                    description=f"Generate easier questions for beginners",
-                    action_params={"difficulty": "easy"}
-                ))
+                suggestions.append(
+                    FollowupSuggestion(
+                        suggestion_type="difficulty",
+                        title=f"Simplify Questions",
+                        description=f"Generate easier questions for beginners",
+                        action_params={"difficulty": "easy"},
+                    )
+                )
 
             # Suggest different types
             current_types = [t.value for t in config.question_types]
             if "short-answer" not in current_types:
-                suggestions.append(FollowupSuggestion(
-                    suggestion_type="type",
-                    title="Add Short Answer",
-                    description="Generate short answer questions",
-                    action_params={"types": ["short-answer"]}
-                ))
+                suggestions.append(
+                    FollowupSuggestion(
+                        suggestion_type="type",
+                        title="Add Short Answer",
+                        description="Generate short answer questions",
+                        action_params={"types": ["short-answer"]},
+                    )
+                )
             if "essay" not in current_types:
-                suggestions.append(FollowupSuggestion(
-                    suggestion_type="type",
-                    title="Add Essay Questions",
-                    description="Generate essay-type questions",
-                    action_params={"types": ["essay"]}
-                ))
+                suggestions.append(
+                    FollowupSuggestion(
+                        suggestion_type="type",
+                        title="Add Essay Questions",
+                        description="Generate essay-type questions",
+                        action_params={"types": ["essay"]},
+                    )
+                )
 
             # Suggest more questions
-            suggestions.append(FollowupSuggestion(
-                suggestion_type="expand",
-                title="Generate More",
-                description=f"Add {config.question_count} more questions",
-                action_params={"count": config.question_count}
-            ))
+            suggestions.append(
+                FollowupSuggestion(
+                    suggestion_type="expand",
+                    title="Generate More",
+                    description=f"Add {config.question_count} more questions",
+                    action_params={"count": config.question_count},
+                )
+            )
 
             # Suggest related topics (simplified - could use LLM)
-            suggestions.append(FollowupSuggestion(
-                suggestion_type="topic",
-                title="Related Topics",
-                description="Explore related concepts",
-                action_params={"expand_topics": True}
-            ))
+            suggestions.append(
+                FollowupSuggestion(
+                    suggestion_type="topic",
+                    title="Related Topics",
+                    description="Explore related concepts",
+                    action_params={"expand_topics": True},
+                )
+            )
 
             state["followup_suggestions"] = suggestions[:4]  # Limit to 4
 
-            self.add_thinking_step(state, "observation",
-                f"Generated {len(suggestions)} follow-up suggestions")
+            self.add_thinking_step(
+                state,
+                "observation",
+                f"Generated {len(suggestions)} follow-up suggestions",
+            )
 
         except Exception as e:
             logger.error("generateFollowup failed", error=str(e))
@@ -1390,13 +1609,16 @@ class ReflectNode(BaseNode):
 
         try:
             # Build questions summary for reflection
-            questions_text = "\n".join([
-                f"{i+1}. [{q.type.value}] [{q.difficulty.value}] {q.question_text[:100]}..."
-                for i, q in enumerate(questions)
-            ])
+            questions_text = "\n".join(
+                [
+                    f"{i + 1}. [{q.type.value}] [{q.difficulty.value}] {q.question_text[:100]}..."
+                    for i, q in enumerate(questions)
+                ]
+            )
 
             messages = [
-                SystemMessage(content="""You are a quality evaluator for educational questions.
+                SystemMessage(
+                    content="""You are a quality evaluator for educational questions.
 Analyze the questions and provide a brief assessment.
 
 Output JSON:
@@ -1406,8 +1628,10 @@ Output JSON:
     "improvements": ["list", "of", "improvements"],
     "should_regenerate": false,
     "regenerate_indices": []
-}"""),
-                HumanMessage(content=f"""
+}"""
+                ),
+                HumanMessage(
+                    content=f"""
 Evaluate these questions:
 
 {questions_text}
@@ -1417,7 +1641,8 @@ Consider:
 - Difficulty appropriateness
 - Variety and coverage
 - Educational value
-""")
+"""
+                ),
             ]
 
             response = await self.llm.ainvoke(messages)
@@ -1433,7 +1658,7 @@ Consider:
                     strengths=["Questions generated successfully"],
                     improvements=[],
                     should_regenerate=False,
-                    regenerate_indices=[]
+                    regenerate_indices=[],
                 )
                 state["reflection_result"] = reflection
                 return state
@@ -1455,7 +1680,7 @@ Consider:
                     strengths=["Questions generated successfully"],
                     improvements=[],
                     should_regenerate=False,
-                    regenerate_indices=[]
+                    regenerate_indices=[],
                 )
                 state["reflection_result"] = reflection
                 return state
@@ -1472,7 +1697,7 @@ Consider:
                 strengths=data.get("strengths", []),
                 improvements=data.get("improvements", []),
                 should_regenerate=data.get("should_regenerate", False),
-                regenerate_indices=data.get("regenerate_indices", [])
+                regenerate_indices=data.get("regenerate_indices", []),
             )
 
             state["reflection_result"] = reflection
@@ -1483,8 +1708,11 @@ Consider:
                     f"Quality: {reflection.overall_quality:.0%}"
                 )
 
-            self.add_thinking_step(state, "observation",
-                f"Quality assessment: {reflection.overall_quality:.0%}")
+            self.add_thinking_step(
+                state,
+                "observation",
+                f"Quality assessment: {reflection.overall_quality:.0%}",
+            )
 
         except Exception as e:
             logger.error("reflect failed", error=str(e))
@@ -1494,7 +1722,7 @@ Consider:
                 strengths=["Questions generated"],
                 improvements=[],
                 should_regenerate=False,
-                regenerate_indices=[]
+                regenerate_indices=[],
             )
 
         return state
@@ -1519,16 +1747,21 @@ class RespondToQueryNode(BaseNode):
 
         try:
             # Build context from questions
-            questions_context = "\n".join([
-                f"Q{i+1}: {q.question_text}\nA: {q.correct_answer}\nExplanation: {q.explanation}"
-                for i, q in enumerate(questions)
-            ])
+            questions_context = "\n".join(
+                [
+                    f"Q{i + 1}: {q.question_text}\nA: {q.correct_answer}\nExplanation: {q.explanation}"
+                    for i, q in enumerate(questions)
+                ]
+            )
 
             messages = [
-                SystemMessage(content="""You are a helpful educational assistant.
+                SystemMessage(
+                    content="""You are a helpful educational assistant.
 Answer the user's question about the generated questions.
-Be clear, concise, and educational."""),
-                HumanMessage(content=f"""
+Be clear, concise, and educational."""
+                ),
+                HumanMessage(
+                    content=f"""
 ## Generated Questions
 {questions_context}
 
@@ -1536,7 +1769,8 @@ Be clear, concise, and educational."""),
 {query}
 
 Provide a helpful response.
-""")
+"""
+                ),
             ]
 
             response = await self.llm.ainvoke(messages)

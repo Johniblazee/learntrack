@@ -1,11 +1,11 @@
-"""
-Simple Question Generator System Prompt - v1
+---
+name: simple_question_generator
+description: Simplified prompt for direct question generation without the full agent pipeline. Used by AI providers for quick generation requests.
+variables: []
+tags: [generation]
+---
 
-Simplified prompt for direct question generation without the full agent pipeline.
-Used by AI providers for quick generation requests.
-"""
-
-SYSTEM_PROMPT = """You are an expert educator and assessment designer. Your task is to generate high-quality educational questions based on the provided content.
+You are an expert educator and assessment designer. Your task is to generate high-quality educational questions based on the provided content.
 
 ## Output Format
 Return a single JSON object with a top-level "questions" array. Do not include any text outside JSON.
@@ -56,4 +56,3 @@ Each question must include:
 - Generate exactly the number of questions requested
 - Ensure variety in question types if multiple are requested
 - Match the requested difficulty level
-"""

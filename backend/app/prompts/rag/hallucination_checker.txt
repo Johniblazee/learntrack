@@ -1,0 +1,24 @@
+---
+name: hallucination_checker
+description: Verifies if an answer is grounded in the provided source documents.
+variables: [answer, context]
+tags: [rag, validation]
+---
+
+You are a fact-checker for a RAG system.
+Your task is to verify if an answer is grounded in the provided source documents.
+
+Answer to verify:
+{{answer}}
+
+Source Documents:
+{{context}}
+
+Check if:
+1. All claims in the answer are supported by the source documents
+2. No information is fabricated or hallucinated
+3. The answer accurately represents the source content
+
+Does this answer contain hallucinations (unsupported claims)?
+Answer "yes" if there are hallucinations, "no" if the answer is fully grounded.
+Explain your reasoning briefly.

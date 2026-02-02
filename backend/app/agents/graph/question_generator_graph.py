@@ -17,20 +17,37 @@ import structlog
 from langgraph.graph import StateGraph, END
 
 from app.agents.graph.state import (
-    AgentState, GenerationConfig, GenerationSession,
-    ThinkingStep, QuestionType, Difficulty, ActionType
+    AgentState,
+    GenerationConfig,
+    GenerationSession,
+    ThinkingStep,
+    QuestionType,
+    Difficulty,
+    ActionType,
 )
 from app.agents.graph.nodes import (
-    PromptAnalyzerNode, MaterialRetrieverNode,
-    QuestionGeneratorNode, QuestionValidatorNode, QuestionEditorNode,
+    PromptAnalyzerNode,
+    MaterialRetrieverNode,
+    QuestionGeneratorNode,
+    QuestionValidatorNode,
+    QuestionEditorNode,
     # Agentic Workflow nodes
-    GeneratePathNode, GenerateArtifactNode, UpdateArtifactNode,
-    RewriteArtifactNode, RewriteArtifactThemeNode,
-    GenerateFollowupNode, ReflectNode, RespondToQueryNode, CleanStateNode
+    GeneratePathNode,
+    GenerateArtifactNode,
+    UpdateArtifactNode,
+    RewriteArtifactNode,
+    RewriteArtifactThemeNode,
+    GenerateFollowupNode,
+    ReflectNode,
+    RespondToQueryNode,
+    CleanStateNode,
 )
 from app.agents.graph.edges import (
-    route_after_generate_path, route_after_artifact_operation,
-    route_after_respond_to_query, route_after_followup, route_after_reflect
+    route_after_generate_path,
+    route_after_artifact_operation,
+    route_after_respond_to_query,
+    route_after_followup,
+    route_after_reflect,
 )
 from app.agents.streaming.sse_handler import SSEHandler
 from app.agents.streaming.event_types import StreamEvent
@@ -55,6 +72,7 @@ class QuestionGeneratorAgent:
         self,
         llm,
         rag_service=None,
+        web_search_service=None,
     ):
         """
         Initialize the agent.
@@ -62,9 +80,11 @@ class QuestionGeneratorAgent:
         Args:
             llm: LangChain LLM instance (ChatOpenAI, ChatGroq, etc.)
             rag_service: RAG service for material retrieval
+            web_search_service: Web search service for fallback when no RAG materials
         """
         self.llm = llm
         self.rag_service = rag_service
+        self.web_search_service = web_search_service
         self._graph = None
 
     def _build_graph(self, sse_handler: Optional[SSEHandler] = None) -> StateGraph:
@@ -72,10 +92,14 @@ class QuestionGeneratorAgent:
 
         # Initialize agent workflow nodes
         generate_path = GeneratePathNode(self.llm, sse_handler)
-        generate_artifact = GenerateArtifactNode(self.llm, self.rag_service, sse_handler)
+        generate_artifact = GenerateArtifactNode(
+            self.llm, self.rag_service, self.web_search_service, sse_handler
+        )
         update_artifact = UpdateArtifactNode(self.llm, self.rag_service, sse_handler)
         rewrite_artifact = RewriteArtifactNode(self.llm, self.rag_service, sse_handler)
-        rewrite_artifact_theme = RewriteArtifactThemeNode(self.llm, self.rag_service, sse_handler)
+        rewrite_artifact_theme = RewriteArtifactThemeNode(
+            self.llm, self.rag_service, sse_handler
+        )
         generate_followup = GenerateFollowupNode(self.llm, sse_handler)
         reflect = ReflectNode(self.llm, sse_handler)
         respond_to_query = RespondToQueryNode(self.llm, sse_handler)
@@ -107,58 +131,58 @@ class QuestionGeneratorAgent:
                 "update_artifact": "update_artifact",
                 "rewrite_artifact": "rewrite_artifact",
                 "rewrite_artifact_theme": "rewrite_artifact_theme",
-                "respond_to_query": "respond_to_query"
-            }
+                "respond_to_query": "respond_to_query",
+            },
         )
 
         # Artifact operations -> generateFollowup
         graph.add_conditional_edges(
             "generate_artifact",
             route_after_artifact_operation,
-            {"generate_followup": "generate_followup", "clean_state": "clean_state"}
+            {"generate_followup": "generate_followup", "clean_state": "clean_state"},
         )
         graph.add_conditional_edges(
             "update_artifact",
             route_after_artifact_operation,
-            {"generate_followup": "generate_followup", "clean_state": "clean_state"}
+            {"generate_followup": "generate_followup", "clean_state": "clean_state"},
         )
         graph.add_conditional_edges(
             "rewrite_artifact",
             route_after_artifact_operation,
-            {"generate_followup": "generate_followup", "clean_state": "clean_state"}
+            {"generate_followup": "generate_followup", "clean_state": "clean_state"},
         )
         graph.add_conditional_edges(
             "rewrite_artifact_theme",
             route_after_artifact_operation,
-            {"generate_followup": "generate_followup", "clean_state": "clean_state"}
+            {"generate_followup": "generate_followup", "clean_state": "clean_state"},
         )
 
         # respondToQuery -> cleanState (direct path)
         graph.add_conditional_edges(
             "respond_to_query",
             route_after_respond_to_query,
-            {"clean_state": "clean_state"}
+            {"clean_state": "clean_state"},
         )
 
         # generateFollowup -> reflect or cleanState
         graph.add_conditional_edges(
             "generate_followup",
             route_after_followup,
-            {"reflect": "reflect", "clean_state": "clean_state"}
+            {"reflect": "reflect", "clean_state": "clean_state"},
         )
 
         # reflect -> cleanState or regenerate
         graph.add_conditional_edges(
             "reflect",
             route_after_reflect,
-            {"generate_artifact": "generate_artifact", "clean_state": "clean_state"}
+            {"generate_artifact": "generate_artifact", "clean_state": "clean_state"},
         )
 
         # cleanState -> END
         graph.add_edge("clean_state", END)
 
         return graph.compile()
-    
+
     async def generate(
         self,
         prompt: str,
@@ -195,7 +219,7 @@ class QuestionGeneratorAgent:
             "Starting agentic generation",
             session_id=session_id,
             user_id=user_id,
-            question_count=config.question_count
+            question_count=config.question_count,
         )
 
         # Initialize state for the agent workflow
@@ -205,44 +229,40 @@ class QuestionGeneratorAgent:
             "user_id": user_id,
             "tenant_id": tenant_id,
             "config": config,
-
             # Prompt and analysis
             "original_prompt": prompt,
             "enhanced_prompt": None,
             "prompt_analysis": None,
-
             # Materials
             "selected_material_ids": material_ids or [],
             "retrieved_chunks": [],
-
             # Questions
             "questions": [],
             "current_question_index": 0,
-
             # Thinking/reasoning
             "thinking_steps": [],
-
             # Status flags
             "needs_clarification": False,
             "is_complete": False,
             "error": None,
-
             # ReAct iteration control
             "iteration_count": 0,
             "max_iterations": config.max_iterations,
-
             # Agent workflow routing
             "next_action": None,
             "target_question_id": target_question_id,
             "user_query": user_query,
             "new_theme": new_theme,
-
             # Agent workflow outputs
             "artifact": None,
             "followup_suggestions": [],
             "reflection_result": None,
             "should_reflect": True,
             "response_to_query": None,
+            # Context source tracking for RAG -> Web -> Default fallback
+            "context_source": "default",
+            "web_search_enabled": True,
+            "web_search_query": None,
         }
 
         # Emit start event
@@ -268,7 +288,7 @@ class QuestionGeneratorAgent:
                 selected_materials=material_ids or [],
                 questions=final_state.get("questions", []),
                 thinking_steps=final_state.get("thinking_steps", []),
-                current_question_index=len(final_state.get("questions", []))
+                current_question_index=len(final_state.get("questions", [])),
             )
 
             # Emit done
@@ -282,4 +302,3 @@ class QuestionGeneratorAgent:
             if sse_handler:
                 await sse_handler.send_error(str(e))
             raise
-

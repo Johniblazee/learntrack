@@ -1,61 +1,22 @@
-/**
- * QuestionGenerator - Main component for the AI-powered question generator.
- * Provides a split-screen layout for configuration and real-time generation results.
- */
 import React, { useState, useCallback, useEffect } from 'react'
-import { motion } from 'motion/react'
-import { Card } from '@/components/ui/card'
+import { motion, AnimatePresence } from 'motion/react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Checkbox } from '@/components/ui/checkbox'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
-import { ConfigSidebar } from './ConfigSidebar'
-import { QuestionCanvas } from './QuestionCanvas'
-import { SessionDrawer } from './SessionDrawer'
-import { Sparkles, PanelLeftClose, PanelLeft, FileText, Search } from 'lucide-react'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Settings, Sparkles, CheckCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '@clerk/clerk-react'
 import { toast } from '@/contexts/ToastContext'
 import { cn } from '@/lib/utils'
-import { useMaterials } from '@/hooks/useQueries'
-import { useIsMobile } from '@/hooks/use-mobile'
 import { API_BASE_URL } from '@/lib/config'
+import { ChatPanel, ChatMessage } from './ChatPanel'
+import { SettingsModal, GenerationSettings } from './SettingsModal'
 
-// Mapping functions
-const mapQuestionType = (type: string): string => {
-  const map: Record<string, string> = {
-    mcq: 'multiple-choice',
-    'multiple-choice': 'multiple-choice',
-    'multiple choice': 'multiple-choice',
-    true_false: 'true-false',
-    'true-false': 'true-false',
-    'true false': 'true-false',
-    'short-answer': 'short-answer',
-    'short answer': 'short-answer',
-    short_answer: 'short-answer',
-    essay: 'essay',
-  }
-  const key = type?.toLowerCase?.() || type
-  return map[key] || 'multiple-choice'
-}
+import { QuestionCanvas } from './QuestionCanvas'
 
-const mapDifficulty = (diff: string): string => {
-  const map: Record<string, string> = {
-    beginner: 'easy',
-    intermediate: 'medium',
-    advanced: 'hard',
-    easy: 'easy',
-    medium: 'medium',
-    hard: 'hard',
-  }
-  const key = diff?.toLowerCase?.() || diff
-  return map[key] || 'medium'
-}
-
+// Types
 interface GeneratedQuestion {
   question_id: string
-  session_id?: string  // Added to track which session this question belongs to
+  session_id?: string
   type: string
   difficulty: string
   blooms_level?: string
@@ -64,55 +25,52 @@ interface GeneratedQuestion {
   correct_answer: string
   explanation?: string
   status?: 'pending' | 'approved' | 'rejected'
+  versions?: GeneratedQuestion[] // For version history
+  currentVersionIndex?: number
 }
 
 interface Session {
   session_id: string
   prompt: string
-  original_prompt?: string  // Backend returns this
   created_at: string
   status: 'completed' | 'failed' | 'in_progress' | 'pending'
   question_count: number
-  total_questions?: number  // Backend returns this
   approved_count: number
   pending_count: number
   rejected_count: number
-  questions?: any[]
-}
-
-interface Material {
-  _id: string
-  title: string
-  description?: string
-  material_type: string
-  tags: string[]
 }
 
 export function OpenCanvasGenerator() {
   const { getToken } = useAuth()
-  const isMobile = useIsMobile()
 
-  // Sidebar state - collapsed by default on mobile
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  // Settings state
+  const [settings, setSettings] = useState<GenerationSettings>({
+    subject: '',
+    topic: '',
+    questionCount: 3,
+    questionTypes: ['multiple-choice'],
+    difficulty: 'medium',
+    aiProvider: 'groq',
+    modelName: 'llama-3.3-70b-versatile',
+    bloomsLevels: [],
+    materialIds: [],
+  })
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
-  // Auto-collapse sidebar on mobile
-  useEffect(() => {
-    if (isMobile) {
-      setIsSidebarCollapsed(true)
-    }
-  }, [isMobile])
-  
-  // Form state - defaults will be loaded from settings
-  const [prompt, setPrompt] = useState('')
-  const [questionCount, setQuestionCount] = useState(1)
-  const [questionType, setQuestionType] = useState('multiple-choice')
-  const [difficulty, setDifficulty] = useState('medium')
-  const [aiProvider, setAiProvider] = useState('')  // Will be loaded from settings
-  const [selectedModel, setSelectedModel] = useState('')  // Will be loaded from settings
-  const [bloomsLevels, setBloomsLevels] = useState<string[]>([])
-  const [selectedMaterials, setSelectedMaterials] = useState<Material[]>([])
-  const [isMaterialsDialogOpen, setIsMaterialsDialogOpen] = useState(false)
-  const [isLoadingDefaults, setIsLoadingDefaults] = useState(true)
+  // Generation state
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [questions, setQuestions] = useState<GeneratedQuestion[]>([])
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
+
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatHistory, setChatHistory] = useState<ChatMessage[][]>([])
+  const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1)
+
+  // Session state
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false)
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
 
   // Fetch AI defaults from settings on mount
   useEffect(() => {
@@ -124,79 +82,30 @@ export function OpenCanvasGenerator() {
         })
         if (response.ok) {
           const data = await response.json()
-          // Set provider and model from saved settings
-          if (data.default_provider) {
-            setAiProvider(data.default_provider)
-          } else {
-            setAiProvider('groq')  // Fallback
-          }
-          if (data.default_model) {
-            setSelectedModel(data.default_model)
-          } else {
-            setSelectedModel('llama-3.3-70b-versatile')  // Fallback
-          }
-        } else {
-          // Fallback to defaults if settings not available
-          setAiProvider('groq')
-          setSelectedModel('llama-3.3-70b-versatile')
+          setSettings(prev => ({
+            ...prev,
+            aiProvider: data.default_provider || 'groq',
+            modelName: data.default_model || 'llama-3.3-70b-versatile',
+          }))
         }
       } catch (error) {
         console.error('Failed to fetch AI defaults:', error)
-        // Fallback to defaults
-        setAiProvider('groq')
-        setSelectedModel('llama-3.3-70b-versatile')
-      } finally {
-        setIsLoadingDefaults(false)
       }
     }
     fetchAIDefaults()
   }, [getToken])
-
-  // Generation state
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [currentAction, setCurrentAction] = useState<string | null>(null)
-  const [thinkingSteps, setThinkingSteps] = useState<string[]>([])
-  const [foundSources, setFoundSources] = useState<Array<{ id: string; title: string; excerpt: string }>>([])
-  const [questions, setQuestions] = useState<GeneratedQuestion[]>([])
-  const [streamingContent, setStreamingContent] = useState('')
-  const [progress, setProgress] = useState({ current: 0, total: 0 })
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  
-  // Sessions state
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [isLoadingSessions, setIsLoadingSessions] = useState(false)
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
-  
-  // Materials query
-  const { data: materialsData, isLoading: isLoadingMaterials } = useMaterials()
-  const materials = materialsData?.items || []
 
   // Fetch sessions
   const fetchSessions = useCallback(async () => {
     setIsLoadingSessions(true)
     try {
       const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/question-generator/sessions-with-questions`, {
+      const response = await fetch(`${API_BASE_URL}/question-generator/sessions`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (response.ok) {
         const data = await response.json()
-        // Map backend response to frontend Session interface
-        const items = data.items || data.sessions || []
-        const mappedSessions: Session[] = items.map((s: any) => ({
-          session_id: s.session_id,
-          prompt: s.original_prompt || s.prompt || 'Untitled Generation',
-          original_prompt: s.original_prompt,
-          created_at: s.created_at,
-          status: s.status || 'completed',
-          question_count: s.total_questions || s.question_count || 0,
-          total_questions: s.total_questions,
-          approved_count: s.approved_count || 0,
-          pending_count: s.pending_count || 0,
-          rejected_count: s.rejected_count || 0,
-          questions: s.questions || [],
-        }))
-        setSessions(mappedSessions)
+        setSessions(data.sessions || [])
       }
     } catch (error) {
       console.error('Failed to fetch sessions:', error)
@@ -205,98 +114,87 @@ export function OpenCanvasGenerator() {
     }
   }, [getToken])
 
+  // Load sessions on mount
   useEffect(() => {
     fetchSessions()
   }, [fetchSessions])
 
-  // Load session questions
-  const handleSelectSession = useCallback(async (selectedId: string) => {
-    setSelectedSessionId(selectedId)
-    setSessionId(selectedId)  // Also set the active sessionId
-    const session = sessions.find(s => s.session_id === selectedId)
-    if (session?.questions) {
-      setQuestions(session.questions.map(q => ({
-        ...q,
-        session_id: selectedId,  // Attach session_id to each question
-        status: q.status || 'pending',
-      })))
-      setPrompt(session.prompt || '')
-    }
-  }, [sessions])
-
-  // Toggle material selection
-  const toggleMaterial = (material: Material) => {
-    setSelectedMaterials(prev => {
-      const exists = prev.find(m => m._id === material._id)
-      if (exists) {
-        return prev.filter(m => m._id !== material._id)
-      }
-      return [...prev, material]
-    })
-  }
-
-  // Handle generation
+  // Handle generating questions
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim() && selectedMaterials.length === 0) {
-      toast.error('Please enter a prompt or select materials')
+    if (!settings.subject || !settings.topic) {
+      setIsSettingsOpen(true)
+      toast.error('Please configure subject and topic')
       return
     }
 
-    // Reset state
     setIsGenerating(true)
-    setThinkingSteps([])
-    setFoundSources([])
-    setQuestions([])
-    setStreamingContent('')
-    setCurrentAction(null)
-    setProgress({ current: 0, total: questionCount })
-    setSelectedSessionId(null)
+
+    // Add user message to chat
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: `Generate ${settings.questionCount} ${settings.difficulty} ${settings.questionTypes.join(', ')} questions about ${settings.topic} in ${settings.subject}`,
+      timestamp: new Date(),
+    }
+    setChatMessages(prev => [...prev, userMessage])
 
     try {
       const token = await getToken()
-      const requestBody = {
-        prompt: prompt || `Generate ${questionCount} questions about the selected materials`,
-        question_count: questionCount,
-        question_types: [mapQuestionType(questionType)],
-        difficulty: mapDifficulty(difficulty),
-        material_ids: selectedMaterials.map(m => m._id),
-        ai_provider: aiProvider,
-        model_name: selectedModel,
-        blooms_levels: bloomsLevels.length > 0 ? bloomsLevels : undefined,
-      }
-
-      const response = await fetch(`${API_BASE_URL}/question-generator/generate`, {
+      const response = await fetch(`${API_BASE_URL}/question-generator/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          message: userMessage.content,
+          settings,
+          stream: true,
+        }),
       })
 
-      if (!response.ok) {
-        throw new Error(`Generation failed: ${response.statusText}`)
-      }
+      if (!response.ok) throw new Error('Generation failed')
 
+      // Handle streaming response
       const reader = response.body?.getReader()
       if (!reader) throw new Error('No response body')
 
       const decoder = new TextDecoder()
-      let buffer = ''
+      let assistantContent = ''
+      let newQuestions: GeneratedQuestion[] = []
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6))
-              handleStreamEvent(data)
+
+              if (data.type === 'content') {
+                assistantContent += data.content
+                // Update streaming message
+                setChatMessages(prev => {
+                  const lastMsg = prev[prev.length - 1]
+                  if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
+                    return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent }]
+                  }
+                  return [...prev, {
+                    id: `assistant-${Date.now()}`,
+                    role: 'assistant',
+                    content: assistantContent,
+                    timestamp: new Date(),
+                    isStreaming: true,
+                  }]
+                })
+              } else if (data.type === 'question_complete' && data.question) {
+                newQuestions.push(data.question)
+                setQuestions(prev => [...prev, data.question])
+              }
             } catch (e) {
               // Skip invalid JSON
             }
@@ -304,342 +202,443 @@ export function OpenCanvasGenerator() {
         }
       }
 
-      toast.success('Questions generated successfully!')
-      fetchSessions() // Refresh sessions
+      // Mark streaming as complete
+      setChatMessages(prev => {
+        const lastMsg = prev[prev.length - 1]
+        if (lastMsg?.role === 'assistant') {
+          return [...prev.slice(0, -1), { ...lastMsg, isStreaming: false }]
+        }
+        return prev
+      })
+
+      toast.success(`Generated ${newQuestions.length} questions`)
     } catch (error) {
       console.error('Generation error:', error)
       toast.error('Failed to generate questions')
     } finally {
       setIsGenerating(false)
-      setCurrentAction(null)
     }
-  }, [prompt, questionCount, questionType, difficulty, aiProvider, bloomsLevels, selectedMaterials, getToken, fetchSessions])
+  }, [settings, getToken])
 
-  // Handle stream events
-  const handleStreamEvent = useCallback((data: any) => {
-    const eventType = data.event_type || data.type
+  // Handle chat message (for refining/updating questions)
+  const handleSendMessage = useCallback(async (message: string, referencedQuestionId?: string) => {
+    if (isGenerating) return
 
-    switch (eventType) {
-      case 'session:created':
-        setSessionId(data.session_id)
-        break
-
-      case 'agent:thinking':
-        if (data.step) {
-          setThinkingSteps(prev => [...prev.slice(-4), data.step])
-        }
-        break
-
-      case 'agent:action':
-        setCurrentAction(data.step || null)
-        break
-
-      case 'source:found':
-        setFoundSources(prev => [...prev, {
-          id: data.source_id || `src-${prev.length}`,
-          title: data.source_title || 'Source',
-          excerpt: data.source_excerpt || '',
-        }])
-        break
-
-      case 'generation:chunk':
-        if (data.content) {
-          setStreamingContent(prev => prev + data.content)
-        }
-        break
-
-      case 'generation:question_complete':
-        if (data.question_data) {
-          // Capture sessionId in closure for the question
-          setQuestions(prev => [...prev, {
-            ...data.question_data,
-            session_id: sessionId || data.session_id,
-            status: 'pending',
-          }])
-          setStreamingContent('')
-          setProgress(prev => ({ ...prev, current: prev.current + 1 }))
-        }
-        break
-
-      case 'done':
-        setIsGenerating(false)
-        break
+    // Save current state to history before making changes
+    if (questions.length > 0) {
+      setChatHistory(prev => [...prev.slice(0, currentHistoryIndex + 1), chatMessages])
+      setCurrentHistoryIndex(prev => prev + 1)
     }
-  }, [])
 
-  // Question actions
-  const handleApprove = useCallback(async (questionId: string) => {
+    // Add user message
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: message,
+      timestamp: new Date(),
+      referencedQuestionId,
+    }
+    setChatMessages(prev => [...prev, userMessage])
+
+    // Clear selection after sending
+    setSelectedQuestionId(null)
+
+    setIsGenerating(true)
+
     try {
-      // Find the question to get its session_id
-      const question = questions.find(q => q.question_id === questionId)
-      const qSessionId = question?.session_id || sessionId
-
-      if (!qSessionId) {
-        toast.error('Session ID not found')
-        return
-      }
-
       const token = await getToken()
-      await fetch(`${API_BASE_URL}/question-generator/sessions/${qSessionId}/questions/${questionId}/approve`, {
+      const response = await fetch(`${API_BASE_URL}/question-generator/chat`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      setQuestions(prev => prev.map(q =>
-        q.question_id === questionId ? { ...q, status: 'approved' as const } : q
-      ))
-      toast.success('Question approved')
-    } catch (error) {
-      toast.error('Failed to approve question')
-    }
-  }, [getToken, questions, sessionId])
-
-  const handleReject = useCallback(async (questionId: string) => {
-    try {
-      // Find the question to get its session_id
-      const question = questions.find(q => q.question_id === questionId)
-      const qSessionId = question?.session_id || sessionId
-
-      if (!qSessionId) {
-        toast.error('Session ID not found')
-        return
-      }
-
-      const token = await getToken()
-      await fetch(`${API_BASE_URL}/question-generator/sessions/${qSessionId}/questions/${questionId}/reject`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      setQuestions(prev => prev.map(q =>
-        q.question_id === questionId ? { ...q, status: 'rejected' as const } : q
-      ))
-      toast.success('Question rejected')
-    } catch (error) {
-      toast.error('Failed to reject question')
-    }
-  }, [getToken, questions, sessionId])
-
-  const handleApproveAll = useCallback(async () => {
-    const pendingQuestions = questions.filter(q => q.status === 'pending' || !q.status)
-    for (const q of pendingQuestions) {
-      await handleApprove(q.question_id)
-    }
-  }, [questions, handleApprove])
-
-  const handleEdit = useCallback(async (questionId: string, data: Partial<GeneratedQuestion>) => {
-    try {
-      // Find the question to get its session_id
-      const question = questions.find(q => q.question_id === questionId)
-      const qSessionId = question?.session_id || sessionId
-
-      if (!qSessionId) {
-        toast.error('Session ID not found')
-        return
-      }
-
-      const token = await getToken()
-      await fetch(`${API_BASE_URL}/question-generator/sessions/${qSessionId}/questions/${questionId}`, {
-        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          message,
+          referenced_question_id: referencedQuestionId,
+          current_questions: questions,
+          settings,
+          stream: true,
+        }),
       })
-      setQuestions(prev => prev.map(q =>
-        q.question_id === questionId ? { ...q, ...data } : q
-      ))
-      toast.success('Question updated')
-    } catch (error) {
-      toast.error('Failed to update question')
-    }
-  }, [getToken, questions, sessionId])
 
-  const handleStop = useCallback(() => {
-    // TODO: Implement abort controller
-    setIsGenerating(false)
+      if (!response.ok) throw new Error('Update failed')
+
+      // Handle streaming response (similar to above)
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let assistantContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+
+              if (data.type === 'content') {
+                assistantContent += data.content
+                setChatMessages(prev => {
+                  const lastMsg = prev[prev.length - 1]
+                  if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
+                    return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent }]
+                  }
+                  return [...prev, {
+                    id: `assistant-${Date.now()}`,
+                    role: 'assistant',
+                    content: assistantContent,
+                    timestamp: new Date(),
+                    isStreaming: true,
+                    referencedQuestionId,
+                  }]
+                })
+              } else if (data.type === 'question_updated' && data.question) {
+                // Update the specific question
+                setQuestions(prev => {
+                  const index = prev.findIndex(q => q.question_id === data.question.question_id)
+                  if (index !== -1) {
+                    // Save current version to history
+                    const oldQuestion = prev[index]
+                    const versions = [...(oldQuestion.versions || []), oldQuestion]
+
+                    const newQuestions = [...prev]
+                    newQuestions[index] = {
+                      ...data.question,
+                      versions,
+                      currentVersionIndex: versions.length,
+                    }
+                    return newQuestions
+                  }
+                  return prev
+                })
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+
+      // Mark streaming complete
+      setChatMessages(prev => {
+        const lastMsg = prev[prev.length - 1]
+        if (lastMsg?.role === 'assistant') {
+          return [...prev.slice(0, -1), { ...lastMsg, isStreaming: false }]
+        }
+        return prev
+      })
+
+    } catch (error) {
+      console.error('Update error:', error)
+      toast.error('Failed to update question')
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [isGenerating, questions, settings, getToken, chatMessages, currentHistoryIndex])
+
+  // Cycle through question versions
+  const handleCycleVersion = useCallback((questionId: string, direction: 'prev' | 'next') => {
+    setQuestions(prev => {
+      const index = prev.findIndex(q => q.question_id === questionId)
+      if (index === -1) return prev
+
+      const question = prev[index]
+      const versions = question.versions || []
+      const currentIdx = question.currentVersionIndex ?? versions.length
+
+      let newIdx: number
+      if (direction === 'prev') {
+        newIdx = Math.max(0, currentIdx - 1)
+      } else {
+        newIdx = Math.min(versions.length, currentIdx + 1)
+      }
+
+      const newQuestions = [...prev]
+
+      if (newIdx === versions.length) {
+        // Current version
+        newQuestions[index] = { ...question, currentVersionIndex: newIdx }
+      } else {
+        // Historical version
+        newQuestions[index] = {
+          ...versions[newIdx],
+          versions: question.versions,
+          currentVersionIndex: newIdx,
+          question_id: question.question_id, // Keep same ID
+        }
+      }
+
+      return newQuestions
+    })
   }, [])
 
-  const handleDeleteSession = useCallback(async (sessionIdToDelete: string) => {
-    const token = await getToken()
-    const response = await fetch(`${API_BASE_URL}/question-generator/sessions/${sessionIdToDelete}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    })
+  // Cycle through chat history
+  const handleCycleChatHistory = useCallback((direction: 'prev' | 'next') => {
+    if (direction === 'prev' && currentHistoryIndex > 0) {
+      setCurrentHistoryIndex(prev => prev - 1)
+      setChatMessages(chatHistory[currentHistoryIndex - 1])
+    } else if (direction === 'next' && currentHistoryIndex < chatHistory.length - 1) {
+      setCurrentHistoryIndex(prev => prev + 1)
+      setChatMessages(chatHistory[currentHistoryIndex + 1])
+    }
+  }, [chatHistory, currentHistoryIndex])
 
-    if (!response.ok) {
-      throw new Error('Failed to delete session')
+  // Handle question actions
+  const handleApprove = useCallback((questionId: string) => {
+    setQuestions(prev => prev.map(q =>
+      q.question_id === questionId ? { ...q, status: 'approved' } : q
+    ))
+    toast.success('Question approved')
+  }, [])
+
+  const handleReject = useCallback((questionId: string) => {
+    setQuestions(prev => prev.map(q =>
+      q.question_id === questionId ? { ...q, status: 'rejected' } : q
+    ))
+    toast.success('Question rejected')
+  }, [])
+
+  const handleDelete = useCallback((questionId: string) => {
+    setQuestions(prev => prev.filter(q => q.question_id !== questionId))
+    if (selectedQuestionId === questionId) {
+      setSelectedQuestionId(null)
+    }
+    toast.success('Question deleted')
+  }, [selectedQuestionId])
+
+  const handleApproveAll = useCallback(() => {
+    setQuestions(prev => prev.map(q => ({ ...q, status: 'approved' })))
+    toast.success('All questions approved')
+  }, [])
+
+  // Handle clearing chat
+  const handleClearChat = useCallback(() => {
+    setChatMessages([])
+    setChatHistory([])
+    setCurrentHistoryIndex(-1)
+  }, [])
+
+  // Handle new conversation
+  const handleNewConversation = useCallback(() => {
+    setChatMessages([])
+    setChatHistory([])
+    setCurrentHistoryIndex(-1)
+    setCurrentSessionId(null)
+    setQuestions([])
+    setSelectedQuestionId(null)
+    toast.success('Started new conversation')
+  }, [])
+
+  // Handle delete conversation
+  const handleDeleteConversation = useCallback(async () => {
+    if (!currentSessionId) {
+      toast.error('No active conversation to delete')
+      return
     }
 
-    // Remove from local state
-    setSessions(prev => prev.filter(s => s.session_id !== sessionIdToDelete))
-
-    // If this was the selected session, clear it
-    if (selectedSessionId === sessionIdToDelete) {
-      setSelectedSessionId(null)
-      setSessionId(null)
-      setQuestions([])
+    try {
+      const token = await getToken()
+      const response = await fetch(`${API_BASE_URL}/question-generator/sessions/${currentSessionId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (response.ok) {
+        setSessions(prev => prev.filter(s => s.session_id !== currentSessionId))
+        setCurrentSessionId(null)
+        setQuestions([])
+        setChatMessages([])
+        toast.success('Conversation deleted')
+      } else {
+        toast.error('Failed to delete conversation')
+      }
+    } catch (error) {
+      console.error('Delete error:', error)
+      toast.error('Failed to delete conversation')
     }
-  }, [getToken, selectedSessionId])
+  }, [currentSessionId, getToken])
 
-  // Responsive sidebar width: full on mobile when open, 320px on tablet, 360px on desktop
-  const sidebarWidth = isMobile ? (typeof window !== 'undefined' ? window.innerWidth : 320) : 360
+  // Handle switch session
+  const handleSwitchSession = useCallback(async (sessionId: string) => {
+    setCurrentSessionId(sessionId)
+    setIsGenerating(true)
+    try {
+      const token = await getToken()
+      const response = await fetch(`${API_BASE_URL}/question-generator/sessions/${sessionId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        if (data.questions) {
+          setQuestions(data.questions)
+        }
+        if (data.messages) {
+          setChatMessages(data.messages)
+        }
+        toast.success('Session loaded')
+      } else {
+        toast.error('Failed to load session')
+      }
+    } catch (error) {
+      console.error('Load session error:', error)
+      toast.error('Failed to load session')
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [getToken])
+
+  // Handle request regenerate from QuestionCard
+  const handleRequestRegenerate = useCallback((questionId: string, defaultMessage: string) => {
+    setSelectedQuestionId(questionId)
+    // Send the regenerate message
+    handleSendMessage(defaultMessage, questionId)
+  }, [handleSendMessage])
+
+  // Convert sessions to ChatSession format
+  const chatSessions = sessions.map(session => ({
+    id: session.session_id,
+    title: session.prompt.slice(0, 60) || 'Untitled Session',
+    createdAt: new Date(session.created_at),
+    updatedAt: new Date(session.created_at),
+    messageCount: session.question_count,
+    preview: `${session.approved_count} approved, ${session.pending_count} pending`,
+  }))
 
   return (
-    <div className="flex h-[calc(100vh-120px)] gap-0 overflow-hidden rounded-lg border bg-background relative">
-      {/* Mobile overlay backdrop */}
-      {isMobile && !isSidebarCollapsed && (
-        <div
-          className="fixed inset-0 bg-black/50 z-20 md:hidden"
-          onClick={() => setIsSidebarCollapsed(true)}
-        />
-      )}
-
-      {/* Left Sidebar - Configuration */}
-      <motion.div
-        initial={false}
-        animate={{ width: isSidebarCollapsed ? 0 : sidebarWidth }}
-        transition={{ duration: 0.3, ease: 'easeInOut' }}
-        className={cn(
-          'border-r bg-muted/30 overflow-hidden',
-          isMobile ? 'fixed left-0 top-0 h-full z-30' : 'relative'
-        )}
-      >
-        <div className={cn('h-full', isMobile ? 'w-[100vw] max-w-[360px]' : 'w-[360px]')}>
-          <div className="flex items-center justify-between p-3 sm:p-4 border-b">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
-              <span className="font-semibold text-sm sm:text-base">AI Generator</span>
-            </div>
-            <SessionDrawer
-              sessions={sessions}
-              isLoading={isLoadingSessions}
-              onRefresh={fetchSessions}
-              onSelectSession={handleSelectSession}
-              onDeleteSession={handleDeleteSession}
-              selectedSessionId={selectedSessionId}
-            />
-          </div>
-          <ConfigSidebar
-            prompt={prompt}
-            onPromptChange={setPrompt}
-            questionCount={questionCount}
-            onQuestionCountChange={setQuestionCount}
-            questionType={questionType}
-            onQuestionTypeChange={setQuestionType}
-            difficulty={difficulty}
-            onDifficultyChange={setDifficulty}
-            aiProvider={aiProvider}
-            onAiProviderChange={setAiProvider}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
-            bloomsLevels={bloomsLevels}
-            onBloomsLevelsChange={setBloomsLevels}
-            selectedMaterials={selectedMaterials}
-            onMaterialsClick={() => setIsMaterialsDialogOpen(true)}
-            isGenerating={isGenerating}
-            onGenerate={handleGenerate}
-            onStop={handleStop}
-          />
+    <div className="flex flex-col h-[calc(100vh-120px)] bg-background">
+      {/* Header Bar */}
+      <div className="flex items-center justify-between px-6 py-3 border-b bg-muted/30">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold">AI Question Generator</h1>
+          {settings.subject && (
+            <Badge variant="secondary" className="font-normal">
+              {settings.subject}
+            </Badge>
+          )}
+          {settings.topic && (
+            <Badge variant="outline" className="font-normal">
+              {settings.topic}
+            </Badge>
+          )}
+          {settings.difficulty && (
+            <Badge
+              variant="secondary"
+              className={cn(
+                "font-normal",
+                settings.difficulty === 'easy' && "bg-green-100 text-green-700",
+                settings.difficulty === 'medium' && "bg-amber-100 text-amber-700",
+                settings.difficulty === 'hard' && "bg-red-100 text-red-700",
+              )}
+            >
+              {settings.difficulty.charAt(0).toUpperCase() + settings.difficulty.slice(1)}
+            </Badge>
+          )}
         </div>
-      </motion.div>
 
-      {/* Collapse Toggle */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn(
-          'z-10 h-8 w-8 sm:w-6 rounded-l-none border border-l-0 bg-background hover:bg-muted',
-          isMobile
-            ? 'fixed left-0 top-20 rounded-r-md'
-            : 'absolute top-1/2 -translate-y-1/2'
-        )}
-        style={{ left: isMobile ? (isSidebarCollapsed ? 0 : 'auto') : (isSidebarCollapsed ? 0 : sidebarWidth) }}
-        onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-      >
-        {isSidebarCollapsed ? (
-          <PanelLeft className="h-4 w-4" />
-        ) : (
-          <PanelLeftClose className="h-4 w-4" />
-        )}
-      </Button>
+        <div className="flex items-center gap-2">
 
-      {/* Right Canvas - Questions */}
-      <div className="flex-1 overflow-hidden">
-        <QuestionCanvas
-          isGenerating={isGenerating}
-          currentAction={currentAction}
-          thinkingSteps={thinkingSteps}
-          progress={progress}
-          foundSources={foundSources}
-          questions={questions}
-          streamingContent={streamingContent}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onEdit={handleEdit}
-          onApproveAll={handleApproveAll}
-        />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsSettingsOpen(true)}
+            className="gap-2"
+          >
+            <Settings className="h-4 w-4" />
+            Adjust Parameters
+          </Button>
+
+          {questions.length > 0 && (
+            <Button
+              size="sm"
+              onClick={handleApproveAll}
+              className="bg-[#5c4a38] hover:bg-[#4a3c2e] gap-2"
+            >
+              <CheckCircle className="h-4 w-4" />
+              Finalize & Save All
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Materials Selection Dialog */}
-      <Dialog open={isMaterialsDialogOpen} onOpenChange={setIsMaterialsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Select Materials
-            </DialogTitle>
-          </DialogHeader>
-          <ScrollArea className="h-[400px] pr-4">
-            {isLoadingMaterials ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map(i => (
-                  <Skeleton key={i} className="h-16 w-full" />
-                ))}
-              </div>
-            ) : materials.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-sm text-muted-foreground">No materials available</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {materials.map((material: Material) => {
-                  const isSelected = selectedMaterials.some(m => m._id === material._id)
-                  return (
-                    <div
-                      key={material._id}
-                      className={cn(
-                        'flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
-                        isSelected ? 'bg-primary/5 border-primary/50' : 'hover:bg-muted/50'
-                      )}
-                      onClick={() => toggleMaterial(material)}
-                    >
-                      <Checkbox checked={isSelected} />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm truncate">{material.title}</p>
-                        {material.description && (
-                          <p className="text-xs text-muted-foreground truncate">{material.description}</p>
-                        )}
-                      </div>
-                      <Badge variant="outline" className="text-xs">
-                        {material.material_type}
-                      </Badge>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </ScrollArea>
-          <div className="flex justify-between items-center pt-4 border-t">
-            <span className="text-sm text-muted-foreground">
-              {selectedMaterials.length} selected
-            </span>
-            <Button onClick={() => setIsMaterialsDialogOpen(false)}>
-              Done
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Main Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Questions Panel (Left - 70%) */}
+        <div className="w-[70%] border-r overflow-hidden flex flex-col">
+          {questions.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-col items-center justify-center py-20 text-center"
+              >
+                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+                  <Sparkles className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">No questions yet</h3>
+                <p className="text-sm text-muted-foreground max-w-sm mb-6">
+                  Configure your settings and generate questions, or start chatting with the AI assistant.
+                </p>
+                <Button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="bg-[#5c4a38] hover:bg-[#4a3c2e]"
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Start Generating
+                </Button>
+              </motion.div>
+            </div>
+          ) : (
+            <QuestionCanvas
+              isGenerating={isGenerating}
+              currentAction={isGenerating ? 'Generating questions...' : null}
+              thinkingSteps={[]}
+              progress={{ current: questions.length, total: settings.questionCount }}
+              foundSources={[]}
+              questions={questions}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              onDelete={handleDelete}
+              onApproveAll={handleApproveAll}
+              onRequestRegenerate={handleRequestRegenerate}
+            />
+          )}
+        </div>
+
+        {/* Chat Panel (Right - 30%) */}
+        <div className="w-[30%] overflow-hidden">
+          <ChatPanel
+            messages={chatMessages}
+            isStreaming={isGenerating}
+            onSendMessage={handleSendMessage}
+            onClearChat={handleClearChat}
+            selectedQuestionId={selectedQuestionId}
+            sessions={chatSessions}
+            currentSessionId={currentSessionId || undefined}
+            onNewConversation={handleNewConversation}
+            onDeleteConversation={handleDeleteConversation}
+            onSwitchSession={handleSwitchSession}
+            settings={{
+              aiProvider: settings.aiProvider,
+              modelName: settings.modelName,
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Settings Modal */}
+      <SettingsModal
+        open={isSettingsOpen}
+        onOpenChange={setIsSettingsOpen}
+        settings={settings}
+        onSettingsChange={setSettings}
+        isGenerating={isGenerating}
+      />
     </div>
   )
 }

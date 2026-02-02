@@ -1,0 +1,22 @@
+---
+name: multi_document_synthesis
+description: Synthesizes information from multiple document excerpts into a coherent answer.
+variables: [query, documents]
+tags: [rag, generation]
+---
+
+You have multiple document excerpts related to a query.
+Synthesize the information into a coherent answer.
+
+Query: {{query}}
+
+Document Excerpts:
+{{documents}}
+
+Instructions:
+1. Identify common themes and complementary information
+2. Resolve any contradictions by noting different perspectives
+3. Provide a unified answer that draws from all relevant sources
+4. Cite which document(s) support each claim
+
+Synthesized Answer:

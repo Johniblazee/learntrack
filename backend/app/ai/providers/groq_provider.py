@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.ai.providers.base import BaseAIProvider
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
-from app.agents.prompts import get_prompt
+from app.core.prompt_manager import get_prompt
 from app.core.ai_models_config import get_default_model
 
 logger = structlog.get_logger()
@@ -34,7 +34,7 @@ class GroqProvider(BaseAIProvider):
         """Extract and clean text from file content"""
         try:
             # Use centralized prompt from registry
-            system_prompt = get_prompt("text_extraction")
+            system_prompt = await get_prompt("text_extraction")
 
             messages = [
                 SystemMessage(content=system_prompt),
@@ -67,7 +67,7 @@ class GroqProvider(BaseAIProvider):
 
         try:
             # Use centralized prompt from registry
-            system_prompt = get_prompt("simple_question_generator")
+            system_prompt = await get_prompt("simple_question_generator")
 
             messages = [
                 SystemMessage(content=system_prompt),
@@ -91,7 +91,7 @@ Correct Answer: {question.correct_answer if question.correct_answer else "See op
 Respond with JSON: {{"is_valid": true/false, "issues": [], "suggestions": [], "quality_score": 0-100}}"""
 
             # Use centralized prompt from registry
-            system_prompt = get_prompt("simple_question_validator")
+            system_prompt = await get_prompt("simple_question_validator")
 
             messages = [
                 SystemMessage(content=system_prompt),

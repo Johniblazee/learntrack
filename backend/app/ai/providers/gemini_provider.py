@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.ai.providers.base import BaseAIProvider
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
-from app.agents.prompts import get_prompt
+from app.core.prompt_manager import get_prompt
 from app.core.ai_models_config import get_default_model
 
 logger = structlog.get_logger()
@@ -77,7 +77,7 @@ class GeminiProvider(BaseAIProvider):
         )
 
         try:
-            system_prompt = get_prompt("simple_question_generator")
+            system_prompt = await get_prompt("simple_question_generator")
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=prompt),

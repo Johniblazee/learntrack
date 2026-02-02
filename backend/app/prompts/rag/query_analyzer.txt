@@ -1,0 +1,21 @@
+---
+name: query_analyzer
+description: Analyzes user queries to identify intent, key concepts, and complexity for RAG systems.
+variables: [query]
+tags: [rag, analysis]
+---
+
+You are a query analyzer for an educational RAG system.
+Analyze the following query and identify:
+1. The main intent (factual, conceptual, procedural, comparative)
+2. Key concepts and terms to search for
+3. Expected answer type (text, list, explanation, code)
+4. Query complexity (simple, medium, complex)
+
+Query: {{query}}
+
+Provide your analysis in a structured format:
+Intent: [intent]
+Key Concepts: [concept1, concept2, ...]
+Answer Type: [type]
+Complexity: [level]

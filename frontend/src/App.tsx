@@ -21,7 +21,7 @@ import AccessDeniedPage from './pages/AccessDeniedPage'
 
 // Admin imports
 import { AdminLayout } from './components/admin/AdminLayout'
-import { AdminDashboardPage, TenantsPage, UsersPage, AdminSettingsPage, TenantAIConfigPage } from './pages/admin'
+import { AdminDashboardPage, TenantsPage, UsersPage, AdminSettingsPage, TenantAIConfigPage, ActivityPage } from './pages/admin'
 import { AdminProtectedRoute } from './components/admin/AdminProtectedRoute'
 import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
 
@@ -115,6 +115,7 @@ function App() {
                 <Route path="tenants/:tenantId/ai-config" element={<TenantAIConfigPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="settings" element={<AdminSettingsPage />} />
+                <Route path="activity" element={<ActivityPage />} />
                 {/* 404 Catch-all for undefined admin routes */}
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

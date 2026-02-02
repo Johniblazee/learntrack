@@ -12,6 +12,7 @@ import {
   Sun,
   ArrowLeft,
   Bell,
+  Activity,
 } from 'lucide-react'
 import { useUserContext } from '../../contexts/UserContext'
 import { useClerk } from '@clerk/clerk-react'
@@ -54,6 +55,7 @@ const navItems: NavItem[] = [
   { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
   { name: 'Tenants', path: '/admin/tenants', icon: Building2, permission: 'view_all_tenants' },
   { name: 'Users', path: '/admin/users', icon: Users, permission: 'view_all_users' },
+  { name: 'Activity', path: '/admin/activity', icon: Activity, permission: 'view_system_logs' },
   { name: 'Settings', path: '/admin/settings', icon: Settings, permission: 'manage_system_settings' },
 ]
 

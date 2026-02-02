@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Edit, Search, X, Users, UserPlus } from 'lucide-react'
+import { Edit, Search, X, Users, UserPlus, RefreshCw, Loader2 } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
 import { useApiClient } from '@/lib/api-client'
 
@@ -32,6 +32,8 @@ interface Group {
   name: string
   description?: string
   studentIds?: string[]
+  imageUrl?: string
+  color?: string
 }
 
 interface EditGroupModalProps {
@@ -49,8 +51,10 @@ export function EditGroupModal({
 }: EditGroupModalProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [imageUrl, setImageUrl] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [loadingStudents, setLoadingStudents] = useState(false)
+  const [regeneratingImage, setRegeneratingImage] = useState(false)
   const [allStudents, setAllStudents] = useState<Student[]>([])
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -62,6 +66,7 @@ export function EditGroupModal({
     if (open && group) {
       setName(group.name)
       setDescription(group.description || '')
+      setImageUrl(group.imageUrl || '')
       // Filter out any null/undefined values from studentIds
       const validStudentIds = (group.studentIds || []).filter((id): id is string => id != null && id !== '')
       setSelectedStudentIds(validStudentIds)
@@ -122,6 +127,29 @@ export function EditGroupModal({
     setSelectedStudentIds(prev => prev.filter(id => id !== studentId))
   }
 
+  const handleRegenerateImage = async () => {
+    if (!group) return
+    
+    try {
+      setRegeneratingImage(true)
+      const response = await client.post(`/groups/${group._id}/regenerate-image`, {})
+      
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      setImageUrl(response.data?.imageUrl || '')
+      toast.success('Cover image updated!')
+    } catch (error: any) {
+      console.error('Failed to regenerate image:', error)
+      toast.error('Failed to update image', {
+        description: error.message || 'Please try again'
+      })
+    } finally {
+      setRegeneratingImage(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -167,6 +195,59 @@ export function EditGroupModal({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden space-y-4">
+          {/* Image Preview Section */}
+          <div className="space-y-2">
+            <Label>Cover Image</Label>
+            <div className="relative rounded-lg overflow-hidden border bg-muted/30 aspect-[2/1]">
+              {imageUrl ? (
+                <>
+                  <img
+                    src={imageUrl}
+                    alt="Group cover"
+                    className="w-full h-full object-cover"
+                    onError={() => {
+                      setImageUrl('')
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleRegenerateImage}
+                      disabled={regeneratingImage}
+                      className="bg-white/90 hover:bg-white text-foreground shadow-lg"
+                    >
+                      {regeneratingImage ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      <span className="ml-1">Regenerate Image</span>
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full gap-3">
+                  <span className="text-sm text-muted-foreground">No cover image</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRegenerateImage}
+                    disabled={regeneratingImage}
+                  >
+                    {regeneratingImage ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-1" />
+                    )}
+                    Generate Image
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Group Name */}
           <div className="space-y-2">
             <Label htmlFor="edit-group-name">Group Name *</Label>

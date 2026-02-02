@@ -1,0 +1,6 @@
+{
+	"dependencies": {
+		"@radix-ui/react-use-controllable-state": "^1.2.2",
+		"framer-motion": "^12.29.2"
+	}
+}

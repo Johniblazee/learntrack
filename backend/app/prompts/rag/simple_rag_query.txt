@@ -1,0 +1,16 @@
+---
+name: simple_rag_query
+description: Basic prompt for answering questions from context (non-agentic use).
+variables: [context, query]
+tags: [rag]
+---
+
+Answer the following question based on the provided context.
+If the context doesn't contain relevant information, say "I don't have enough information to answer this question."
+
+Context:
+{{context}}
+
+Question: {{query}}
+
+Answer:

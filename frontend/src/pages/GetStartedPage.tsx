@@ -21,21 +21,21 @@ export default function GetStartedPage() {
       title: 'I am a Tutor',
       description: 'Create courses, manage assignments, and track student progress.',
       icon: GraduationCap,
-      iconColor: 'text-orange-500'
+      iconColor: 'text-[#5c4a38]'
     },
     {
       id: 'student',
       title: 'I am a Student',
       description: 'Access course materials, submit assignments, and view your grades.',
       icon: BookOpen,
-      iconColor: 'text-yellow-500'
+      iconColor: 'text-[#5c4a38]'
     },
     {
       id: 'parent',
       title: 'I am a Parent',
       description: "Monitor your child's progress, view assignments, and communicate with tutors.",
       icon: Users,
-      iconColor: 'text-orange-500'
+      iconColor: 'text-[#5c4a38]'
     }
   ]
 
@@ -65,8 +65,8 @@ export default function GetStartedPage() {
                 className={`
                   relative p-6 rounded-xl text-left transition-all duration-200
                   ${isSelected
-                    ? 'bg-gray-800 dark:bg-gray-700 ring-2 ring-[#C8A882]'
-                    : 'bg-gray-100 dark:bg-gray-800/50 hover:bg-gray-200 dark:hover:bg-gray-700/50'
+                    ? 'bg-[#5c4a38]/10 dark:bg-[#5c4a38]/20 ring-2 ring-[#5c4a38]'
+                    : 'bg-gray-100 dark:bg-gray-800/50 hover:bg-[#5c4a38]/10 dark:hover:bg-[#5c4a38]/10'
                   }
                 `}
               >
@@ -88,7 +88,7 @@ export default function GetStartedPage() {
                 {/* Selection Indicator */}
                 {isSelected && (
                   <div className="absolute top-4 right-4">
-                    <div className="w-6 h-6 bg-[#C8A882] rounded-full flex items-center justify-center">
+                    <div className="w-6 h-6 bg-[#5c4a38] rounded-full flex items-center justify-center">
                       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
@@ -108,7 +108,7 @@ export default function GetStartedPage() {
             className={`
               px-12 py-3 rounded-lg font-semibold text-lg transition-all duration-200
               ${selectedRole
-                ? 'bg-[#C8A882] hover:bg-[#B89872] text-white shadow-lg hover:shadow-xl'
+                ? 'bg-[#5c4a38] hover:bg-[#4a3a2a] text-white shadow-lg hover:shadow-xl'
                 : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-500 cursor-not-allowed'
               }
             `}
@@ -123,7 +123,7 @@ export default function GetStartedPage() {
             Already have an account?{' '}
             <button
               onClick={() => navigate('/sign-in')}
-              className="text-[#C8A882] hover:text-[#B89872] font-semibold transition-colors"
+              className="text-[#5c4a38] hover:text-[#4a3a2a] font-semibold transition-colors"
             >
               Sign in here
             </button>

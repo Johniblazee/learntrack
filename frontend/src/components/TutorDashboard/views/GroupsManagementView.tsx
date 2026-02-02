@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Search, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, Users, BookOpen, RefreshCw, Loader2, X } from 'lucide-react'
 import { useAuth } from '@clerk/clerk-react'
 import { toast } from '@/contexts/ToastContext'
 import { CreateGroupModal } from '@/components/modals/CreateGroupModal'
 import { EditGroupModal } from '@/components/modals/EditGroupModal'
 import { ViewGroupDetailsModal } from '@/components/modals/ViewGroupDetailsModal'
 import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal'
+import { Badge } from '@/components/ui/badge'
+import { useApiClient } from '@/lib/api-client'
 
 interface StudentGroup {
   _id: string
@@ -17,11 +19,13 @@ interface StudentGroup {
   studentIds: string[]
   subjects: string[]
   color: string
+  imageUrl?: string
   averageScore?: number
 }
 
 export default function GroupsManagementView() {
   const { getToken } = useAuth()
+  const client = useApiClient()
   const [groups, setGroups] = useState<StudentGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -29,8 +33,10 @@ export default function GroupsManagementView() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [selectedGroup, setSelectedGroup] = useState<any>(null)
+  const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [regeneratingImage, setRegeneratingImage] = useState<string | null>(null)
+  const [removingImage, setRemovingImage] = useState<string | null>(null)
 
   useEffect(() => {
     loadGroups()
@@ -39,8 +45,8 @@ export default function GroupsManagementView() {
   const loadGroups = async () => {
     try {
       setLoading(true)
-      const token = await getToken()
       const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const token = await getToken()
 
       const response = await fetch(`${API_BASE}/groups/`, {
         headers: {
@@ -65,8 +71,8 @@ export default function GroupsManagementView() {
 
     try {
       setDeleting(true)
-      const token = await getToken()
       const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const token = await getToken()
 
       const response = await fetch(`${API_BASE}/groups/${selectedGroup._id}`, {
         method: 'DELETE',
@@ -89,17 +95,59 @@ export default function GroupsManagementView() {
     }
   }
 
-  const openDeleteModal = (group: any) => {
+  const handleRegenerateImage = async (group: StudentGroup) => {
+    try {
+      setRegeneratingImage(group._id)
+      const response = await client.post(`/groups/${group._id}/regenerate-image`, {})
+      
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      toast.success('Cover image updated!')
+      loadGroups()
+    } catch (error: any) {
+      console.error('Failed to regenerate image:', error)
+      toast.error('Failed to update image', {
+        description: error.message || 'Please try again'
+      })
+    } finally {
+      setRegeneratingImage(null)
+    }
+  }
+
+  const handleRemoveImage = async (group: StudentGroup) => {
+    try {
+      setRemovingImage(group._id)
+      const response = await client.delete(`/groups/${group._id}/image`)
+      
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      toast.success('Cover image removed')
+      loadGroups()
+    } catch (error: any) {
+      console.error('Failed to remove image:', error)
+      toast.error('Failed to remove image', {
+        description: error.message || 'Please try again'
+      })
+    } finally {
+      setRemovingImage(null)
+    }
+  }
+
+  const openDeleteModal = (group: StudentGroup) => {
     setSelectedGroup(group)
     setShowDeleteModal(true)
   }
 
-  const handleEditGroup = (group: any) => {
+  const handleEditGroup = (group: StudentGroup) => {
     setSelectedGroup(group)
     setShowEditModal(true)
   }
 
-  const handleViewDetails = (group: any) => {
+  const handleViewDetails = (group: StudentGroup) => {
     setSelectedGroup(group)
     setShowViewModal(true)
   }
@@ -107,19 +155,45 @@ export default function GroupsManagementView() {
   // Filter groups by search term
   const filteredGroups = groups.filter(group => {
     const searchLower = searchTerm.toLowerCase()
-    return group.name.toLowerCase().includes(searchLower)
+    return group.name.toLowerCase().includes(searchLower) ||
+           group.description.toLowerCase().includes(searchLower)
   })
+
+  // Get initials for avatar fallback
+  const getInitials = (name: string) => {
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+  }
+
+  // Get color class based on group color
+  const getColorClass = (color: string) => {
+    const colorMap: Record<string, string> = {
+      'blue': 'bg-blue-100 text-blue-700',
+      'green': 'bg-emerald-100 text-emerald-700',
+      'purple': 'bg-purple-100 text-purple-700',
+      'orange': 'bg-orange-100 text-orange-700',
+      'red': 'bg-red-100 text-red-700',
+      'pink': 'bg-pink-100 text-pink-700',
+      'yellow': 'bg-yellow-100 text-yellow-700',
+      'indigo': 'bg-indigo-100 text-indigo-700',
+    }
+    return colorMap[color] || 'bg-slate-100 text-slate-700'
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-foreground">
-          Manage Student Groups
-        </h1>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">
+            Manage Student Groups
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Organize your students into groups for better management
+          </p>
+        </div>
         <Button
           onClick={() => setShowCreateModal(true)}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
+          className="bg-[#5c4a38] hover:bg-[#4a3c2e] text-white"
         >
           <Plus className="w-4 h-4 mr-2" />
           Create New Group
@@ -130,7 +204,7 @@ export default function GroupsManagementView() {
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
         <Input
-          placeholder="Find a group by name..."
+          placeholder="Search groups by name or description..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-10 bg-muted/50"
@@ -139,83 +213,179 @@ export default function GroupsManagementView() {
 
       {/* Groups Grid */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, index) => (
-            <Card key={index} className="border-0 shadow-sm bg-card">
-              <CardContent className="p-6">
-                <div className="space-y-4">
-                  <div className="h-6 bg-muted rounded w-3/4 animate-pulse"></div>
+            <Card key={index} className="border shadow-sm bg-card overflow-hidden">
+              <div className="aspect-[16/9] bg-muted animate-pulse" />
+              <CardContent className="p-4">
+                <div className="space-y-3">
+                  <div className="h-5 bg-muted rounded w-3/4 animate-pulse"></div>
                   <div className="h-4 bg-muted rounded w-1/2 animate-pulse"></div>
-                  <div className="h-4 bg-muted rounded w-1/3 animate-pulse"></div>
-                  <div className="h-10 bg-muted rounded w-full animate-pulse"></div>
+                  <div className="h-8 bg-muted rounded w-full animate-pulse"></div>
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
       ) : filteredGroups.length === 0 ? (
-        <Card className="border-0 shadow-sm bg-card">
-          <CardContent className="py-12">
-            <div className="text-center text-muted-foreground">
-              <p className="text-lg font-medium">No groups found</p>
-              <p className="text-sm mt-2">
-                {searchTerm ? 'Try a different search term' : 'Create your first group to get started'}
+        <Card className="border shadow-sm bg-card">
+          <CardContent className="py-16">
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-4">
+                <Users className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <h3 className="text-lg font-semibold text-foreground mb-2">
+                No groups found
+              </h3>
+              <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
+                {searchTerm 
+                  ? "Try adjusting your search terms to find what you're looking for."
+                  : "Create your first group to start organizing your students and tracking their progress together."
+                }
               </p>
+              {!searchTerm && (
+                <Button
+                  onClick={() => setShowCreateModal(true)}
+                  className="bg-[#5c4a38] hover:bg-[#4a3c2e] text-white"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Your First Group
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredGroups.map((group) => (
-            <Card key={group._id} className="border-0 shadow-sm bg-card hover:shadow-md transition-shadow">
-              <CardContent className="p-6">
-                <div className="space-y-4">
-                  {/* Group Header */}
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-bold text-foreground truncate">
-                        {group.name}
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {group.studentIds.length} Student{group.studentIds.length !== 1 ? 's' : ''}
-                      </p>
+            <Card 
+              key={group._id} 
+              className="border shadow-sm bg-card hover:shadow-md transition-shadow overflow-hidden group"
+            >
+              {/* Image Section - Smaller 16:9 aspect ratio */}
+              <div className="relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-[#5c4a38]/10 to-[#8b7355]/10">
+                {group.imageUrl ? (
+                  <>
+                    <img
+                      src={group.imageUrl}
+                      alt={group.name}
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
+                    {/* Hover overlay with regenerate and remove buttons */}
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col items-center justify-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleRegenerateImage(group)}
+                        disabled={regeneratingImage === group._id}
+                        className="bg-white/90 hover:bg-white"
+                      >
+                        {regeneratingImage === group._id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        <span className="ml-1">New Image</span>
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleRemoveImage(group)}
+                        disabled={removingImage === group._id}
+                        className="bg-red-600/90 hover:bg-red-600"
+                      >
+                        {removingImage === group._id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <X className="h-4 w-4" />
+                        )}
+                        <span className="ml-1">Remove</span>
+                      </Button>
                     </div>
-                    <div className="flex items-center gap-1 ml-2">
-                      <Button
-                        onClick={() => handleEditGroup(group)}
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        onClick={() => openDeleteModal(group)}
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold ${getColorClass(group.color)}`}>
+                      {getInitials(group.name)}
                     </div>
                   </div>
+                )}
+              </div>
 
-                  {/* Average Score */}
-                  {group.averageScore !== undefined && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Avg. Score: <span className="font-semibold text-foreground">{group.averageScore}%</span>
+              <CardContent className="p-4">
+                <div className="space-y-3">
+                  {/* Group Header */}
+                  <div>
+                    <h3 className="text-base font-bold text-foreground truncate group-hover:text-[#5c4a38] transition-colors">
+                      {group.name}
+                    </h3>
+                    {group.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                        {group.description}
                       </p>
+                    )}
+                  </div>
+
+                  {/* Stats Row - Compact */}
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1">
+                      <Users className="h-3.5 w-3.5" />
+                      <span>
+                        {group.studentIds.length} Student{group.studentIds.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    {group.subjects && group.subjects.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        <BookOpen className="h-3.5 w-3.5" />
+                        <span>{group.subjects.length} Subject{group.subjects.length !== 1 ? 's' : ''}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Subject Badges - Compact */}
+                  {group.subjects && group.subjects.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {group.subjects.slice(0, 2).map((subject, idx) => (
+                        <Badge key={idx} variant="secondary" className="text-[10px] px-1.5 py-0 bg-[#5c4a38]/10 text-[#5c4a38] hover:bg-[#5c4a38]/20">
+                          {subject}
+                        </Badge>
+                      ))}
+                      {group.subjects.length > 2 && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          +{group.subjects.length - 2}
+                        </Badge>
+                      )}
                     </div>
                   )}
 
-                  {/* View Details Button */}
-                  <Button
-                    onClick={() => handleViewDetails(group)}
-                    className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                  >
-                    View Details
-                  </Button>
+                  {/* Action Buttons - Compact */}
+                  <div className="flex gap-1.5 pt-1">
+                    <Button
+                      onClick={() => handleViewDetails(group)}
+                      className="flex-1 bg-[#5c4a38] hover:bg-[#4a3c2e] text-white text-xs h-8"
+                    >
+                      View
+                    </Button>
+                    <Button
+                      onClick={() => handleEditGroup(group)}
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      onClick={() => openDeleteModal(group)}
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -256,4 +426,3 @@ export default function GroupsManagementView() {
     </div>
   )
 }
-

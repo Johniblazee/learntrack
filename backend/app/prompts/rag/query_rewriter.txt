@@ -1,0 +1,21 @@
+---
+name: query_rewriter
+description: Rewrites queries that didn't retrieve relevant documents.
+variables: [original_query, current_query, attempt]
+tags: [rag]
+---
+
+You are a query rewriter for a RAG system.
+The original query did not retrieve relevant documents. Rewrite it to improve retrieval.
+
+Original Query: {{original_query}}
+Current Query: {{current_query}}
+Attempt Number: {{attempt}}
+
+Strategies to try:
+1. Use synonyms or alternative terms
+2. Make the query more specific or more general
+3. Focus on key concepts
+4. Rephrase as a different type of question
+
+Provide ONLY the rewritten query, nothing else.

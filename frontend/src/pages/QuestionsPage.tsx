@@ -1,20 +1,67 @@
-import { useUser, UserButton } from '@clerk/clerk-react'
+import { useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useEffect, useState } from 'react'
 import { Button } from "@/components/ui/button"
 import { Header } from "@/components/ui/header"
-import { HelpCircle, BookOpen, ArrowLeft } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { HelpCircle, ArrowLeft, Sparkles, Database, Plus } from "lucide-react"
+import AIQuestionGenerator from "@/components/ai/question-generator"
+import QuestionBankManager from "@/components/question-bank-manager"
+import { GeneratedQuestion } from "@/hooks/useQuestionGenerator"
+import { toast } from "@/contexts/ToastContext"
+import { useApiClient } from "@/lib/api-client"
 
 export default function QuestionsPage() {
-  const { isLoaded, isSignedIn, user } = useUser()
+  const { isLoaded, isSignedIn } = useUser()
   const navigate = useNavigate()
+  const client = useApiClient()
+  const [activeTab, setActiveTab] = useState("ai-generator")
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
       navigate('/sign-in')
     }
   }, [isLoaded, isSignedIn, navigate])
+
+  // Handle adding generated questions to the bank
+  const handleQuestionsGenerated = async (questions: GeneratedQuestion[]) => {
+    try {
+      let addedCount = 0
+      
+      for (const question of questions) {
+        const createData = {
+          question_text: question.question_text,
+          subject_id: question.subject || '',
+          topic: question.topic || '',
+          question_type: question.type,
+          difficulty: question.difficulty,
+          options: question.options,
+          correct_answer: question.correct_answer,
+          explanation: question.explanation,
+          points: 1,
+          tags: question.tags || [],
+          status: 'active',
+        }
+
+        const response = await client.post('/questions/', createData)
+        
+        if (!response.error) {
+          addedCount++
+        }
+      }
+
+      if (addedCount > 0) {
+        toast.success(`Added ${addedCount} question${addedCount !== 1 ? 's' : ''} to your question bank`)
+        // Switch to the question bank tab to show the new questions
+        setActiveTab("question-bank")
+      } else {
+        toast.error('Failed to add questions to the bank')
+      }
+    } catch (err) {
+      console.error('Failed to add questions:', err)
+      toast.error('Failed to add questions to the bank')
+    }
+  }
 
   if (!isLoaded || !isSignedIn) {
     return (
@@ -43,24 +90,26 @@ export default function QuestionsPage() {
           <h1 className="text-3xl font-bold text-foreground">Question Bank</h1>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>AI Question Generator</CardTitle>
-            <CardDescription>Generate questions using artificial intelligence.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground mb-4">
-              The AI-powered question generation feature will be available here. Create custom questions for your assignments and assessments.
-            </p>
-            <div className="space-y-2 text-sm text-muted-foreground">
-              <p>• Generate questions from text prompts</p>
-              <p>• Multiple question types (MCQ, Short Answer, Essay)</p>
-              <p>• Difficulty level adjustment</p>
-              <p>• Subject-specific question generation</p>
-              <p>• Question bank management</p>
-            </div>
-          </CardContent>
-        </Card>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="ai-generator" className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              AI Generator
+            </TabsTrigger>
+            <TabsTrigger value="question-bank" className="flex items-center gap-2">
+              <Database className="h-4 w-4" />
+              My Questions
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="ai-generator" className="space-y-6">
+            <AIQuestionGenerator onQuestionsGenerated={handleQuestionsGenerated} />
+          </TabsContent>
+
+          <TabsContent value="question-bank">
+            <QuestionBankManager />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   )

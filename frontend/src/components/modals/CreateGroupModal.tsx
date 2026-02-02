@@ -38,7 +38,10 @@ export function CreateGroupModal({
     try {
       setLoading(true)
 
-      const response = await client.post('/groups/', { name, description })
+      const response = await client.post('/groups/', { 
+        name, 
+        description
+      })
 
       if (response.error) {
         throw new Error(response.error)
@@ -63,8 +66,14 @@ export function CreateGroupModal({
     }
   }
 
+  const handleClose = () => {
+    setName('')
+    setDescription('')
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -96,11 +105,15 @@ export function CreateGroupModal({
             />
           </div>
 
+          <p className="text-xs text-muted-foreground">
+            A cover image will be automatically generated based on your group name.
+          </p>
+
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={handleClose}
               disabled={loading}
             >
               Cancel
@@ -114,4 +127,3 @@ export function CreateGroupModal({
     </Dialog>
   )
 }
-

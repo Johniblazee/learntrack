@@ -1,6 +1,7 @@
 """
 Student models and schemas
 """
+
 from datetime import datetime, timezone
 from typing import Optional, List, Union
 from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
@@ -11,33 +12,69 @@ from app.models.user import PyObjectId
 
 class StudentBase(BaseModel):
     name: str = Field(..., description="Student's full name", example="John Smith")
-    email: EmailStr = Field(..., description="Student's email address", example="john.smith@example.com")
-    phone: Optional[str] = Field(None, description="Student's phone number", example="+1-555-0123")
-    grade: Optional[str] = Field(None, description="Student's grade level", example="10th")
-    subjects: List[str] = Field(default=[], description="List of subjects the student is enrolled in", example=["Mathematics", "Science"])
-    status: str = Field(default="active", description="Student's enrollment status", example="active")
-    parentEmail: Optional[str] = Field(None, description="Parent's email address", example="parent@example.com")
-    parentPhone: Optional[str] = Field(None, description="Parent's phone number", example="+1-555-0456")
-    averageScore: float = Field(default=0.0, description="Student's average score across all assignments", example=85.5)
-    completionRate: float = Field(default=0.0, description="Percentage of assignments completed", example=92.3)
-    totalAssignments: int = Field(default=0, description="Total number of assignments given", example=15)
-    completedAssignments: int = Field(default=0, description="Number of assignments completed", example=14)
-    notes: Optional[str] = Field(None, description="Additional notes about the student", example="Excellent progress in mathematics")
-    tutor_id: str = Field(..., description="Tutor ID - references the tutor's Clerk user ID")
-    parent_ids: List[str] = Field(default=[], description="List of parent Clerk user IDs who can access this student")
+    email: EmailStr = Field(
+        ..., description="Student's email address", example="john.smith@example.com"
+    )
+    phone: Optional[str] = Field(
+        None, description="Student's phone number", example="+1-555-0123"
+    )
+    grade: Optional[str] = Field(
+        None, description="Student's grade level", example="10th"
+    )
+    subjects: List[str] = Field(
+        default=[],
+        description="List of subjects the student is enrolled in",
+        example=["Mathematics", "Science"],
+    )
+    status: str = Field(
+        default="active", description="Student's enrollment status", example="active"
+    )
+    parentEmail: Optional[str] = Field(
+        None, description="Parent's email address", example="parent@example.com"
+    )
+    parentPhone: Optional[str] = Field(
+        None, description="Parent's phone number", example="+1-555-0456"
+    )
+    averageScore: float = Field(
+        default=0.0,
+        description="Student's average score across all assignments",
+        example=85.5,
+    )
+    completionRate: float = Field(
+        default=0.0, description="Percentage of assignments completed", example=92.3
+    )
+    totalAssignments: int = Field(
+        default=0, description="Total number of assignments given", example=15
+    )
+    completedAssignments: int = Field(
+        default=0, description="Number of assignments completed", example=14
+    )
+    notes: Optional[str] = Field(
+        None,
+        description="Additional notes about the student",
+        example="Excellent progress in mathematics",
+    )
+    tutor_id: str = Field(
+        ..., description="Tutor ID - references the tutor's Clerk user ID"
+    )
+    parent_ids: List[str] = Field(
+        default=[],
+        description="List of parent Clerk user IDs who can access this student",
+    )
 
-    @field_validator('parentEmail')
+    @field_validator("parentEmail")
     @classmethod
     def validate_parent_email(cls, v):
         if v is None or v == "":
             return None
         # Validate as email if not empty
         from pydantic import ValidationError
+
         try:
             EmailStr._validate(v, None)
             return v
         except ValidationError:
-            raise ValueError('Invalid email format')
+            raise ValueError("Invalid email format")
 
 
 class StudentCreate(StudentBase):
@@ -53,7 +90,7 @@ class StudentCreate(StudentBase):
                 "subjects": ["Physics", "Chemistry"],
                 "parentEmail": "parent.doe@example.com",
                 "parentPhone": "+1-555-0987",
-                "notes": "Interested in STEM subjects"
+                "notes": "Interested in STEM subjects",
             }
         }
     )
@@ -61,11 +98,22 @@ class StudentCreate(StudentBase):
 
 class StudentUpdate(BaseModel):
     """Schema for updating an existing student"""
-    name: Optional[str] = Field(None, description="Student's full name", example="John Smith")
-    email: Optional[EmailStr] = Field(None, description="Student's email address", example="john.smith@example.com")
-    phone: Optional[str] = Field(None, description="Student's phone number", example="+1-555-0123")
-    grade: Optional[str] = Field(None, description="Student's grade level", example="10th")
-    subjects: Optional[List[str]] = Field(None, description="List of subjects", example=["Mathematics", "Science"])
+
+    name: Optional[str] = Field(
+        None, description="Student's full name", example="John Smith"
+    )
+    email: Optional[EmailStr] = Field(
+        None, description="Student's email address", example="john.smith@example.com"
+    )
+    phone: Optional[str] = Field(
+        None, description="Student's phone number", example="+1-555-0123"
+    )
+    grade: Optional[str] = Field(
+        None, description="Student's grade level", example="10th"
+    )
+    subjects: Optional[List[str]] = Field(
+        None, description="List of subjects", example=["Mathematics", "Science"]
+    )
     status: Optional[str] = None
     parentEmail: Optional[str] = None
     parentPhone: Optional[str] = None
@@ -75,18 +123,19 @@ class StudentUpdate(BaseModel):
     completedAssignments: Optional[int] = None
     notes: Optional[str] = None
 
-    @field_validator('parentEmail')
+    @field_validator("parentEmail")
     @classmethod
     def validate_parent_email(cls, v):
         if v is None or v == "":
             return None
         # Validate as email if not empty
         from pydantic import ValidationError
+
         try:
             EmailStr._validate(v, None)
             return v
         except ValidationError:
-            raise ValueError('Invalid email format')
+            raise ValueError("Invalid email format")
 
 
 class StudentInDB(StudentBase):
@@ -113,7 +162,10 @@ class StudentGroupBase(BaseModel):
     studentIds: List[str] = []  # store student _id strings
     subjects: List[str] = []  # using subject names for MVP simplicity
     color: str = "blue"
-    tutor_id: str = Field(..., description="Tutor ID - references the tutor's Clerk user ID")
+    imageUrl: Optional[str] = Field(None, description="URL to the group's cover image")
+    tutor_id: str = Field(
+        ..., description="Tutor ID - references the tutor's Clerk user ID"
+    )
 
 
 class StudentGroupCreate(StudentGroupBase):
@@ -126,6 +178,7 @@ class StudentGroupUpdate(BaseModel):
     studentIds: Optional[List[str]] = None
     subjects: Optional[List[str]] = None
     color: Optional[str] = None
+    imageUrl: Optional[str] = None
 
 
 class StudentGroupInDB(StudentGroupBase):
@@ -135,14 +188,14 @@ class StudentGroupInDB(StudentGroupBase):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Coerce legacy ObjectId values to strings for compatibility
-    @field_validator('id', mode='before')
+    @field_validator("id", mode="before")
     @classmethod
     def validate_object_id(cls, v):
         if isinstance(v, ObjectId):
             return str(v)
         return v
 
-    @field_validator('studentIds', mode='before')
+    @field_validator("studentIds", mode="before")
     @classmethod
     def validate_student_ids(cls, v):
         if v is None:
@@ -160,5 +213,3 @@ class StudentGroupInDB(StudentGroupBase):
 
 class StudentGroup(StudentGroupInDB):
     pass
-
-

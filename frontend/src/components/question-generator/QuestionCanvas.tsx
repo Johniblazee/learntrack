@@ -44,8 +44,7 @@ interface QuestionCanvasProps {
   // Actions
   onApprove?: (id: string) => void
   onReject?: (id: string) => void
-  onEdit?: (id: string, data: Partial<GeneratedQuestion>) => void
-  onRegenerate?: (id: string) => void
+  onRequestRegenerate?: (id: string, defaultMessage: string) => void
   onDelete?: (id: string) => void
   onApproveAll?: () => void
   onExport?: () => void
@@ -113,8 +112,7 @@ export function QuestionCanvas({
   streamingContent,
   onApprove,
   onReject,
-  onEdit,
-  onRegenerate,
+  onRequestRegenerate,
   onDelete,
   onApproveAll,
   onExport,
@@ -167,8 +165,7 @@ export function QuestionCanvas({
                       isStreaming={false}
                       onApprove={onApprove}
                       onReject={onReject}
-                      onEdit={onEdit}
-                      onRegenerate={onRegenerate}
+                      onRequestRegenerate={onRequestRegenerate}
                       onDelete={onDelete}
                     />
                   </motion.div>

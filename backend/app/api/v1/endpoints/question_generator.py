@@ -15,47 +15,73 @@ import structlog
 from app.core.dependencies import get_rag_service, get_database
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
 from app.core.ai_models_config import get_all_active_models_for_dropdown
-from app.agents.graph.state import GenerationConfig, QuestionType, Difficulty, BloomsLevel, GenerationSession
+from app.agents.graph.state import (
+    GenerationConfig,
+    QuestionType,
+    Difficulty,
+    BloomsLevel,
+    GenerationSession,
+)
 from app.agents.graph.question_generator_graph import QuestionGeneratorAgent
 from app.agents.streaming.sse_handler import SSEHandler
 from app.ai.services.ai_manager import get_tenant_ai_manager
 from app.services.tenant_ai_config_service import TenantAIConfigService
 from app.services.generation_session_service import GenerationSessionService
+from app.services.web_search_service import WebSearchService
 from app.models.generation_session import SessionStatus, QuestionStatus, StoredQuestion
-from app.utils.enums import normalize_question_type, normalize_difficulty, normalize_provider
+from app.utils.enums import (
+    normalize_question_type,
+    normalize_difficulty,
+    normalize_provider,
+)
 
 logger = structlog.get_logger()
 router = APIRouter()
 
-async def get_session_service(db = Depends(get_database)):
+
+async def get_session_service(db=Depends(get_database)):
     """Dependency for session service"""
     return GenerationSessionService(db)
 
 
 class GenerateRequest(BaseModel):
     """Request body for question generation"""
+
     prompt: str = Field(..., description="User's generation prompt")
-    question_count: int = Field(default=1, ge=1, le=20, description="Number of questions")
-    question_types: List[str] = Field(default=["multiple-choice"], description="Question types to generate")
+    question_count: int = Field(
+        default=1, ge=1, le=20, description="Number of questions"
+    )
+    question_types: List[str] = Field(
+        default=["multiple-choice"], description="Question types to generate"
+    )
     difficulty: str = Field(default="medium", description="Difficulty level")
-    material_ids: Optional[List[str]] = Field(default=None, description="Material IDs to use")
+    material_ids: Optional[List[str]] = Field(
+        default=None, description="Material IDs to use"
+    )
     grade_level: Optional[str] = Field(default=None, description="Target grade level")
     subject: Optional[str] = Field(default=None, description="Subject area")
     topic: Optional[str] = Field(default=None, description="Specific topic")
     ai_provider: Optional[str] = Field(default=None, description="AI provider to use")
     model_name: Optional[str] = Field(default=None, description="Specific model to use")
-    blooms_levels: Optional[List[str]] = Field(default=None, description="Bloom's taxonomy levels to target (REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, CREATE)")
+    blooms_levels: Optional[List[str]] = Field(
+        default=None,
+        description="Bloom's taxonomy levels to target (REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, CREATE)",
+    )
 
 
 class EditQuestionRequest(BaseModel):
     """Request body for editing a question"""
+
     question_id: str = Field(..., description="ID of question to edit")
     edit_instruction: str = Field(..., description="What to change")
-    new_source_ids: Optional[List[str]] = Field(default=None, description="New sources for regeneration")
+    new_source_ids: Optional[List[str]] = Field(
+        default=None, description="New sources for regeneration"
+    )
 
 
 class SessionResponse(BaseModel):
     """Response with session info"""
+
     session_id: str
     status: str
     questions_count: int
@@ -66,9 +92,9 @@ class SessionResponse(BaseModel):
 async def generate_questions(
     request: GenerateRequest,
     current_user: ClerkUserContext = Depends(require_tutor),
-    rag_service = Depends(get_rag_service),
+    rag_service=Depends(get_rag_service),
     session_service: GenerationSessionService = Depends(get_session_service),
-    database: AsyncIOMotorDatabase = Depends(get_database)
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Generate questions with streaming SSE output.
@@ -104,30 +130,52 @@ async def generate_questions(
             user_id=current_user.clerk_id,
             tenant_id=current_user.tutor_id,
             prompt=request.prompt,
-            config=config.model_dump() if hasattr(config, 'model_dump') else dict(config),
-            material_ids=request.material_ids
+            config=config.model_dump()
+            if hasattr(config, "model_dump")
+            else dict(config),
+            material_ids=request.material_ids,
         )
 
         # Get LLM with tenant-aware configuration
         config_service = TenantAIConfigService(database)
-        tenant_config = await config_service.get_or_create_default(current_user.tutor_id)
+        tenant_config = await config_service.get_or_create_default(
+            current_user.tutor_id
+        )
 
         # Normalize provider name (handles legacy 'google' -> 'gemini' mapping)
-        ai_provider = normalize_provider(request.ai_provider) if request.ai_provider else tenant_config.default_provider
+        ai_provider = (
+            normalize_provider(request.ai_provider)
+            if request.ai_provider
+            else tenant_config.default_provider
+        )
         model_name = request.model_name or tenant_config.default_model
 
         if ai_provider not in tenant_config.enabled_providers:
-            raise HTTPException(status_code=400, detail=f"Provider {ai_provider} is not enabled for this tenant")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider {ai_provider} is not enabled for this tenant",
+            )
 
-        provider_config = tenant_config.provider_configs.get(ai_provider) if tenant_config.provider_configs else None
-        if provider_config and provider_config.enabled_models and model_name not in provider_config.enabled_models:
-            raise HTTPException(status_code=400, detail=f"Model {model_name} is not enabled for provider {ai_provider}")
+        provider_config = (
+            tenant_config.provider_configs.get(ai_provider)
+            if tenant_config.provider_configs
+            else None
+        )
+        if (
+            provider_config
+            and provider_config.enabled_models
+            and model_name not in provider_config.enabled_models
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {model_name} is not enabled for provider {ai_provider}",
+            )
 
         ai_manager = await get_tenant_ai_manager(current_user.tutor_id, database)
         provider = ai_manager.get_provider(ai_provider)
 
         # Set specific model if provided
-        if model_name and hasattr(provider, 'set_model'):
+        if model_name and hasattr(provider, "set_model"):
             try:
                 provider.set_model(model_name)
                 logger.info("Model set", model=model_name, provider=ai_provider)
@@ -136,20 +184,27 @@ async def generate_questions(
 
         llm = provider.llm
 
-        # Create agent
-        agent = QuestionGeneratorAgent(llm=llm, rag_service=rag_service)
+        # Create agent with web search service for fallback
+        web_search_service = WebSearchService(database)
+        agent = QuestionGeneratorAgent(
+            llm=llm, rag_service=rag_service, web_search_service=web_search_service
+        )
 
         # Track saved questions count
         saved_questions_count = 0
 
         # Helpers to normalize enum/string values
-        def normalize_question_type_value(val: Optional[str], default: str = "multiple-choice") -> str:
+        def normalize_question_type_value(
+            val: Optional[str], default: str = "multiple-choice"
+        ) -> str:
             if val is None:
                 return default
             raw = val.value if hasattr(val, "value") else str(val)
             return normalize_question_type(raw).value
 
-        def normalize_difficulty_value(val: Optional[str], default: str = "medium") -> str:
+        def normalize_difficulty_value(
+            val: Optional[str], default: str = "medium"
+        ) -> str:
             if val is None:
                 return default
             raw = val.value if hasattr(val, "value") else str(val)
@@ -161,8 +216,12 @@ async def generate_questions(
             nonlocal saved_questions_count
             try:
                 # Handle both enum objects and string values
-                q_type = normalize_question_type_value(question_data.get("type"), "multiple-choice")
-                q_difficulty = normalize_difficulty_value(question_data.get("difficulty"), "medium")
+                q_type = normalize_question_type_value(
+                    question_data.get("type"), "multiple-choice"
+                )
+                q_difficulty = normalize_difficulty_value(
+                    question_data.get("difficulty"), "medium"
+                )
                 q_blooms = question_data.get("blooms_level")
                 if hasattr(q_blooms, "value"):
                     q_blooms = q_blooms.value
@@ -173,7 +232,7 @@ async def generate_questions(
                 raw_citations = question_data.get("source_citations", [])
                 citations = []
                 for c in raw_citations:
-                    if hasattr(c, 'model_dump'):
+                    if hasattr(c, "model_dump"):
                         citations.append(c.model_dump())
                     elif isinstance(c, dict):
                         citations.append(c)
@@ -183,11 +242,13 @@ async def generate_questions(
                     session_id=session.session_id,
                     question_id=question_data.get("question_id"),
                     type=q_type,
-                    difficulty=q_difficulty
+                    difficulty=q_difficulty,
                 )
 
                 stored_q = StoredQuestion(
-                    question_id=question_data.get("question_id", f"q{saved_questions_count + 1}"),
+                    question_id=question_data.get(
+                        "question_id", f"q{saved_questions_count + 1}"
+                    ),
                     type=q_type,
                     difficulty=q_difficulty,
                     blooms_level=q_blooms,
@@ -197,12 +258,10 @@ async def generate_questions(
                     explanation=question_data.get("explanation", ""),
                     source_citations=citations,
                     tags=question_data.get("tags", []),
-                    quality_score=question_data.get("quality_score", 0.85)
+                    quality_score=question_data.get("quality_score", 0.85),
                 )
                 result = await session_service.add_question(
-                    session.session_id,
-                    current_user.clerk_id,
-                    stored_q
+                    session.session_id, current_user.clerk_id, stored_q
                 )
                 if result:
                     saved_questions_count += 1
@@ -210,13 +269,13 @@ async def generate_questions(
                         "Question saved to database successfully",
                         session_id=session.session_id,
                         question_id=stored_q.question_id,
-                        total_saved=saved_questions_count
+                        total_saved=saved_questions_count,
                     )
                 else:
                     logger.warning(
                         "Question save returned False",
                         session_id=session.session_id,
-                        question_id=stored_q.question_id
+                        question_id=stored_q.question_id,
                     )
                 return result
             except Exception as e:
@@ -224,16 +283,16 @@ async def generate_questions(
                     "Failed to save question",
                     error=str(e),
                     error_type=type(e).__name__,
-                    question_id=question_data.get("question_id")
+                    question_id=question_data.get("question_id"),
                 )
                 import traceback
+
                 logger.error("Traceback", traceback=traceback.format_exc())
                 return False
 
         # Create SSE handler with session ID and save callback
         sse_handler = SSEHandler(
-            session_id=session.session_id,
-            on_question_complete=save_question_callback
+            session_id=session.session_id, on_question_complete=save_question_callback
         )
 
         async def run_generation():
@@ -244,7 +303,7 @@ async def generate_questions(
                 await session_service.update_session(
                     session.session_id,
                     current_user.clerk_id,
-                    status=SessionStatus.IN_PROGRESS.value
+                    status=SessionStatus.IN_PROGRESS.value,
                 )
 
                 result = await agent.generate(
@@ -253,7 +312,7 @@ async def generate_questions(
                     user_id=current_user.clerk_id,
                     tenant_id=current_user.tutor_id,
                     material_ids=request.material_ids,
-                    sse_handler=sse_handler
+                    sse_handler=sse_handler,
                 )
 
                 # Questions are now saved via callback as they're generated
@@ -261,7 +320,7 @@ async def generate_questions(
                 await session_service.update_session(
                     session.session_id,
                     current_user.clerk_id,
-                    status=SessionStatus.COMPLETED.value
+                    status=SessionStatus.COMPLETED.value,
                 )
 
                 # Note: send_done is already called in agent.generate()
@@ -275,7 +334,7 @@ async def generate_questions(
                     session.session_id,
                     current_user.clerk_id,
                     status=SessionStatus.FAILED.value,
-                    error_message=str(e)
+                    error_message=str(e),
                 )
                 await sse_handler.send_error(str(e))
 
@@ -288,7 +347,9 @@ async def generate_questions(
             session_event = {
                 "event_type": "session:created",
                 "session_id": session.session_id,
-                "timestamp": session.created_at.isoformat() if hasattr(session, 'created_at') else None
+                "timestamp": session.created_at.isoformat()
+                if hasattr(session, "created_at")
+                else None,
             }
             yield f"event: session:created\ndata: {json.dumps(session_event)}\n\n"
 
@@ -311,7 +372,7 @@ async def generate_questions(
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
-            }
+            },
         )
 
     except Exception as e:
@@ -324,9 +385,9 @@ async def edit_question(
     request: EditQuestionRequest,
     session_id: str = Query(..., description="Generation session ID"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    rag_service = Depends(get_rag_service),
+    rag_service=Depends(get_rag_service),
     session_service: GenerationSessionService = Depends(get_session_service),
-    database: AsyncIOMotorDatabase = Depends(get_database)
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Edit a single question from a generation session.
@@ -364,7 +425,7 @@ async def edit_question(
 
 Question Type: {question_to_edit.type}
 Question Text: {question_to_edit.question_text}
-Options: {question_to_edit.options if question_to_edit.options else 'N/A'}
+Options: {question_to_edit.options if question_to_edit.options else "N/A"}
 Correct Answer: {question_to_edit.correct_answer}
 Explanation: {question_to_edit.explanation}
 
@@ -382,6 +443,7 @@ Respond with a JSON object containing:
 
         # Get edited question from LLM
         from langchain_core.messages import HumanMessage
+
         response = await llm.ainvoke([HumanMessage(content=edit_prompt)])
 
         # Parse the response
@@ -390,7 +452,7 @@ Respond with a JSON object containing:
 
         # Try to extract JSON from the response
         response_text = response.content
-        json_match = re.search(r'\{[\s\S]*\}', response_text)
+        json_match = re.search(r"\{[\s\S]*\}", response_text)
 
         if json_match:
             try:
@@ -400,14 +462,23 @@ Respond with a JSON object containing:
                 updated_question = StoredQuestion(
                     question_id=question_to_edit.question_id,
                     type=question_to_edit.type,
-                    question_text=edited_data.get("question_text", question_to_edit.question_text),
+                    question_text=edited_data.get(
+                        "question_text", question_to_edit.question_text
+                    ),
                     options=edited_data.get("options", question_to_edit.options),
-                    correct_answer=edited_data.get("correct_answer", question_to_edit.correct_answer),
-                    explanation=edited_data.get("explanation", question_to_edit.explanation),
+                    correct_answer=edited_data.get(
+                        "correct_answer", question_to_edit.correct_answer
+                    ),
+                    explanation=edited_data.get(
+                        "explanation", question_to_edit.explanation
+                    ),
                     difficulty=question_to_edit.difficulty,
                     source_ids=request.new_source_ids or question_to_edit.source_ids,
                     status=question_to_edit.status,
-                    metadata={"edited": True, "edit_instruction": request.edit_instruction}
+                    metadata={
+                        "edited": True,
+                        "edit_instruction": request.edit_instruction,
+                    },
                 )
 
                 # Update in database
@@ -415,26 +486,30 @@ Respond with a JSON object containing:
                     {
                         "_id": session_id,
                         "user_id": current_user.clerk_id,
-                        "questions.question_id": request.question_id
+                        "questions.question_id": request.question_id,
                     },
                     {
                         "$set": {
                             f"questions.{question_index}": updated_question.model_dump()
                         }
-                    }
+                    },
                 )
 
                 if result.modified_count > 0:
                     return {
                         "message": "Question edited successfully",
                         "question_id": request.question_id,
-                        "edited_question": updated_question.model_dump()
+                        "edited_question": updated_question.model_dump(),
                     }
                 else:
-                    raise HTTPException(status_code=500, detail="Failed to update question in database")
+                    raise HTTPException(
+                        status_code=500, detail="Failed to update question in database"
+                    )
 
             except json.JSONDecodeError:
-                raise HTTPException(status_code=500, detail="Failed to parse AI response")
+                raise HTTPException(
+                    status_code=500, detail="Failed to parse AI response"
+                )
         else:
             raise HTTPException(status_code=500, detail="AI did not return valid JSON")
 
@@ -449,7 +524,7 @@ Respond with a JSON object containing:
 async def get_session(
     session_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """
     Get a generation session by ID.
@@ -470,7 +545,7 @@ async def list_sessions(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """
     List generation sessions for the current user.
@@ -482,14 +557,14 @@ async def list_sessions(
         tenant_id=current_user.tutor_id,  # tutor_id is used for tenant isolation
         status=status_enum,
         page=page,
-        per_page=per_page
+        per_page=per_page,
     )
 
     return {
         "items": [s.model_dump() for s in sessions],
         "page": page,
         "per_page": per_page,
-        "total": total
+        "total": total,
     }
 
 
@@ -498,7 +573,7 @@ async def get_pending_questions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """
     Get all pending questions across all sessions for the current tutor.
@@ -508,24 +583,21 @@ async def get_pending_questions(
         user_id=current_user.clerk_id,
         tenant_id=current_user.tutor_id,
         page=page,
-        per_page=per_page
+        per_page=per_page,
     )
 
-    return {
-        "items": questions,
-        "page": page,
-        "per_page": per_page,
-        "total": total
-    }
+    return {"items": questions, "page": page, "per_page": per_page, "total": total}
 
 
 @router.get("/all-questions")
 async def get_all_questions(
-    status: Optional[str] = Query(None, description="Filter by status: pending, approved, rejected, edited"),
+    status: Optional[str] = Query(
+        None, description="Filter by status: pending, approved, rejected, edited"
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """
     Get all questions across all sessions for the current tutor.
@@ -538,15 +610,10 @@ async def get_all_questions(
         tenant_id=current_user.tutor_id,
         status=status_enum,
         page=page,
-        per_page=per_page
+        per_page=per_page,
     )
 
-    return {
-        "items": questions,
-        "page": page,
-        "per_page": per_page,
-        "total": total
-    }
+    return {"items": questions, "page": page, "per_page": per_page, "total": total}
 
 
 @router.get("/sessions-with-questions")
@@ -554,25 +621,20 @@ async def get_sessions_with_questions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(10, ge=1, le=50, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """
     Get all generation sessions with their questions and status counts.
-    Used for the Review & Approve tab to show all previous generations.
+    Used for the Review & Approve tab to show all generation history.
     """
     sessions, total = await session_service.get_sessions_with_questions(
         user_id=current_user.clerk_id,
         tenant_id=current_user.tutor_id,
         page=page,
-        per_page=per_page
+        per_page=per_page,
     )
 
-    return {
-        "items": sessions,
-        "page": page,
-        "per_page": per_page,
-        "total": total
-    }
+    return {"items": sessions, "page": page, "per_page": per_page, "total": total}
 
 
 @router.post("/sessions/{session_id}/questions/{question_id}/approve")
@@ -580,14 +642,14 @@ async def approve_question(
     session_id: str,
     question_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """Approve a generated question"""
     success = await session_service.update_question_status(
         session_id=session_id,
         user_id=current_user.clerk_id,
         question_id=question_id,
-        status=QuestionStatus.APPROVED
+        status=QuestionStatus.APPROVED,
     )
 
     if not success:
@@ -601,14 +663,14 @@ async def reject_question(
     session_id: str,
     question_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """Reject a generated question"""
     success = await session_service.update_question_status(
         session_id=session_id,
         user_id=current_user.clerk_id,
         question_id=question_id,
-        status=QuestionStatus.REJECTED
+        status=QuestionStatus.REJECTED,
     )
 
     if not success:
@@ -619,6 +681,7 @@ async def reject_question(
 
 class UpdateQuestionRequest(BaseModel):
     """Request body for updating a question"""
+
     question_text: Optional[str] = None
     options: Optional[List[str]] = None
     correct_answer: Optional[str] = None
@@ -631,7 +694,7 @@ async def update_question(
     question_id: str,
     request: UpdateQuestionRequest,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """Manually update a question's content"""
     # Build update data from non-None fields
@@ -652,7 +715,7 @@ async def update_question(
         session_id=session_id,
         user_id=current_user.clerk_id,
         question_id=question_id,
-        update_data=update_data
+        update_data=update_data,
     )
 
     if not success:
@@ -665,12 +728,11 @@ async def update_question(
 async def delete_session(
     session_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """Delete a generation session and all its questions"""
     success = await session_service.delete_session(
-        session_id=session_id,
-        user_id=current_user.clerk_id
+        session_id=session_id, user_id=current_user.clerk_id
     )
 
     if not success:
@@ -682,7 +744,7 @@ async def delete_session(
 @router.get("/stats")
 async def get_generation_stats(
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service)
+    session_service: GenerationSessionService = Depends(get_session_service),
 ):
     """
     Get generation statistics for the current user.
@@ -695,7 +757,7 @@ async def get_generation_stats(
     """
     stats = await session_service.get_stats(
         user_id=current_user.clerk_id,
-        tenant_id=current_user.tutor_id  # tutor_id is used for tenant isolation
+        tenant_id=current_user.tutor_id,  # tutor_id is used for tenant isolation
     )
     return stats
 
@@ -703,7 +765,7 @@ async def get_generation_stats(
 @router.get("/available-models")
 async def get_available_models(
     current_user: ClerkUserContext = Depends(require_tutor),
-    database: AsyncIOMotorDatabase = Depends(get_database)
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Get all available AI providers and their models (fetched dynamically from provider APIs).
@@ -746,18 +808,37 @@ async def get_available_models(
     fetched_models = {}
     try:
         fetched_models = await fetch_all_provider_models(limit=3)
-        logger.info("Successfully fetched models from providers", count=len(fetched_models))
+        logger.info(
+            "Successfully fetched models from providers", count=len(fetched_models)
+        )
     except Exception as e:
-        logger.warning("Failed to fetch models from providers, using fallback", error=str(e))
+        logger.warning(
+            "Failed to fetch models from providers, using fallback", error=str(e)
+        )
         fetched_models = {}
 
     providers = []
 
     provider_info = [
-        ("groq", "Groq", "Ultra-fast inference with open models", settings.GROQ_API_KEY),
+        (
+            "groq",
+            "Groq",
+            "Ultra-fast inference with open models",
+            settings.GROQ_API_KEY,
+        ),
         ("openai", "OpenAI", "GPT models from OpenAI", settings.OPENAI_API_KEY),
-        ("gemini", "Google Gemini", "Gemini models from Google", settings.GEMINI_API_KEY),
-        ("anthropic", "Anthropic", "Claude models from Anthropic", settings.ANTHROPIC_API_KEY),
+        (
+            "gemini",
+            "Google Gemini",
+            "Gemini models from Google",
+            settings.GEMINI_API_KEY,
+        ),
+        (
+            "anthropic",
+            "Anthropic",
+            "Claude models from Anthropic",
+            settings.ANTHROPIC_API_KEY,
+        ),
     ]
 
     for provider_id, name, description, api_key in provider_info:
@@ -775,14 +856,18 @@ async def get_available_models(
         if tenant_config and tenant_config.provider_configs:
             provider_config = tenant_config.provider_configs.get(provider_id)
             if provider_config and provider_config.enabled_models:
-                models = [m for m in models if m["id"] in provider_config.enabled_models]
+                models = [
+                    m for m in models if m["id"] in provider_config.enabled_models
+                ]
 
-        providers.append({
-            "id": provider_id,
-            "name": name,
-            "description": description,
-            "available": is_available,
-            "models": models
-        })
+        providers.append(
+            {
+                "id": provider_id,
+                "name": name,
+                "description": description,
+                "available": is_available,
+                "models": models,
+            }
+        )
 
     return {"providers": providers}

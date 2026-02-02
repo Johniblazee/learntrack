@@ -1,0 +1,14 @@
+---
+name: document_summary
+description: Summarizes documents for use in a RAG system.
+variables: [document]
+tags: [rag]
+---
+
+Summarize the following document for use in a RAG system.
+Focus on key facts, concepts, and information that would be useful for answering questions.
+
+Document:
+{{document}}
+
+Provide a concise summary (2-3 paragraphs):

@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 from app.ai.providers.base import BaseAIProvider
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
 from app.core.exceptions import AIProviderError
-from app.agents.prompts import get_prompt
+from app.core.prompt_manager import get_prompt
 from app.core.ai_models_config import get_default_model
 
 logger = structlog.get_logger()
@@ -49,7 +49,7 @@ class OpenAIProvider(BaseAIProvider):
             """
 
             # Use centralized prompt from registry
-            system_prompt = get_prompt("text_extraction")
+            system_prompt = await get_prompt("text_extraction")
 
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -95,7 +95,7 @@ class OpenAIProvider(BaseAIProvider):
             )
 
             # Use centralized prompt from registry
-            system_prompt = get_prompt("simple_question_generator")
+            system_prompt = await get_prompt("simple_question_generator")
 
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -159,7 +159,7 @@ class OpenAIProvider(BaseAIProvider):
             """
 
             # Use centralized prompt from registry
-            system_prompt = get_prompt("simple_question_validator")
+            system_prompt = await get_prompt("simple_question_validator")
 
             response = await self.client.chat.completions.create(
                 model=self.model,

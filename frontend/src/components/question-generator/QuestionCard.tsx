@@ -1,121 +1,131 @@
 /**
- * QuestionCard - Interactive card for displaying and editing a single question
- * Features: inline editing, quick actions on hover, status indicators, markdown/math rendering
- * Design: Dark themed card matching reference design
+ * QuestionCard - Card for displaying questions with selection, inline editing, and version cycling
  */
-import React, { useState, useEffect } from 'react'
-import { motion } from 'motion/react'
+import * as React from 'react'
+import { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
-import {
-  Check,
-  X,
-  Edit3,
-  RefreshCw,
-  Trash2,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  MoreHorizontal,
-} from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { ChevronLeft, ChevronRight, Check, X, Trash2, RefreshCw, Edit3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { MathText } from '@/components/ui/math-text'
-
-interface QuestionData {
-  question_id: string
-  type: string
-  difficulty: string
-  blooms_level?: string
-  question_text: string
-  options?: string[]
-  correct_answer: string
-  explanation?: string
-  status?: 'pending' | 'approved' | 'rejected'
-}
 
 interface QuestionCardProps {
-  question: QuestionData
+  question: {
+    question_id: string
+    type: string
+    difficulty: string
+    blooms_level?: string
+    question_text: string
+    options?: string[]
+    correct_answer: string
+    explanation?: string
+    status?: 'pending' | 'approved' | 'rejected'
+    versions?: any[]
+    currentVersionIndex?: number
+  }
   index: number
+  isSelected?: boolean
   isStreaming?: boolean
+  onClick?: () => void
+  onEdit?: (id: string, updates: Partial<QuestionCardProps['question']>) => void
   onApprove?: (id: string) => void
   onReject?: (id: string) => void
-  onEdit?: (id: string, data: Partial<QuestionData>) => void
-  onRegenerate?: (id: string) => void
   onDelete?: (id: string) => void
+  onCycleVersion?: (questionId: string, direction: 'prev' | 'next') => void
+  onRequestRegenerate?: (questionId: string, defaultMessage: string) => void
 }
 
 const difficultyColors: Record<string, string> = {
-  easy: 'bg-green-600/80 text-white',
-  medium: 'bg-amber-600/80 text-white',
-  hard: 'bg-red-600/80 text-white',
-  EASY: 'bg-green-600/80 text-white',
-  MEDIUM: 'bg-amber-600/80 text-white',
-  HARD: 'bg-red-600/80 text-white',
+  easy: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  medium: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  hard: 'bg-red-500/20 text-red-400 border-red-500/30',
+  EASY: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  MEDIUM: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  HARD: 'bg-red-500/20 text-red-400 border-red-500/30',
 }
 
 const typeLabels: Record<string, string> = {
-  'multiple-choice': 'Multiple Choice',
-  'true-false': 'True/False',
-  'short-answer': 'Short Answer',
+  'multiple-choice': 'MCQ',
+  'true-false': 'T/F',
+  'short-answer': 'Short',
   essay: 'Essay',
-  MCQ: 'Multiple Choice',
-  TRUE_FALSE: 'True/False',
-  SHORT_ANSWER: 'Short Answer',
+  MCQ: 'MCQ',
+  TRUE_FALSE: 'T/F',
+  SHORT_ANSWER: 'Short',
   ESSAY: 'Essay',
 }
 
 export function QuestionCard({
   question,
   index,
-  isStreaming,
+  isSelected = false,
+  isStreaming = false,
+  onClick,
+  onEdit,
   onApprove,
   onReject,
-  onEdit,
-  onRegenerate,
   onDelete,
+  onCycleVersion,
+  onRequestRegenerate,
 }: QuestionCardProps) {
-  const [isExpanded, setIsExpanded] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
-  const [editedText, setEditedText] = useState(question.question_text)
-  const [editedOptions, setEditedOptions] = useState<string[]>(question.options || [])
-  const [editedAnswer, setEditedAnswer] = useState(question.correct_answer)
+  const [editedQuestion, setEditedQuestion] = useState(question.question_text)
+  const [editedOptions, setEditedOptions] = useState(question.options || [])
+  const [editedCorrectAnswer, setEditedCorrectAnswer] = useState(question.correct_answer)
   const [editedExplanation, setEditedExplanation] = useState(question.explanation || '')
-  const [isHovered, setIsHovered] = useState(false)
 
-  // Sync state when question prop changes
-  useEffect(() => {
-    setEditedText(question.question_text)
-    setEditedOptions(question.options || [])
-    setEditedAnswer(question.correct_answer)
+  const hasVersions = question.versions && question.versions.length > 0
+  const currentVersion = hasVersions
+    ? (question.currentVersionIndex ?? 0) + 1
+    : 1
+  const totalVersions = hasVersions ? question.versions!.length + 1 : 1
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (isEditing) return
+    if (onClick) {
+      onClick()
+    }
+  }
+
+  const handleActionClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+  }
+
+  const handleEditStart = () => {
+    setIsEditing(true)
+    setEditedQuestion(question.question_text)
+    setEditedOptions([...(question.options || [])])
+    setEditedCorrectAnswer(question.correct_answer)
     setEditedExplanation(question.explanation || '')
-  }, [question])
+  }
 
-  const handleSaveEdit = () => {
-    onEdit?.(question.question_id, {
-      question_text: editedText,
-      options: editedOptions,
-      correct_answer: editedAnswer,
-      explanation: editedExplanation,
-    })
+  const handleEditCancel = () => {
     setIsEditing(false)
   }
 
-  const handleCancelEdit = () => {
-    setEditedText(question.question_text)
-    setEditedOptions(question.options || [])
-    setEditedAnswer(question.correct_answer)
-    setEditedExplanation(question.explanation || '')
+  const handleEditSave = () => {
+    if (onEdit) {
+      onEdit(question.question_id, {
+        question_text: editedQuestion,
+        options: question.options ? editedOptions : undefined,
+        correct_answer: editedCorrectAnswer,
+        explanation: editedExplanation || undefined,
+      })
+    }
     setIsEditing(false)
+  }
+
+  const handleRegenerateClick = (e: React.MouseEvent) => {
+    handleActionClick(e)
+    if (onClick) {
+      onClick()
+    }
+    if (onRequestRegenerate) {
+      onRequestRegenerate(
+        question.question_id,
+        "Regenerate question with adjustments: "
+      )
+    }
   }
 
   const handleOptionChange = (idx: number, value: string) => {
@@ -125,235 +135,278 @@ export function QuestionCard({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.05 }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+    <Card
+      className={cn(
+        'relative cursor-pointer transition-all duration-200 overflow-hidden',
+        'bg-zinc-900 border-zinc-800',
+        isSelected && 'border-2 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]',
+        !isSelected && 'hover:border-zinc-700 hover:bg-zinc-900/80',
+        isStreaming && 'animate-pulse',
+        isEditing && 'border-2 border-amber-500'
+      )}
+      onClick={handleCardClick}
     >
-      <Card
-        className={cn(
-          'relative transition-all duration-200 bg-zinc-900/95 border-zinc-800',
-          isHovered && 'shadow-lg ring-1 ring-zinc-700',
-          isStreaming && 'animate-pulse'
-        )}
-      >
-        {/* Quick Actions Overlay */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: isHovered && !isEditing ? 1 : 0 }}
-          className="absolute top-2 right-2 z-10 flex gap-1"
-        >
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 bg-background/80 backdrop-blur"
-            onClick={() => onApprove?.(question.question_id)}
-          >
-            <Check className="h-3.5 w-3.5 text-green-500" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 bg-background/80 backdrop-blur"
-            onClick={() => onReject?.(question.question_id)}
-          >
-            <X className="h-3.5 w-3.5 text-red-500" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 bg-background/80 backdrop-blur"
-            onClick={() => setIsEditing(true)}
-          >
-            <Edit3 className="h-3.5 w-3.5" />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7 bg-background/80 backdrop-blur"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onRegenerate?.(question.question_id)}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Regenerate
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigator.clipboard.writeText(question.question_text)}>
-                <Copy className="h-4 w-4 mr-2" />
-                Copy
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => onDelete?.(question.question_id)}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </motion.div>
-
-        <CardContent className="p-3 sm:p-4">
-          {/* Header */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-3">
-            <span className="text-xs sm:text-sm font-medium text-zinc-300">
-              {index + 1}
-            </span>
-            <Badge className={cn('text-[10px] sm:text-xs rounded-md px-1.5 sm:px-2 py-0.5', difficultyColors[question.difficulty])}>
-              {question.difficulty}
-            </Badge>
-            <Badge className="text-[10px] sm:text-xs bg-emerald-600/80 text-white rounded-md px-1.5 sm:px-2 py-0.5">
-              {typeLabels[question.type] || question.type}
-            </Badge>
-            {question.blooms_level && (
-              <Badge variant="outline" className="text-[10px] sm:text-xs text-zinc-400 border-zinc-700 hidden sm:inline-flex">
-                {question.blooms_level}
-              </Badge>
-            )}
-            <div className="flex-1" />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-zinc-400 hover:text-zinc-200"
-              onClick={() => setIsExpanded(!isExpanded)}
-            >
-              {isExpanded ? (
-                <ChevronUp className="h-4 w-4" />
-              ) : (
-                <ChevronDown className="h-4 w-4" />
-              )}
-            </Button>
+      <CardContent className="p-4">
+        {/* Header Row */}
+        <div className="flex items-center gap-3 mb-3">
+          {/* Question Number */}
+          <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center">
+            <span className="text-sm font-semibold text-zinc-300">{index}</span>
           </div>
 
-          {/* Question Text */}
+          {/* Badges */}
+          <Badge
+            variant="outline"
+            className={cn(
+              'text-xs font-medium border',
+              difficultyColors[question.difficulty]
+            )}
+          >
+            {question.difficulty}
+          </Badge>
+
+          <Badge
+            variant="outline"
+            className="text-xs font-medium bg-zinc-800 text-zinc-300 border-zinc-700"
+          >
+            {typeLabels[question.type] || question.type}
+          </Badge>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Version Cycling */}
+          {hasVersions && !isEditing && (
+            <div
+              className="flex items-center gap-1"
+              onClick={handleActionClick}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+                onClick={() =>
+                  onCycleVersion?.(question.question_id, 'prev')
+                }
+                disabled={currentVersion <= 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs text-zinc-500 min-w-[3rem] text-center">
+                {currentVersion}/{totalVersions}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+                onClick={() =>
+                  onCycleVersion?.(question.question_id, 'next')
+                }
+                disabled={currentVersion >= totalVersions}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {/* Status & Actions */}
+          <div className="flex items-center gap-1" onClick={handleActionClick}>
+            {/* Edit Mode Buttons */}
+            {isEditing ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                  onClick={handleEditSave}
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  onClick={handleEditCancel}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <>
+                {/* Status Indicators */}
+                {question.status === 'approved' && (
+                  <div className="flex items-center gap-1 text-emerald-400">
+                    <Check className="h-4 w-4" />
+                  </div>
+                )}
+                {question.status === 'rejected' && (
+                  <div className="flex items-center gap-1 text-red-400">
+                    <X className="h-4 w-4" />
+                  </div>
+                )}
+
+                {/* Edit Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10"
+                  onClick={handleEditStart}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </Button>
+
+                {/* Regenerate Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10"
+                  onClick={handleRegenerateClick}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+
+                {/* Approve Button */}
+                {question.status !== 'approved' && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10"
+                    onClick={() => onApprove?.(question.question_id)}
+                  >
+                    <Check className="h-4 w-4" />
+                  </Button>
+                )}
+
+                {/* Reject Button */}
+                {question.status !== 'rejected' && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+                    onClick={() => onReject?.(question.question_id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+
+                {/* Delete Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+                  onClick={() => onDelete?.(question.question_id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Question Content */}
+        <div className="pl-11">
+          {/* Question Text - Editable or Read-only */}
           {isEditing ? (
-            <div className="space-y-4">
-              {/* Editable Question Text */}
-              <div>
-                <label className="text-xs text-zinc-400 mb-1 block">Question</label>
-                <Textarea
-                  value={editedText}
-                  onChange={(e) => setEditedText(e.target.value)}
-                  className="min-h-[80px] resize-none bg-zinc-800 border-zinc-700 text-zinc-100"
-                  autoFocus
-                />
-              </div>
-
-              {/* Editable Options */}
-              {editedOptions.length > 0 && (
-                <div className="space-y-2">
-                  <label className="text-xs text-zinc-400">Options</label>
-                  {editedOptions.map((opt, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <Input
-                        value={opt}
-                        onChange={(e) => handleOptionChange(i, e.target.value)}
-                        className="bg-zinc-800 border-zinc-700 text-zinc-100"
-                      />
-                      {opt.charAt(0) === editedAnswer && (
-                        <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Editable Correct Answer */}
-              <div>
-                <label className="text-xs text-zinc-400 mb-1 block">Correct Answer</label>
-                <Input
-                  value={editedAnswer}
-                  onChange={(e) => setEditedAnswer(e.target.value)}
-                  className="bg-zinc-800 border-zinc-700 text-green-400"
-                />
-              </div>
-
-              {/* Editable Explanation */}
-              <div>
-                <label className="text-xs text-zinc-400 mb-1 block">Explanation</label>
-                <Textarea
-                  value={editedExplanation}
-                  onChange={(e) => setEditedExplanation(e.target.value)}
-                  className="min-h-[60px] resize-none bg-zinc-800 border-zinc-700 text-zinc-300"
-                />
-              </div>
-
-              <div className="flex gap-2 justify-end pt-2">
-                <Button size="sm" variant="outline" onClick={handleCancelEdit} className="border-zinc-700">
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={handleSaveEdit}>
-                  Save Changes
-                </Button>
-              </div>
+            <div className="mb-4">
+              <label className="text-xs text-zinc-500 mb-1 block">Question</label>
+              <textarea
+                value={editedQuestion}
+                onChange={(e) => setEditedQuestion(e.target.value)}
+                className="w-full p-2 text-sm bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:border-blue-500 focus:outline-none resize-y"
+                rows={3}
+              />
             </div>
           ) : (
-            <div className="text-sm text-zinc-200 leading-relaxed">
-              <MathText>{question.question_text}</MathText>
+            <p className="text-sm text-zinc-200 leading-relaxed">
+              {question.question_text}
+            </p>
+          )}
+
+          {/* Options for multiple choice */}
+          {question.options && question.options.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {question.options.map((option, i) => {
+                const optionLetter = option.charAt(0).toUpperCase()
+                const answerLetter = question.correct_answer
+                  .charAt(0)
+                  .toUpperCase()
+                const isCorrect = optionLetter === answerLetter
+
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      'flex items-center gap-2 text-sm rounded px-2 py-1.5',
+                      isCorrect
+                        ? 'bg-emerald-500/10 text-emerald-400'
+                        : 'text-zinc-400'
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'w-5 h-5 rounded flex items-center justify-center text-xs',
+                        isCorrect
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : 'bg-zinc-800 text-zinc-500'
+                      )}
+                    >
+                      {String.fromCharCode(65 + i)}
+                    </span>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editedOptions[i] || ''}
+                        onChange={(e) => handleOptionChange(i, e.target.value)}
+                        className="flex-1 p-1 text-sm bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:border-blue-500 focus:outline-none"
+                      />
+                    ) : (
+                      <span>{option}</span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
 
-          {/* Options & Answer (Collapsible) */}
-          {isExpanded && !isEditing && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-4 space-y-2"
-            >
-              {/* Options for multiple-choice */}
-              {question.options && question.options.length > 0 && (
-                <div className="space-y-1">
-                  {question.options.map((option, i) => {
-                    const optionLetter = option.charAt(0)
-                    const answerLetter = question.correct_answer.charAt(0).toUpperCase()
-                    const isCorrect = optionLetter.toUpperCase() === answerLetter
-                    return (
-                      <div
-                        key={i}
-                        className={cn(
-                          'flex items-center gap-2 rounded px-3 py-2 text-sm',
-                          isCorrect
-                            ? 'bg-green-600/20 text-green-400'
-                            : 'text-zinc-300 hover:bg-zinc-800/50'
-                        )}
-                      >
-                        {isCorrect && <Check className="h-3.5 w-3.5 flex-shrink-0" />}
-                        <MathText className="text-inherit">{option}</MathText>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-
-              {/* Correct Answer */}
-              <div className="flex items-center gap-2 text-sm pt-2">
-                <span className="text-zinc-500">Answer:</span>
-                <span className="font-medium text-green-400">
-                  <MathText className="text-inherit">{question.correct_answer}</MathText>
+          {/* Answer */}
+          <div className="mt-3 pt-2 border-t border-zinc-800">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-500">Answer:</span>
+              {isEditing ? (
+                <input
+                  type="text"
+                  value={editedCorrectAnswer}
+                  onChange={(e) => setEditedCorrectAnswer(e.target.value)}
+                  className="p-1 text-sm bg-zinc-800 border border-zinc-700 rounded text-emerald-400 focus:border-blue-500 focus:outline-none"
+                />
+              ) : (
+                <span className="text-sm font-medium text-emerald-400">
+                  {question.correct_answer}
                 </span>
-              </div>
-
-              {/* Explanation */}
-              {question.explanation && (
-                <div className="rounded bg-zinc-800/50 p-3 mt-2">
-                  <div className="text-xs text-zinc-400 italic">
-                    <MathText className="text-inherit text-xs">{question.explanation}</MathText>
-                  </div>
-                </div>
               )}
-            </motion.div>
+            </div>
+          </div>
+
+          {/* Explanation */}
+          {isEditing ? (
+            <div className="mt-3">
+              <label className="text-xs text-zinc-500 mb-1 block">Explanation</label>
+              <input
+                type="text"
+                value={editedExplanation}
+                onChange={(e) => setEditedExplanation(e.target.value)}
+                className="w-full p-1 text-sm bg-zinc-800 border border-zinc-700 rounded text-zinc-400 focus:border-blue-500 focus:outline-none"
+                placeholder="Add explanation..."
+              />
+            </div>
+          ) : question.explanation && (
+            <div className="mt-2 text-xs text-zinc-500 italic">
+              {question.explanation}
+            </div>
           )}
-        </CardContent>
-      </Card>
-    </motion.div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

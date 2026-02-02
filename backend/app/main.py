@@ -14,12 +14,13 @@ from app.core.exceptions import (
     learntrack_exception_handler,
     http_exception_handler,
     validation_exception_handler,
-    general_exception_handler
+    general_exception_handler,
 )
 from app.core.rate_limit import setup_rate_limiting, limiter
 from app.websocket import get_socket_app
 from app.core.security_middleware import SecurityHeadersMiddleware
 from app.core.metrics import MetricsMiddleware, metrics_collector
+from app.core.audit_middleware import AuditLoggingMiddleware
 from app.core.health import health_checker, HealthStatus
 from app.core.logging_config import RequestLoggingMiddleware, configure_logging
 from app.core.cache import get_cache_stats
@@ -95,6 +96,9 @@ app.add_middleware(MetricsMiddleware)
 # Add request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
 
+# Add audit logging middleware (must be after auth middleware to capture user context)
+app.add_middleware(AuditLoggingMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -103,16 +107,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Database lifecycle events
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection on startup"""
     try:
         await database.connect_to_database()
+
+        # Store database reference in app state for middleware access
+        app.state.db = database.database
+
+        # Setup audit log TTL index for automatic cleanup
+        try:
+            from app.services.audit_log_service import AuditLogService
+
+            audit_service = AuditLogService(database.database)
+            await audit_service.setup_ttl_index()
+        except Exception as e:
+            logger.warning(
+                "Failed to setup audit log TTL index (may already exist)", error=str(e)
+            )
+
         logger.info("FastAPI application started successfully")
     except Exception as e:
         logger.error("Failed to start FastAPI application", error=str(e))
         raise
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -123,8 +144,10 @@ async def shutdown_event():
     except Exception as e:
         logger.error("Error during FastAPI application shutdown", error=str(e))
 
+
 # Include routers
 from app.api.v1 import api_router
+
 app.include_router(api_router, prefix="/api/v1")
 
 # Mount Socket.IO app for WebSocket support
@@ -132,6 +155,7 @@ socket_app = get_socket_app()
 app.mount("/socket.io", socket_app)
 
 # Authentication removed - no user role endpoint needed
+
 
 # Health and monitoring endpoints
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -145,7 +169,7 @@ async def health():
         status=result["status"],
         service=result["service"],
         version=result["version"],
-        timestamp=result["timestamp"]
+        timestamp=result["timestamp"],
     )
 
 
@@ -160,6 +184,7 @@ async def health_ready():
 
     if result["status"] == HealthStatus.UNHEALTHY.value:
         from fastapi.responses import JSONResponse
+
         return JSONResponse(status_code=503, content=result)
 
     return result
@@ -185,5 +210,5 @@ async def get_metrics_summary():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
 
+    uvicorn.run(app, host="0.0.0.0", port=8000)
