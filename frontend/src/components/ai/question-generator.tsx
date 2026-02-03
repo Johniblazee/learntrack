@@ -99,7 +99,7 @@ const getDifficultyColor = (difficulty: string) => {
   }
 }
 
-interface AIQuestionGeneratorProps {
+export interface AIQuestionGeneratorProps {
   onQuestionsGenerated?: (questions: GeneratedQuestion[]) => void
 }
 
@@ -109,8 +109,8 @@ export default function AIQuestionGenerator({ onQuestionsGenerated }: AIQuestion
   const [subject, setSubject] = useState('')
   const [topic, setTopic] = useState('')
   const [questionCount, setQuestionCount] = useState(5)
-  const [difficulty, setDifficulty] = useState(DIFFICULTIES.MEDIUM)
-  const [questionType, setQuestionType] = useState(QUESTION_TYPES.MULTIPLE_CHOICE)
+  const [difficulty, setDifficulty] = useState<string>(DIFFICULTIES.MEDIUM)
+  const [questionType, setQuestionType] = useState<string>(QUESTION_TYPES.MULTIPLE_CHOICE)
   
   // Question generator hook
   const {

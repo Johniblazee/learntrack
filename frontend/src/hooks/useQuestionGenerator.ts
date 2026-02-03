@@ -62,6 +62,8 @@ export interface GeneratedQuestion {
   }>
   tags: string[]
   quality_score?: number
+  subject?: string
+  topic?: string
 }
 
 export interface GenerationConfig {
@@ -80,7 +82,7 @@ export interface UseQuestionGeneratorResult {
   // State
   isGenerating: boolean
   thinkingSteps: string[]
-  sources: Array<{ id: string; title: string; excerpt: string }>
+  sources: Array<{ id: string; title: string; excerpt: string; url?: string }>
   questions: GeneratedQuestion[]
   currentContent: string
   error: string | null
@@ -99,7 +101,7 @@ export function useQuestionGenerator(): UseQuestionGeneratorResult {
   
   const [isGenerating, setIsGenerating] = useState(false)
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([])
-  const [sources, setSources] = useState<Array<{ id: string; title: string; excerpt: string }>>([])
+  const [sources, setSources] = useState<Array<{ id: string; title: string; excerpt: string; url?: string }>>([])
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([])
   const [currentContent, setCurrentContent] = useState('')
   const [error, setError] = useState<string | null>(null)

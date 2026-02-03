@@ -19,7 +19,6 @@ from app.models.assignment import (
     AssignmentCreate,
     AssignmentUpdate,
     AssignmentStatus,
-    AssignmentDifficulty,
 )
 from app.models.question import (
     Question,
@@ -55,11 +54,10 @@ class TestAssignmentService:
             title="Test Assignment",
             description="Test Description",
             subject_id=str(ObjectId()),
-            difficulty=AssignmentDifficulty.MEDIUM,
+            tutor_id="tutor_123",
             student_ids=["student_1", "student_2"],
             due_date=datetime.now(timezone.utc),
-            questions=[],
-            total_points=100,
+            question_ids=[str(ObjectId())],  # At least one question required
         )
         tutor_id = "tutor_123"
 

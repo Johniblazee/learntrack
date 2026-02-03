@@ -105,7 +105,7 @@ export function OpenCanvasGenerator() {
       })
       if (response.ok) {
         const data = await response.json()
-        setSessions(data.sessions || [])
+        setSessions(data.items || [])  // Fixed: backend returns 'items', not 'sessions'
       }
     } catch (error) {
       console.error('Failed to fetch sessions:', error)
@@ -140,28 +140,35 @@ export function OpenCanvasGenerator() {
 
     try {
       const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/question-generator/chat`, {
+      const response = await fetch(`${API_BASE_URL}/question-generator/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          message: userMessage.content,
-          settings,
-          stream: true,
+          prompt: userMessage.content,
+          question_count: settings.questionCount,
+          question_types: settings.questionTypes,
+          difficulty: settings.difficulty,
+          subject: settings.subject,
+          topic: settings.topic,
+          blooms_levels: settings.bloomsLevels,
+          material_ids: settings.materialIds,
+          ai_provider: settings.aiProvider,
         }),
       })
 
       if (!response.ok) throw new Error('Generation failed')
 
-      // Handle streaming response
+      // Handle SSE streaming response
       const reader = response.body?.getReader()
       if (!reader) throw new Error('No response body')
 
       const decoder = new TextDecoder()
       let assistantContent = ''
       let newQuestions: GeneratedQuestion[] = []
+      let sessionId: string | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -175,9 +182,12 @@ export function OpenCanvasGenerator() {
             try {
               const data = JSON.parse(line.slice(6))
 
-              if (data.type === 'content') {
-                assistantContent += data.content
-                // Update streaming message
+              // Handle different SSE event types
+              if (data.event === 'session:created' && data.session_id) {
+                sessionId = data.session_id
+                setCurrentSessionId(sessionId)
+              } else if (data.event === 'agent:thinking' && data.step) {
+                assistantContent += `💭 ${data.step}\n`
                 setChatMessages(prev => {
                   const lastMsg = prev[prev.length - 1]
                   if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
@@ -191,9 +201,29 @@ export function OpenCanvasGenerator() {
                     isStreaming: true,
                   }]
                 })
-              } else if (data.type === 'question_complete' && data.question) {
-                newQuestions.push(data.question)
-                setQuestions(prev => [...prev, data.question])
+              } else if (data.event === 'agent:action' && data.step) {
+                assistantContent += `⚡ ${data.step}\n`
+                setChatMessages(prev => {
+                  const lastMsg = prev[prev.length - 1]
+                  if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
+                    return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent }]
+                  }
+                  return [...prev, {
+                    id: `assistant-${Date.now()}`,
+                    role: 'assistant',
+                    content: assistantContent,
+                    timestamp: new Date(),
+                    isStreaming: true,
+                  }]
+                })
+              } else if (data.event === 'generation:question_complete' && data.question_data) {
+                const question = {
+                  ...data.question_data,
+                  session_id: sessionId || undefined,
+                  status: 'pending' as const,
+                }
+                newQuestions.push(question)
+                setQuestions(prev => [...prev, question])
               }
             } catch (e) {
               // Skip invalid JSON
@@ -206,10 +236,17 @@ export function OpenCanvasGenerator() {
       setChatMessages(prev => {
         const lastMsg = prev[prev.length - 1]
         if (lastMsg?.role === 'assistant') {
-          return [...prev.slice(0, -1), { ...lastMsg, isStreaming: false }]
+          return [...prev.slice(0, -1), {
+            ...lastMsg,
+            content: assistantContent || `✅ Generated ${newQuestions.length} questions successfully!`,
+            isStreaming: false
+          }]
         }
         return prev
       })
+
+      // Refresh sessions list
+      await fetchSessions()
 
       toast.success(`Generated ${newQuestions.length} questions`)
     } catch (error) {
@@ -218,7 +255,7 @@ export function OpenCanvasGenerator() {
     } finally {
       setIsGenerating(false)
     }
-  }, [settings, getToken])
+  }, [settings, getToken, fetchSessions])
 
   // Handle chat message (for refining/updating questions)
   const handleSendMessage = useCallback(async (message: string, referencedQuestionId?: string) => {

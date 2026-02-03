@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,19 +11,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { 
-  Plus, 
-  RefreshCw, 
-  Search, 
-  Mail, 
-  CheckCircle, 
-  XCircle, 
+import {
+  Plus,
+  RefreshCw,
+  Search,
+  Mail,
+  CheckCircle,
+  XCircle,
   Clock,
   Send,
   Users
 } from 'lucide-react'
 import InviteUserModal from '@/components/InviteUserModal'
-import { useAuth } from '@clerk/clerk-react'
+import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
@@ -52,7 +52,7 @@ interface InvitationStats {
 }
 
 export default function InvitationsView() {
-  const { getToken } = useAuth()
+  const client = useApiClient()
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [stats, setStats] = useState<InvitationStats>({
@@ -69,21 +69,14 @@ export default function InvitationsView() {
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [resendingId, setResendingId] = useState<string | null>(null)
 
-  const loadInvitations = async () => {
+  const loadInvitations = useCallback(async () => {
     try {
       setLoading(true)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const response = await client.get('/invitations/')
 
-      const response = await fetch(`${API_BASE}/invitations/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
+      if (response.error) throw new Error(response.error)
 
-      if (!response.ok) throw new Error('Failed to load invitations')
-
-      const data = await response.json()
+      const data = response.data
       setInvitations(data.invitations || [])
       setStats({
         total: data.total || 0,
@@ -100,11 +93,11 @@ export default function InvitationsView() {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [client])
 
   useEffect(() => {
     loadInvitations()
-  }, [])
+  }, [loadInvitations])
 
   const handleRefresh = () => {
     setRefreshing(true)
@@ -117,20 +110,12 @@ export default function InvitationsView() {
 
   const handleResend = async (invitationId: string) => {
     if (resendingId === invitationId) return
-    
+
     try {
       setResendingId(invitationId)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const response = await client.post(`/invitations/${invitationId}/resend`)
 
-      const response = await fetch(`${API_BASE}/invitations/${invitationId}/resend`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (!response.ok) throw new Error('Failed to resend invitation')
+      if (response.error) throw new Error(response.error)
 
       toast.success('Invitation resent successfully')
       loadInvitations()
@@ -144,20 +129,12 @@ export default function InvitationsView() {
 
   const handleRevoke = async (invitationId: string) => {
     if (revokingId === invitationId) return
-    
+
     try {
       setRevokingId(invitationId)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const response = await client.delete(`/invitations/${invitationId}`)
 
-      const response = await fetch(`${API_BASE}/invitations/${invitationId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (!response.ok) throw new Error('Failed to revoke invitation')
+      if (response.error) throw new Error(response.error)
 
       toast.success('Invitation revoked successfully')
       loadInvitations()

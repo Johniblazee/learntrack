@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Plus, Search, MoreVertical, Edit, Trash2, Eye, Copy, FileText } from 'lucide-react'
-import { useAuth } from '@clerk/clerk-react'
+import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
 import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal'
 
@@ -45,7 +45,7 @@ interface AssignmentTemplate {
 }
 
 export default function AssignmentTemplatesView() {
-  const { getToken } = useAuth()
+  const client = useApiClient()
   const [templates, setTemplates] = useState<AssignmentTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -53,19 +53,14 @@ export default function AssignmentTemplatesView() {
   const [templateToDelete, setTemplateToDelete] = useState<AssignmentTemplate | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const loadTemplates = async () => {
+  const loadTemplates = useCallback(async () => {
     try {
       setLoading(true)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const response = await client.get('/assignment-templates/')
 
-      const response = await fetch(`${API_BASE}/assignment-templates/`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
+      if (response.error) throw new Error(response.error)
 
-      if (!response.ok) throw new Error('Failed to load templates')
-
-      const data = await response.json()
+      const data = response.data
       setTemplates(data.templates || [])
     } catch (error) {
       console.error('Failed to load templates:', error)
@@ -73,26 +68,20 @@ export default function AssignmentTemplatesView() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [client])
 
   useEffect(() => {
     loadTemplates()
-  }, [])
+  }, [loadTemplates])
 
   const handleDelete = async () => {
     if (!templateToDelete) return
 
     try {
       setDeleting(true)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const response = await client.delete(`/assignment-templates/${templateToDelete._id}`)
 
-      const response = await fetch(`${API_BASE}/assignment-templates/${templateToDelete._id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-
-      if (!response.ok) throw new Error('Failed to delete template')
+      if (response.error) throw new Error(response.error)
 
       toast.success('Template deleted successfully')
       setTemplates(templates.filter(t => t._id !== templateToDelete._id))
@@ -108,15 +97,9 @@ export default function AssignmentTemplatesView() {
 
   const handleUseTemplate = async (templateId: string) => {
     try {
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const response = await client.post(`/assignment-templates/${templateId}/use`)
 
-      const response = await fetch(`${API_BASE}/assignment-templates/${templateId}/use`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-
-      if (!response.ok) throw new Error('Failed to use template')
+      if (response.error) throw new Error(response.error)
 
       toast.success('Template loaded', {
         description: 'Redirecting to create assignment...'

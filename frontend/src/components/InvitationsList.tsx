@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,7 +17,7 @@ import {
   Eye,
   Edit
 } from 'lucide-react'
-import { useAuth } from '@clerk/clerk-react'
+import { useApiClient } from '@/lib/api-client'
 import { format } from 'date-fns'
 import InviteUserModal from './InviteUserModal'
 import InvitationDetailsModal from './InvitationDetailsModal'
@@ -42,7 +42,7 @@ interface InvitationsListProps {
 }
 
 export default function InvitationsList({ refreshTrigger, onInviteClick }: InvitationsListProps) {
-  const { getToken } = useAuth()
+  const client = useApiClient()
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({
@@ -58,25 +58,18 @@ export default function InvitationsList({ refreshTrigger, onInviteClick }: Invit
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingInvitation, setEditingInvitation] = useState<Invitation | null>(null)
 
-  const loadInvitations = async () => {
+  const loadInvitations = useCallback(async () => {
     try {
       setLoading(true)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const endpoint = filter === 'all'
+        ? '/invitations/'
+        : `/invitations/?status_filter=${filter}`
 
-      const url = filter === 'all'
-        ? `${API_BASE}/invitations/`
-        : `${API_BASE}/invitations/?status_filter=${filter}`
+      const response = await client.get(endpoint)
 
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
+      if (response.error) throw new Error(response.error)
 
-      if (!response.ok) throw new Error('Failed to load invitations')
-
-      const data = await response.json()
+      const data = response.data
       setInvitations(data.invitations || [])
       setStats({
         total: data.total || 0,
@@ -91,25 +84,17 @@ export default function InvitationsList({ refreshTrigger, onInviteClick }: Invit
     } finally {
       setLoading(false)
     }
-  }
+  }, [client, filter])
 
   useEffect(() => {
     loadInvitations()
-  }, [filter, refreshTrigger])
+  }, [loadInvitations, refreshTrigger])
 
   const handleRevoke = async (invitationId: string) => {
     try {
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      const response = await client.delete(`/invitations/${invitationId}`)
 
-      const response = await fetch(`${API_BASE}/invitations/${invitationId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (!response.ok) throw new Error('Failed to revoke invitation')
+      if (response.error) throw new Error(response.error)
 
       toast.success('Invitation revoked')
       loadInvitations()
