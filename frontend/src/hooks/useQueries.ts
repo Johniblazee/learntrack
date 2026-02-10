@@ -543,6 +543,32 @@ export function useParentProgress() {
   })
 }
 
+/**
+ * Hook to fetch parent dashboard aggregate stats and child cards
+ */
+export function useParentDashboardStats() {
+  const client = useApiClient()
+
+  return useQuery({
+    queryKey: ['parent-dashboard-stats'],
+    queryFn: async () => {
+      const response = await client.get('/dashboard/parent-stats')
+      if (response.error) throw new Error(response.error)
+      return response.data as {
+        children: Array<{
+          id: string
+          name: string
+          grade?: string
+          overall_progress: number
+          recent_grade?: string
+          assignments_due: number
+        }>
+      }
+    },
+    staleTime: 60 * 1000,
+  })
+}
+
 // ============================================
 // Conversation & Message Queries
 // ============================================
@@ -719,6 +745,5 @@ export function useStudentAssignmentsList(studentId: string | undefined) {
     enabled: !!studentId,
   })
 }
-
 
 

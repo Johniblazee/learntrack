@@ -21,6 +21,12 @@ from app.core.database import get_database
 
 logger = structlog.get_logger()
 
+# Temporary cross-view access allowlist for QA/demo users who need to switch between
+# tutor, student, and parent dashboards without changing their primary role.
+CROSS_VIEW_ACCESS_CLERK_IDS = {
+    "user_33bbM70rwXsrbn1GWQTGORD9d8T",
+}
+
 # Cache for user sync status - avoids syncing on every request
 # Key: clerk_id, Value: last sync timestamp
 # TTL of 5 minutes means we'll re-sync at most once every 5 minutes per user
@@ -576,6 +582,8 @@ async def require_tutor(
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require tutor role (super admins also have access)"""
+    if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+        return current_user
     if current_user.role != UserRole.TUTOR and not current_user.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Tutor access required"
@@ -587,6 +595,8 @@ async def require_student(
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require student role"""
+    if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+        return current_user
     if current_user.role != UserRole.STUDENT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Student access required"
@@ -598,6 +608,8 @@ async def require_parent(
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require parent role"""
+    if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+        return current_user
     if current_user.role != UserRole.PARENT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Parent access required"
@@ -611,6 +623,8 @@ async def require_role(allowed_roles: List[UserRole]):
     async def role_checker(
         current_user: ClerkUserContext = Depends(get_current_user),
     ) -> ClerkUserContext:
+        if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+            return current_user
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

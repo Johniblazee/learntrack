@@ -71,8 +71,13 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
   // Questions should come from backend; empty default here
   const activeAssignmentQuestions: Question[] = []
 
-  const startAssignment = () => {
-    // In a real app, you'd fetch the questions for the assignment
+  const startAssignment = (assignmentId: string) => {
+    // Assignment runner flow will be connected to backend assignment questions.
+    // Keep this state-safe while surfacing intent to the user.
+    if (!assignmentId || activeAssignmentQuestions.length === 0) {
+      toast.info('Assignment workspace is coming soon')
+      return
+    }
     setShowingQuestion(true)
     setCurrentQuestionIndex(0)
   }
@@ -347,7 +352,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
                             >
                               {assignment.status === 'pending' ? 'Not Started' : assignment.status === 'completed' ? 'Completed' : 'In Progress'}
                             </Badge>
-                            <Button size="sm" variant="outline" onClick={() => startAssignment()}>
+                            <Button size="sm" variant="outline" onClick={() => startAssignment(assignment.id)}>
                               {assignment.status === 'pending' ? 'Start' : assignment.status === 'completed' ? 'Review' : 'Continue'}
                             </Button>
                           </div>
