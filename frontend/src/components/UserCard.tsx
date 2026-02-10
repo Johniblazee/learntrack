@@ -7,13 +7,13 @@ interface UserCardProps {
 }
 
 const UserCard = ({ type, count, isLoading = false }: UserCardProps) => {
-  const getCardColor = (type: string, index: number) => {
+  const getCardColor = (index: number) => {
     const colors = ["bg-lamaPurple", "bg-lamaYellow", "bg-lamaSky", "bg-lamaPurpleLight"]
     return colors[index % colors.length]
   }
 
   const typeIndex = ["student", "teacher", "parent", "staff"].indexOf(type)
-  const cardColor = getCardColor(type, typeIndex)
+  const cardColor = getCardColor(typeIndex)
 
   return (
     <div className={`rounded-2xl ${cardColor} p-4 flex-1 min-w-[130px]`}>

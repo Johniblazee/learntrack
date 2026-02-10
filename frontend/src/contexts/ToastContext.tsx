@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useCallback, useState, useEffect, useMemo, useRef } from "react"
+import { createContext, useContext, useCallback, useState, useEffect, useMemo, useRef } from 'react'
 import { ToastContainer, ToastType, ToastProps } from "@/components/ui/animated-toast"
 
 interface ToastOptions {

@@ -1,7 +1,6 @@
 /**
  * Reusable table skeleton loader component
  */
-import React from 'react'
 import {
   Table,
   TableBody,

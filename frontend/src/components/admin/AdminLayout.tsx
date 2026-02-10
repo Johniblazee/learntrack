@@ -1,19 +1,6 @@
 // AdminLayout.tsx - Admin dashboard layout using SidebarProvider
-import React from 'react'
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
-import {
-  LayoutDashboard,
-  Users,
-  Building2,
-  Settings,
-  Shield,
-  LogOut,
-  Moon,
-  Sun,
-  ArrowLeft,
-  Bell,
-  Activity,
-} from 'lucide-react'
+import { LayoutDashboard, Users, Building2, Settings, Shield, LogOut, Moon, Sun, ArrowLeft, Activity } from 'lucide-react'
 import { useUserContext } from '../../contexts/UserContext'
 import { useClerk } from '@clerk/clerk-react'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -42,7 +29,6 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
-import { Button } from "@/components/ui/button"
 
 interface NavItem {
   name: string

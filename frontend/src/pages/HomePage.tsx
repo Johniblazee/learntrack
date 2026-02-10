@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useUser, UserButton } from "@clerk/clerk-react"
-import { motion, AnimatePresence } from "motion/react"
+import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,11 +15,7 @@ import {
 } from "@/components/ui/accordion"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
-import {
-  Layers, Check, ArrowRight, CheckCircle2, Menu, X,
-  Brain, Users, BarChart3, Sparkles, Shield, Clock, Zap,
-  Mail, Phone, MapPin, Github, Twitter, Linkedin, Play
-} from "lucide-react"
+import { Layers, Check, ArrowRight, Menu, X, Users, BarChart3, Sparkles, Shield, Mail, Phone, MapPin, Github, Twitter, Linkedin, Play } from "lucide-react"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
 
 // Animated Shape Component for Hero

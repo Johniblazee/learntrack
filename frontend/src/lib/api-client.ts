@@ -161,8 +161,6 @@ export const apiUtils = {
 
   // Questions
   getQuestions: (client: ApiClient) => client.get('/questions/'),
-  generateQuestions: (client: ApiClient, data: any) => client.post('/questions/generate', data),
-  reviewQuestions: (client: ApiClient, data: any) => client.post('/questions/review', data),
 
   // Progress
   getProgress: (client: ApiClient) => client.get('/progress/'),

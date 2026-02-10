@@ -4,7 +4,7 @@
  * Used in assignment creation to assign to specific students
  */
 
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useApiClient } from "@/lib/api-client"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"

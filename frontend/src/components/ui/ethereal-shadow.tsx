@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, CSSProperties, ReactNode } from 'react';
+import { useId, CSSProperties, ReactNode } from 'react'
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 

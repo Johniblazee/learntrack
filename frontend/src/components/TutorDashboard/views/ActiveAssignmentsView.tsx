@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -12,32 +11,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Calendar,
-  Users,
-  BookOpen,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  Edit,
-  Trash2,
-  Eye,
-  Filter,
-  Search,
-  Plus,
-  MoreVertical,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown
-} from "lucide-react"
+import { Edit, Trash2, Eye, Search, Plus, MoreVertical, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
 import { ServerError } from '@/components/ErrorScreen'
-import { UpcomingDeadlines } from '../components/UpcomingDeadlines'
-import { MessageInbox } from '@/components/messaging/MessageInbox'
 import { useNavigate } from 'react-router-dom'
 import { ViewAssignmentModal } from '@/components/modals/ViewAssignmentModal'
 import { EditAssignmentModal } from '@/components/modals/EditAssignmentModal'
@@ -148,19 +125,6 @@ export default function ActiveAssignmentsView() {
     const day = date.getDate()
     const year = date.getFullYear()
     return `${month} ${day}, ${year}`
-  }
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'published':
-        return <Clock className="h-4 w-4" />
-      case 'completed':
-        return <CheckCircle className="h-4 w-4" />
-      case 'draft':
-        return <AlertCircle className="h-4 w-4" />
-      default:
-        return <AlertCircle className="h-4 w-4" />
-    }
   }
 
   const handleSort = (column: 'dueDate' | 'status' | 'submissions') => {

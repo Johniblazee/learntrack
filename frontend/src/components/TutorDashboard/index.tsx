@@ -1,11 +1,9 @@
-import { useState } from "react"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
 import { useNavigate, useLocation, Routes, Route, Navigate } from "react-router-dom"
 import { AppSidebar } from "./AppSidebar"
 import { OverviewView } from "./views/OverviewView"
-import { PlaceholderView } from "./views/PlaceholderView"
 import InvitationsView from "./views/InvitationsView"
 import GroupsManagementView from "./views/GroupsManagementView"
 import StudentManager from "@/components/student-manager"
@@ -20,7 +18,6 @@ import GradingView from "./views/GradingView"
 import MessagingView from "./views/MessagingView"
 import ConversationsView from "./views/ConversationsView"
 import StudentDetailsPage from "@/pages/StudentDetailsPage"
-import { Brain, Calendar, BarChart3, FileText } from "lucide-react"
 import { useDashboardStats } from "@/hooks/useQueries"
 
 interface TutorDashboardProps {
@@ -28,6 +25,7 @@ interface TutorDashboardProps {
 }
 
 export default function TutorDashboard({ onBack }: TutorDashboardProps) {
+  void onBack
   const navigate = useNavigate()
   const location = useLocation()
 

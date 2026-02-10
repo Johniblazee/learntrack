@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
 import { Users, Search, ChevronLeft, ChevronRight, MoreVertical, Eye, Edit, Shield, UserCheck } from 'lucide-react'
@@ -38,6 +38,7 @@ export function UsersPage() {
   const [totalPages, setTotalPages] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  void error
   const [searchQuery, setSearchQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('')
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)

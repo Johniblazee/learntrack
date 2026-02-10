@@ -7,7 +7,7 @@ import { useAuth } from "@clerk/clerk-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   Search,
   Plus,
@@ -304,7 +304,7 @@ export default function ConversationsView() {
               </div>
             ) : (
               filteredConversations.map((conv) => {
-                const { name, role } = getOtherParticipant(conv)
+                const { name } = getOtherParticipant(conv)
                 const isSelected = selectedConversation?._id === conv._id
                 const unreadCount = conv.unread_count[userId || ""] || 0
                 const hasUnread = unreadCount > 0

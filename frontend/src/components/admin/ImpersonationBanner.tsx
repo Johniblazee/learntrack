@@ -1,4 +1,3 @@
-import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, X, User, Shield } from 'lucide-react'
 import { useImpersonation } from '../../contexts/ImpersonationContext'

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import { setTokenGetter } from '@/lib/api'
 import { API_BASE_URL } from '@/lib/config'

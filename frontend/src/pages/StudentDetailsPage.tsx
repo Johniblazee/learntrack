@@ -16,28 +16,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  MessageCircle,
-  Edit,
-  CheckCircle2,
-  Clock,
-  Users,
-  FileText,
-  Calendar,
-  Link as LinkIcon,
-  X,
-  UserPlus,
-  Mail,
-  Loader2,
-  TrendingUp,
-  Target,
-  BookOpen,
-  Award,
-  BarChart3,
-  Activity as ActivityIcon,
-  GraduationCap,
-  User
-} from 'lucide-react'
+import { MessageCircle, Edit, CheckCircle2, Clock, Users, FileText, Calendar, X, UserPlus, Mail, Loader2, TrendingUp, Target, BookOpen, Award, BarChart3, Activity as ActivityIcon, GraduationCap, User } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'

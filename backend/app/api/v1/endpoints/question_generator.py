@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 
-from app.core.dependencies import get_rag_service, get_database
+from app.core.dependencies import get_rag_service, get_database, get_question_service
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
 from app.core.ai_models_config import get_all_active_models_for_dropdown
 from app.agents.graph.state import (
@@ -28,7 +28,14 @@ from app.ai.services.ai_manager import get_tenant_ai_manager
 from app.services.tenant_ai_config_service import TenantAIConfigService
 from app.services.generation_session_service import GenerationSessionService
 from app.services.web_search_service import WebSearchService
+from app.services.question_service import QuestionService
 from app.models.generation_session import SessionStatus, QuestionStatus, StoredQuestion
+from app.models.question import (
+    QuestionCreate,
+    QuestionType as BankQuestionType,
+    QuestionDifficulty as BankQuestionDifficulty,
+    QuestionOption,
+)
 from app.utils.enums import (
     normalize_question_type,
     normalize_difficulty,
@@ -677,6 +684,160 @@ async def reject_question(
         raise HTTPException(status_code=404, detail="Question not found")
 
     return {"message": "Question rejected", "question_id": question_id}
+
+
+class SaveToQuestionBankRequest(BaseModel):
+    """Request for saving approved generated questions to the bank."""
+
+    question_ids: Optional[List[str]] = Field(default=None)
+    subject_id: Optional[str] = Field(default=None)
+    topic: Optional[str] = Field(default=None)
+
+
+def _normalize_bank_question_type(value: Optional[str]) -> BankQuestionType:
+    raw = (value or "").strip().lower().replace("_", "-")
+    if raw in {"multiple-choice", "mcq"}:
+        return BankQuestionType.MULTIPLE_CHOICE
+    if raw == "true-false":
+        return BankQuestionType.TRUE_FALSE
+    if raw == "essay":
+        return BankQuestionType.ESSAY
+    return BankQuestionType.SHORT_ANSWER
+
+
+def _normalize_bank_difficulty(value: Optional[str]) -> BankQuestionDifficulty:
+    raw = (value or "").strip().lower()
+    if raw == "easy":
+        return BankQuestionDifficulty.EASY
+    if raw == "hard":
+        return BankQuestionDifficulty.HARD
+    return BankQuestionDifficulty.MEDIUM
+
+
+def _strip_option_prefix(value: str) -> str:
+    import re
+
+    return re.sub(r"^[A-Za-z][\).:-]\s*", "", value).strip()
+
+
+def _build_mcq_options(options: Optional[List[str]], answer: str):
+    normalized = [
+        _strip_option_prefix(opt) for opt in (options or []) if opt and opt.strip()
+    ]
+    if len(normalized) < 2:
+        raise ValueError("MCQ requires at least 2 options")
+
+    resolved_answer = (answer or "").strip()
+    if len(resolved_answer) == 1 and resolved_answer.isalpha():
+        idx = ord(resolved_answer.upper()) - 65
+        if 0 <= idx < len(normalized):
+            resolved_answer = normalized[idx]
+
+    if resolved_answer not in normalized:
+        raise ValueError("Correct answer does not match options")
+
+    return [
+        QuestionOption(text=opt, is_correct=opt == resolved_answer)
+        for opt in normalized
+    ], resolved_answer
+
+
+@router.post("/sessions/{session_id}/save-to-question-bank")
+async def save_session_questions_to_bank(
+    session_id: str,
+    request: SaveToQuestionBankRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    session_service: GenerationSessionService = Depends(get_session_service),
+    question_service: QuestionService = Depends(get_question_service),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Persist approved generated session questions into the tutor question bank."""
+    session = await session_service.get_session(session_id, current_user.clerk_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    selected_question_ids = set(request.question_ids or [])
+    approved_questions = [
+        question
+        for question in session.questions
+        if question.status == QuestionStatus.APPROVED
+        and (not selected_question_ids or question.question_id in selected_question_ids)
+    ]
+
+    if not approved_questions:
+        raise HTTPException(status_code=400, detail="No approved questions to save")
+
+    subject_id = request.subject_id
+    if not subject_id:
+        configured_subject_name = (session.config or {}).get("subject")
+        if configured_subject_name:
+            subject_doc = await database.subjects.find_one(
+                {
+                    "tutor_id": current_user.clerk_id,
+                    "name": configured_subject_name,
+                    "is_active": True,
+                }
+            )
+            if subject_doc and subject_doc.get("_id"):
+                subject_id = str(subject_doc["_id"])
+
+    if not subject_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to resolve subject_id from session subject. Provide subject_id.",
+        )
+
+    topic = request.topic or (session.config or {}).get("topic") or "AI Generated"
+
+    saved_count = 0
+    failed_items = []
+
+    for question in approved_questions:
+        try:
+            bank_type = _normalize_bank_question_type(question.type)
+            bank_difficulty = _normalize_bank_difficulty(question.difficulty)
+
+            option_payload = []
+            correct_answer = question.correct_answer
+            if bank_type == BankQuestionType.MULTIPLE_CHOICE:
+                option_payload, correct_answer = _build_mcq_options(
+                    question.options,
+                    question.correct_answer,
+                )
+
+            payload = QuestionCreate(
+                question_text=question.question_text,
+                question_type=bank_type,
+                subject_id=subject_id,
+                topic=topic,
+                difficulty=bank_difficulty,
+                points=1,
+                explanation=question.explanation,
+                tags=question.tags,
+                tutor_id=current_user.clerk_id,
+                options=option_payload,
+                correct_answer=correct_answer,
+            )
+
+            await question_service.create_question(
+                question_data=payload,
+                tutor_id=current_user.clerk_id,
+                ai_generated=False,
+                generation_id=session_id,
+            )
+            saved_count += 1
+        except Exception as exc:
+            failed_items.append(
+                {"question_id": question.question_id, "reason": str(exc)}
+            )
+
+    return {
+        "session_id": session_id,
+        "requested": len(approved_questions),
+        "saved_count": saved_count,
+        "failed_count": len(failed_items),
+        "failed_items": failed_items,
+    }
 
 
 class UpdateQuestionRequest(BaseModel):

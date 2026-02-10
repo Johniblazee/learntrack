@@ -87,6 +87,3 @@ export {
   type ActionProps,
 } from './actions'
 
-// Question Generator Component
-export { default as AIQuestionGenerator } from './question-generator'
-export type { AIQuestionGeneratorProps } from './question-generator'

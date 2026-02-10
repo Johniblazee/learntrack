@@ -3,7 +3,6 @@ import { Calendar } from '@/components/ui/calendar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useApiClient } from '@/lib/api-client'
-import { toast } from "@/contexts/ToastContext"
 import { CalendarDays } from 'lucide-react'
 
 export function DeadlineCalendar() {

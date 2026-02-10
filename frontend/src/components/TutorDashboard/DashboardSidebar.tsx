@@ -13,17 +13,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import {
-  Brain,
-  Home,
-  Users,
-  FileText,
-  BookOpen,
-  ChevronDown,
-  ChevronRight,
-  Mail,
-  Link as LinkIcon,
-} from "lucide-react"
+import { Brain, Home, Users, FileText, BookOpen, ChevronDown, ChevronRight } from "lucide-react"
 
 interface DashboardSidebarProps {
   activeView: string

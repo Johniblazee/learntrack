@@ -11,17 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Plus,
-  RefreshCw,
-  Search,
-  Mail,
-  CheckCircle,
-  XCircle,
-  Clock,
-  Send,
-  Users
-} from 'lucide-react'
+import { Plus, RefreshCw, Search, Mail, CheckCircle, XCircle, Clock, Send } from 'lucide-react'
 import InviteUserModal from '@/components/InviteUserModal'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'

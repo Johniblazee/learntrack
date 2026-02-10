@@ -3,7 +3,6 @@
  * Provides consistent empty state UX across the application
  */
 
-import React from 'react'
 import { Button } from '@/components/ui/button'
 import { LucideIcon } from 'lucide-react'
 

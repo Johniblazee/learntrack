@@ -6,15 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import {
-  Calendar,
-  Users,
-  BookOpen,
-  Plus,
-  X,
-  Save,
-  ArrowLeft
-} from "lucide-react"
+import { Users, BookOpen, Plus, X, Save, ArrowLeft } from "lucide-react"
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
 import GroupSelector from '@/components/GroupSelector'

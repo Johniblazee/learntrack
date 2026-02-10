@@ -8,7 +8,7 @@
  * </ErrorBoundary>
  */
 
-import React, { Component, ErrorInfo, ReactNode } from 'react'
+import { Component, ErrorInfo, ReactNode } from 'react'
 import { AlertCircle, RefreshCw, Home, Bug } from 'lucide-react'
 import { Button } from './ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'

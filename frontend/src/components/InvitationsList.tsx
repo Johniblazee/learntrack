@@ -58,6 +58,8 @@ export default function InvitationsList({ refreshTrigger, onInviteClick }: Invit
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingInvitation, setEditingInvitation] = useState<Invitation | null>(null)
 
+  void onInviteClick
+
   const loadInvitations = useCallback(async () => {
     try {
       setLoading(true)

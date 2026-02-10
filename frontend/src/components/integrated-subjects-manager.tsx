@@ -1,27 +1,11 @@
-import React, { useState, useMemo } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useMemo } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Plus,
-  BookOpen,
-  Users,
-  FileText,
-  Target,
-  Search,
-  Filter,
-  Edit,
-  Trash2,
-  Eye,
-  FolderOpen,
-  Tag,
-  Calendar,
-  TrendingUp,
-  BarChart3
-} from "lucide-react"
+import { Plus, BookOpen, Users, FileText, Target, Search, Edit, Trash2, Eye, Tag, TrendingUp } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useSubjects, useTopics } from "@/hooks/useQueries"

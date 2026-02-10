@@ -3,7 +3,6 @@
  * Provides consistent UX across the application
  */
 
-import React from 'react'
 import {
   AlertDialog,
   AlertDialogAction,

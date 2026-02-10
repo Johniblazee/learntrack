@@ -1,39 +1,15 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  Eye,
-  Edit,
-  Trash2,
-  ThumbsUp,
-  ThumbsDown,
-  Star,
-  Filter,
-  Search,
-  BookOpen,
-  Target,
-  TrendingUp,
-  BarChart3,
-  MessageSquare,
-  Flag,
-  Clock,
-  User
-} from "lucide-react"
+import { CheckCircle, XCircle, AlertTriangle, Eye, Edit, ThumbsUp, ThumbsDown, Star, Search, BookOpen, BarChart3, MessageSquare, Flag, Clock } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { toast } from '@/contexts/ToastContext'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MathText } from '@/components/ui/math-text'
-import { cn } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/config'
 
 interface Question {
@@ -79,9 +55,6 @@ export default function QuestionReviewer() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [subjectFilter, setSubjectFilter] = useState("all")
-  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
-  const [reviewComment, setReviewComment] = useState("")
-  const [rating, setRating] = useState(0)
   const [questions, setQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedQuestions, setSelectedQuestions] = useState<Set<string>>(new Set())
@@ -183,7 +156,7 @@ export default function QuestionReviewer() {
     }
   }
 
-  const handleReject = async (questionId: string, reason?: string) => {
+  const handleReject = async (questionId: string) => {
     try {
       // Find the question to get its session_id
       const question = questions.find(q => q.id === questionId || q.question_id === questionId)
@@ -800,7 +773,7 @@ export default function QuestionReviewer() {
                               </Button>
                               <Button
                                 variant="outline"
-                                onClick={() => handleRequestRevision(question.id, reviewComment || 'Please revise')}
+                                onClick={() => handleRequestRevision(question.id, 'Please revise')}
                                 className="border-border hover:bg-muted"
                               >
                                 <Flag className="w-4 h-4 mr-2" />

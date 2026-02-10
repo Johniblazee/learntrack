@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from 'react'
 import {
   CheckCircle2,
   Circle,
@@ -36,7 +36,7 @@ interface AgentPlanProps {
 }
 
 export function AgentPlan({ tasks: initialTasks }: AgentPlanProps) {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [tasks] = useState<Task[]>(initialTasks);
   const [expandedTasks, setExpandedTasks] = useState<string[]>([]);
   const [expandedSubtasks, setExpandedSubtasks] = useState<{
     [key: string]: boolean;

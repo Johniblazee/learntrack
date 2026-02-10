@@ -3,7 +3,7 @@
  * Displays all questions in a table format with search and filters
  */
 
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
 import { Button } from "@/components/ui/button"
@@ -494,6 +494,9 @@ export default function QuestionBankManager() {
           </h1>
           <p className="text-muted-foreground mt-1">
             Manage your custom questions for assignments and quizzes.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            {loading ? 'Loading questions...' : `${totalItems} total question${totalItems === 1 ? '' : 's'}`}
           </p>
         </div>
         <Button 

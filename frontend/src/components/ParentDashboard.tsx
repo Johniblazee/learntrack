@@ -1,7 +1,6 @@
 "use client"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Heart, Users, BookOpen, TrendingUp } from "lucide-react"
 import { useUser } from "@clerk/clerk-react"
 import { useParentProgress } from "@/hooks/useQueries"

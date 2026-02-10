@@ -4,7 +4,7 @@
  * for adding to assignments
  */
 
-import React, { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useApiClient } from "@/lib/api-client"
 import {
   Dialog,
@@ -27,15 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Search,
-  BookOpen,
-  AlertCircle,
-  Filter,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react"
+import { Search, BookOpen, AlertCircle, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react"
 
 export interface QuestionItem {
   id: string

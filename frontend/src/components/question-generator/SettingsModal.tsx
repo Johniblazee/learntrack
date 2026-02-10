@@ -2,7 +2,7 @@
  * SettingsModal - Modal for configuring question generation settings
  * Features: Subject, topic, difficulty, question type, AI provider, materials
  */
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect, type ElementType } from 'react'
 import { motion } from 'motion/react'
 import {
   Dialog,
@@ -14,32 +14,20 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Slider } from '@/components/ui/slider'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import {
   Settings,
   BookOpen,
   Target,
   Brain,
-  FileText,
-  Sparkles,
   Sliders,
-  X,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useMaterials } from '@/hooks/useQueries'
 
 export interface GenerationSettings {
   subject: string
@@ -58,8 +46,6 @@ interface SettingsModalProps {
   onOpenChange: (open: boolean) => void
   settings: GenerationSettings
   onSettingsChange: (settings: GenerationSettings) => void
-  onGenerate?: () => void
-  isGenerating: boolean
 }
 
 const BLOOMS_LEVELS = [
@@ -78,13 +64,6 @@ const QUESTION_TYPES = [
   { id: 'essay', label: 'Essay', icon: '¶' },
 ]
 
-export const AI_PROVIDERS = [
-  { id: 'openai', label: 'OpenAI', models: ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'] },
-  { id: 'anthropic', label: 'Anthropic', models: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'] },
-  { id: 'gemini', label: 'Google Gemini', models: ['gemini-3.0-pro', 'gemini-3.0-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'] },
-  { id: 'groq', label: 'Groq', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.3-8b-instant'] },
-]
-
 const DIFFICULTIES = [
   { id: 'easy', label: 'Easy', color: 'bg-green-500' },
   { id: 'medium', label: 'Medium', color: 'bg-amber-500' },
@@ -97,13 +76,9 @@ export function SettingsModal({
   onOpenChange,
   settings,
   onSettingsChange,
-  onGenerate,
-  isGenerating,
 }: SettingsModalProps) {
   const [localSettings, setLocalSettings] = useState<GenerationSettings>(settings)
   const [expandedSection, setExpandedSection] = useState<string | null>('basic')
-  const { data: materialsData, isLoading: isLoadingMaterials } = useMaterials()
-  const materials = materialsData?.items || []
 
   // Sync with parent settings when modal opens
   useEffect(() => {
@@ -137,25 +112,8 @@ export function SettingsModal({
     })
   }
 
-  const toggleMaterial = (materialId: string) => {
-    setLocalSettings(prev => {
-      const ids = prev.materialIds.includes(materialId)
-        ? prev.materialIds.filter(id => id !== materialId)
-        : [...prev.materialIds, materialId]
-      return { ...prev, materialIds: ids }
-    })
-  }
-
   const handleSave = () => {
     onSettingsChange(localSettings)
-    onOpenChange(false)
-  }
-
-  const handleGenerate = () => {
-    onSettingsChange(localSettings)
-    if (onGenerate) {
-      onGenerate()
-    }
     onOpenChange(false)
   }
 
@@ -165,7 +123,7 @@ export function SettingsModal({
     sectionId 
   }: { 
     title: string; 
-    icon: React.ElementType; 
+    icon: ElementType;
     sectionId: string 
   }) => (
     <button
@@ -286,9 +244,9 @@ export function SettingsModal({
 
             <Separator />
 
-            {/* Difficulty & AI */}
+            {/* Difficulty */}
             <div>
-              <SectionHeader title="Difficulty & AI Model" icon={Sliders} sectionId="ai" />
+              <SectionHeader title="Difficulty" icon={Sliders} sectionId="ai" />
               {expandedSection === 'ai' && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
@@ -318,52 +276,6 @@ export function SettingsModal({
                     </div>
                   </div>
 
-                  {/* AI Provider */}
-                  <div className="space-y-2">
-                    <Label>AI Provider</Label>
-                    <Select
-                      value={localSettings.aiProvider}
-                      onValueChange={(val) => {
-                        updateSetting('aiProvider', val)
-                        // Auto-select first model of provider
-                        const provider = AI_PROVIDERS.find(p => p.id === val)
-                        if (provider) {
-                          updateSetting('modelName', provider.models[0])
-                        }
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {AI_PROVIDERS.map((provider) => (
-                          <SelectItem key={provider.id} value={provider.id}>
-                            {provider.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Model */}
-                  <div className="space-y-2">
-                    <Label>Model</Label>
-                    <Select
-                      value={localSettings.modelName}
-                      onValueChange={(val) => updateSetting('modelName', val)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {AI_PROVIDERS.find(p => p.id === localSettings.aiProvider)?.models.map((model) => (
-                          <SelectItem key={model} value={model}>
-                            {model}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </motion.div>
               )}
             </div>

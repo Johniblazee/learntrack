@@ -1,24 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@clerk/clerk-react'
-import { 
-  Activity, 
-  RefreshCw, 
-  Search, 
-  ChevronLeft, 
-  ChevronRight, 
-  Calendar,
-  Filter,
-  Clock,
-  User,
-  FileText,
-  CheckCircle,
-  XCircle,
-  AlertCircle
-} from 'lucide-react'
+import { Activity, RefreshCw, ChevronLeft, ChevronRight, Calendar, Filter, Clock, FileText, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { API_BASE_URL } from '@/lib/config'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -78,6 +64,7 @@ export function ActivityPage() {
   const [totalPages, setTotalPages] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  void error
   const [filters, setFilters] = useState<ActivityFilters>({})
   const [fromDate, setFromDate] = useState<Date | undefined>(subDays(new Date(), 7))
   const [toDate, setToDate] = useState<Date | undefined>(new Date())

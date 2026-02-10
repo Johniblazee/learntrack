@@ -17,7 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, Search, MoreVertical, Edit, Trash2, Eye, Copy, FileText } from 'lucide-react'
+import { Plus, Search, MoreVertical, Edit, Trash2, Eye, Copy } from 'lucide-react'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
 import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal'
@@ -111,11 +111,11 @@ export default function AssignmentTemplatesView() {
     }
   }
 
-  const handleView = (templateId: string) => {
+  const handleView = () => {
     toast.info('View template details coming soon')
   }
 
-  const handleEdit = (templateId: string) => {
+  const handleEdit = () => {
     toast.info('Edit template coming soon')
   }
 
@@ -247,11 +247,11 @@ export default function AssignmentTemplatesView() {
                               <Copy className="w-4 h-4 mr-2" />
                               Use Template
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleView(template._id)}>
+                            <DropdownMenuItem onClick={() => handleView()}>
                               <Eye className="w-4 h-4 mr-2" />
                               View Details
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleEdit(template._id)}>
+                            <DropdownMenuItem onClick={() => handleEdit()}>
                               <Edit className="w-4 h-4 mr-2" />
                               Edit
                             </DropdownMenuItem>

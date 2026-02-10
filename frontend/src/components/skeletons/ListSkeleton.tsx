@@ -1,7 +1,6 @@
 /**
  * Reusable list skeleton loader component
  */
-import React from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 
 interface ListSkeletonProps {

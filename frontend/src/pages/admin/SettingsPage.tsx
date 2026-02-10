@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { Settings, Save, ToggleLeft, ToggleRight, RefreshCw } from 'lucide-react'
 

@@ -5,15 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from '@/contexts/ToastContext'
-import { 
-  CheckCircle, 
-  XCircle, 
-  Loader2, 
-  UserPlus,
-  Mail,
-  User,
-  Shield
-} from 'lucide-react'
+import { CheckCircle, XCircle, Loader2, UserPlus, Mail } from 'lucide-react'
 
 interface InvitationDetails {
   valid: boolean
@@ -112,7 +104,7 @@ export default function AcceptInvitationPage() {
         throw new Error(error.detail || 'Failed to accept invitation')
       }
 
-      const result = await response.json()
+      await response.json()
 
       toast.success('Invitation Accepted!', {
         description: 'Your account has been created successfully'

@@ -42,7 +42,7 @@ function getActivityStyle(type: string) {
 }
 
 export function RecentActivity() {
-  const { data: activities, isLoading, error } = useRecentActivity(5)
+  const { data: activities, isLoading } = useRecentActivity(5)
 
   // Loading state
   if (isLoading) {
@@ -122,7 +122,6 @@ export function RecentActivity() {
     </Card>
   )
 }
-
 
 
 

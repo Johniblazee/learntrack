@@ -12,7 +12,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { motion, AnimatePresence } from "framer-motion";
-import { AI_PROVIDERS } from "@/components/question-generator/SettingsModal";
+import { AI_PROVIDERS } from "@/lib/ai-models";
 
 // Flatten all models from AI_PROVIDERS for the dropdown
 const ALL_MODELS = AI_PROVIDERS.flatMap(provider => 
@@ -148,11 +148,6 @@ export function AIInput({
         minHeight: 72,
         maxHeight: 300,
     });
-
-    // Filter models by provider if specified
-    const availableModels = aiProvider
-        ? ALL_MODELS.filter(m => m.provider === aiProvider)
-        : ALL_MODELS;
 
     // Provider icons mapping
     const PROVIDER_ICONS: Record<string, React.ReactNode> = {

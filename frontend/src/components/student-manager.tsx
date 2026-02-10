@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -113,13 +113,8 @@ export default function StudentManager() {
     setCurrentPage(1)
   }, [searchTerm])
 
-  // Handle page change
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page)
-  }
-
   // Handle sort (TODO: Implement server-side sorting)
-  const handleSort = (field: string) => {
+  const handleSort = (_field: string) => {
     toast.info('Sorting functionality coming soon')
   }
 

@@ -1,7 +1,6 @@
 /**
  * Reusable card skeleton loader component
  */
-import React from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 

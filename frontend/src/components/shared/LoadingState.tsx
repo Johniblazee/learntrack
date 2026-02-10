@@ -3,7 +3,6 @@
  * Provides consistent loading UX across the application
  */
 
-import React from 'react'
 
 interface LoadingStateProps {
   count?: number

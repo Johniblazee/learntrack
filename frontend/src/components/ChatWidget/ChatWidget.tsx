@@ -1,7 +1,7 @@
 /**
  * Floating chat widget - accessible from all pages
  */
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { MessageCircle, X, Send, Minimize2, Maximize2 } from 'lucide-react';
 import { useAuth } from '@clerk/clerk-react';
 import { Button } from '@/components/ui/button';
@@ -38,7 +38,7 @@ interface Conversation {
 
 export default function ChatWidget() {
   const { getToken, userId } = useAuth();
-  const { visibleUserIds, canAccessConversation } = useVisibility();
+  const { visibleUserIds } = useVisibility();
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -207,7 +207,7 @@ export default function ChatWidget() {
     });
   };
 
-  const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTyping = (e: ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
     
     if (!selectedConversation) return;

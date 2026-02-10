@@ -1,17 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
-import {
-  User,
-  Bell,
-  Lock,
-  Palette,
-  Globe,
-  Mail,
-  Save,
-  ArrowLeft,
-  Loader2
-} from 'lucide-react'
+import { User, Bell, Lock, Palette, Globe, Save, ArrowLeft, Loader2 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'

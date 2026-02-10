@@ -8,11 +8,9 @@ import { Progress } from "@/components/ui/progress"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, BookOpen, Clock, CheckCircle, Star, Calendar, Trophy, Target, Flame } from "lucide-react"
+import { ArrowLeft, BookOpen, Clock, CheckCircle, Star, Calendar, Trophy, Target } from "lucide-react"
 import { toast } from "@/contexts/ToastContext"
 
-import Announcements from "@/components/Announcements"
-import EventCalendar from "@/components/EventCalendar"
 
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -50,7 +48,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
   const studentName = user?.fullName || user?.firstName || "Student"
 
   // Use React Query for assignments
-  const { data: assignments = [], isLoading: loading, error } = useMyAssignments()
+  const { data: assignments = [], isLoading: loading } = useMyAssignments()
 
   // Fetch dashboard stats
   const { data: dashboardStats, isLoading: statsLoading } = useStudentDashboardStats()
@@ -64,7 +62,6 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState("")
   const [showingQuestion, setShowingQuestion] = useState(false)
-  const [isReviewing, setIsReviewing] = useState(false)
 
   // Placeholder function for submitting an answer
   const submitAnswer = () => {
@@ -74,16 +71,9 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
   // Questions should come from backend; empty default here
   const activeAssignmentQuestions: Question[] = []
 
-  const startAssignment = (assignmentId: string) => {
+  const startAssignment = () => {
     // In a real app, you'd fetch the questions for the assignment
     setShowingQuestion(true)
-    setIsReviewing(false)
-    setCurrentQuestionIndex(0)
-  }
-
-  const startReview = (assignmentId: string) => {
-    setShowingQuestion(true)
-    setIsReviewing(true)
     setCurrentQuestionIndex(0)
   }
 
@@ -97,39 +87,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
     }
   }
 
-  const handlePreviousQuestion = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1)
-    }
-  }
-
   const currentQuestion = activeAssignmentQuestions[currentQuestionIndex]
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <CheckCircle className="h-4 w-4 text-green-600" />
-      case "in-progress":
-        return <Clock className="h-4 w-4 text-blue-600" />
-      case "pending":
-        return <BookOpen className="h-4 w-4 text-gray-600" />
-      default:
-        return null
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "completed":
-        return "bg-green-100 text-green-800"
-      case "in-progress":
-        return "bg-blue-100 text-blue-800"
-      case "pending":
-        return "bg-gray-100 text-gray-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
 
   if (showingQuestion) {
     return (
@@ -389,7 +347,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
                             >
                               {assignment.status === 'pending' ? 'Not Started' : assignment.status === 'completed' ? 'Completed' : 'In Progress'}
                             </Badge>
-                            <Button size="sm" variant="outline" onClick={() => startAssignment(assignment.id)}>
+                            <Button size="sm" variant="outline" onClick={() => startAssignment()}>
                               {assignment.status === 'pending' ? 'Start' : assignment.status === 'completed' ? 'Review' : 'Continue'}
                             </Button>
                           </div>

@@ -9,15 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { 
-  MessageCircle, 
-  Edit, 
-  CheckCircle2, 
-  Clock,
-  Users,
-  FileText,
-  Calendar
-} from 'lucide-react'
+import { MessageCircle, Edit, CheckCircle2, Users, FileText } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'

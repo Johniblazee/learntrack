@@ -32,7 +32,7 @@ interface DashboardHeaderProps {
 
 export function DashboardHeader({ onCreateAssignment }: DashboardHeaderProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<any[]>([])
+  const [notifications] = useState<any[]>([])
   const { user } = useUser()
   const { signOut } = useClerk()
   const navigate = useNavigate()
@@ -223,7 +223,6 @@ export function DashboardHeader({ onCreateAssignment }: DashboardHeaderProps) {
     </header>
   )
 }
-
 
 
 

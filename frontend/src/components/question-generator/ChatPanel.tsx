@@ -2,7 +2,7 @@
  * ChatPanel - Continuous chat interface for question generation
  * Features: Streaming messages, question references, chat history cycling, session management
  */
-import React, { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -250,7 +250,7 @@ export function ChatPanel({
                 </p>
               </motion.div>
             ) : (
-              messages.map((message, index) => (
+              messages.map((message) => (
                 <motion.div
                   key={message.id}
                   initial={{ opacity: 0, y: 10 }}

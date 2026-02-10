@@ -14,7 +14,7 @@ const avatarColors = [
 ]
 
 export function TopPerformers() {
-  const { data: performers, isLoading, error } = useTopPerformers()
+  const { data: performers, isLoading } = useTopPerformers()
 
   // Loading state
   if (isLoading) {
@@ -125,4 +125,3 @@ export function TopPerformers() {
     </div>
   )
 }
-

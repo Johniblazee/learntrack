@@ -3,7 +3,7 @@
  * Matches the dark theme design with golden send button
  */
 
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -13,9 +13,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, X, Loader2 } from 'lucide-react'
+import { Send, Loader2 } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
-import { useAuth } from '@clerk/clerk-react'
 import { useApiClient } from '@/lib/api-client'
 import { socketClient } from '@/lib/socket'
 
@@ -45,7 +44,6 @@ export function SendMessageModal({
 }: SendMessageModalProps) {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
-  const { getToken } = useAuth()
   const client = useApiClient()
 
   const handleSendMessage = async () => {
@@ -104,7 +102,7 @@ export function SendMessageModal({
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSendMessage()

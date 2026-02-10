@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom"
-import { useUser, useAuth } from "@clerk/clerk-react"
+import { useUser } from "@clerk/clerk-react"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
 import { GraduationCap } from "lucide-react"
@@ -10,7 +10,6 @@ interface HeaderProps {
 
 export function Header({ showNavigation = true }: HeaderProps) {
   const { isSignedIn, user } = useUser()
-  const { getToken } = useAuth()
   const navigate = useNavigate()
 
   const handleGetStarted = () => {

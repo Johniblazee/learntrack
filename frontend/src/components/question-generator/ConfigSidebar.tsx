@@ -2,7 +2,7 @@
  * ConfigSidebar - Sidebar for configuring question generation parameters.
  * Allows users to control the AI agent's behavior.
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'

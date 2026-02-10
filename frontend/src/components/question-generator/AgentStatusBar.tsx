@@ -2,9 +2,8 @@
  * AgentStatusBar - Displays the real-time status of the question generation agent.
  * Visualizes the agent's thinking steps and current action.
  */
-import React from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Brain, Sparkles, FileSearch, CheckCircle2, Loader2 } from 'lucide-react'
+import { FileSearch, CheckCircle2, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface AgentStatusBarProps {
@@ -13,13 +12,6 @@ interface AgentStatusBarProps {
   thinkingSteps: string[]
   progress: { current: number; total: number }
   foundSources: Array<{ id: string; title: string }>
-}
-
-const statusIcons: Record<string, React.ReactNode> = {
-  thinking: <Brain className="w-4 h-4" />,
-  generating: <Sparkles className="w-4 h-4" />,
-  searching: <FileSearch className="w-4 h-4" />,
-  complete: <CheckCircle2 className="w-4 h-4" />,
 }
 
 export function AgentStatusBar({

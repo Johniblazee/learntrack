@@ -1,42 +1,6 @@
-import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  BookOpen,
-  Settings,
-  ChevronRight,
-  UserPlus,
-  MessageSquare,
-  Mail,
-  Brain,
-  CheckSquare,
-  Library,
-  FolderOpen,
-  Calendar,
-  ClipboardList,
-  GraduationCap,
-  Bell,
-  User,
-  LogOut,
-  Moon,
-  Sun,
-  Layers,
-} from "lucide-react"
+import { LayoutDashboard, Users, FileText, BookOpen, Settings, ChevronRight, UserPlus, MessageSquare, Mail, Brain, CheckSquare, Library, FolderOpen, Calendar, ClipboardList, GraduationCap, Bell, LogOut, Moon, Sun, Layers } from "lucide-react"
 
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
-} from "@/components/ui/sidebar"
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar"
 import {
   Collapsible,
   CollapsibleContent,
@@ -167,6 +131,7 @@ export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const client = useApiClient()
+  void onViewChange
 
   // Notifications state
   const [notifications, setNotifications] = useState<any[]>([])

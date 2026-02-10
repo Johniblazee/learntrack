@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -73,8 +73,7 @@ export default function GradingView() {
   const loadSubmissions = async () => {
     try {
       setLoading(true)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      await getToken()
 
       // TODO: Replace with actual API endpoint when available
       // For now, using mock data
@@ -102,8 +101,7 @@ export default function GradingView() {
 
     try {
       setGrading(true)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+      await getToken()
 
       // TODO: Implement actual grading API call
       toast.success('Submission graded successfully')

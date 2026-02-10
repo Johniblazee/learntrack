@@ -1,6 +1,7 @@
 """
 Question management endpoints
 """
+
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, Path, Query, HTTPException, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -8,13 +9,18 @@ import structlog
 
 from app.core.database import get_database
 from app.core.dependencies import get_question_service
-from app.core.enhanced_auth import require_tutor, require_authenticated_user, ClerkUserContext
+from app.core.enhanced_auth import (
+    require_tutor,
+    require_authenticated_user,
+    ClerkUserContext,
+)
 from app.core.rate_limit import limiter, RATE_LIMITS
 from app.models.question import (
-    Question, QuestionCreate, QuestionUpdate, QuestionForStudent,
-    QuestionGenerationRequest, QuestionGenerationResponse
+    Question,
+    QuestionCreate,
+    QuestionUpdate,
+    QuestionForStudent,
 )
-from app.ai.services.ai_manager import AIManager
 from app.services.question_service import QuestionService
 from app.services.user_service import UserService
 from app.utils.pagination import PaginatedResponse, paginate
@@ -22,19 +28,23 @@ from app.utils.pagination import PaginatedResponse, paginate
 logger = structlog.get_logger()
 router = APIRouter()
 
+
 @router.post("/", response_model=Question)
 async def create_question(
     question_data: QuestionCreate,
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Create a new question"""
     try:
-        question = await question_service.create_question(question_data, current_user.clerk_id)
+        question = await question_service.create_question(
+            question_data, current_user.clerk_id
+        )
         return question
     except Exception as e:
         logger.error("Failed to create question", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to create question")
+
 
 @router.get("/", response_model=PaginatedResponse[Question])
 async def get_questions(
@@ -46,7 +56,7 @@ async def get_questions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Get paginated questions with optional filters"""
     try:
@@ -58,27 +68,26 @@ async def get_questions(
             question_type=question_type,
             search=search,
             page=page,
-            per_page=per_page
+            per_page=per_page,
         )
         return paginate(
-            items=result["items"],
-            page=page,
-            per_page=per_page,
-            total=result["total"]
+            items=result["items"], page=page, per_page=per_page, total=result["total"]
         )
     except Exception as e:
         logger.error("Failed to get questions", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to get questions")
 
+
 # NOTE: Static routes like /pending and /generation-history must be defined BEFORE /{question_id}
 # to avoid being caught by the dynamic route
+
 
 @router.get("/pending", response_model=PaginatedResponse[Question])
 async def get_pending_questions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Get paginated pending questions awaiting approval"""
     try:
@@ -86,13 +95,10 @@ async def get_pending_questions(
             tutor_id=current_user.clerk_id,
             status="pending",
             page=page,
-            per_page=per_page
+            per_page=per_page,
         )
         return paginate(
-            items=result["items"],
-            page=page,
-            per_page=per_page,
-            total=result["total"]
+            items=result["items"], page=page, per_page=per_page, total=result["total"]
         )
     except Exception as e:
         logger.error("Failed to get pending questions", error=str(e))
@@ -104,20 +110,15 @@ async def get_generation_history(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Get AI-generated questions history (both pending and approved)"""
     try:
         result = await question_service.get_generation_history(
-            tutor_id=current_user.clerk_id,
-            page=page,
-            per_page=per_page
+            tutor_id=current_user.clerk_id, page=page, per_page=per_page
         )
         return paginate(
-            items=result["items"],
-            page=page,
-            per_page=per_page,
-            total=result["total"]
+            items=result["items"], page=page, per_page=per_page, total=result["total"]
         )
     except Exception as e:
         logger.error("Failed to get generation history", error=str(e))
@@ -128,11 +129,13 @@ async def get_generation_history(
 async def get_question(
     question_id: str = Path(..., description="Question ID"),
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Get question by ID"""
     try:
-        question = await question_service.get_question_by_id(question_id, current_user.clerk_id)
+        question = await question_service.get_question_by_id(
+            question_id, current_user.clerk_id
+        )
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
         return question
@@ -142,15 +145,18 @@ async def get_question(
         logger.error("Failed to get question", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to get question")
 
+
 @router.get("/{question_id}/student", response_model=QuestionForStudent)
 async def get_question_for_student(
     question_id: str = Path(..., description="Question ID"),
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Get question for student (without correct answers)"""
     try:
-        question = await question_service.get_question_for_student(question_id, current_user.clerk_id)
+        question = await question_service.get_question_for_student(
+            question_id, current_user.clerk_id
+        )
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
         return question
@@ -160,16 +166,19 @@ async def get_question_for_student(
         logger.error("Failed to get question for student", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to get question")
 
+
 @router.put("/{question_id}", response_model=Question)
 async def update_question(
     question_update: QuestionUpdate,
     question_id: str = Path(..., description="Question ID"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Update question"""
     try:
-        question = await question_service.update_question(question_id, question_update, current_user.clerk_id)
+        question = await question_service.update_question(
+            question_id, question_update, current_user.clerk_id
+        )
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
         return question
@@ -179,15 +188,18 @@ async def update_question(
         logger.error("Failed to update question", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to update question")
 
+
 @router.delete("/{question_id}")
 async def delete_question(
     question_id: str = Path(..., description="Question ID"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Delete question"""
     try:
-        success = await question_service.delete_question(question_id, current_user.clerk_id)
+        success = await question_service.delete_question(
+            question_id, current_user.clerk_id
+        )
         if not success:
             raise HTTPException(status_code=404, detail="Question not found")
         return {"message": "Question deleted successfully"}
@@ -197,62 +209,25 @@ async def delete_question(
         logger.error("Failed to delete question", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to delete question")
 
-@router.post("/generate", response_model=QuestionGenerationResponse)
-@limiter.limit(RATE_LIMITS["ai_generation"])
-async def generate_questions(
-    request: Request,
-    body: QuestionGenerationRequest,
-    current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
-):
-    """Generate questions using AI"""
-    try:
-        ai_manager = AIManager()
-
-        text_content = None
-        if body.file_id:
-            text_content = await question_service.get_text_content_from_file(body.file_id, current_user.clerk_id)
-
-        if not text_content:
-            raise HTTPException(status_code=400, detail="No text content provided or file not found")
-
-        # Generate questions
-        questions = await ai_manager.generate_questions(
-            text_content=text_content,
-            question_count=body.question_count,
-            difficulty=body.difficulty_levels[0] if body.difficulty_levels else None,
-            question_types=body.question_types,
-            ai_provider=body.ai_provider,
-            custom_prompt=body.custom_prompt
-        )
-
-        return QuestionGenerationResponse(
-            questions=questions,
-            total_generated=len(questions),
-            ai_provider_used=body.ai_provider
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to generate questions", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to generate questions")
-
 
 @router.put("/{question_id}/approve", response_model=Question)
 async def approve_question(
     question_id: str = Path(..., description="Question ID"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Approve a pending question"""
     try:
-        question = await question_service.approve_question(question_id, current_user.clerk_id)
+        question = await question_service.approve_question(
+            question_id, current_user.clerk_id
+        )
         return question
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to approve question", question_id=question_id, error=str(e))
+        logger.error(
+            "Failed to approve question", question_id=question_id, error=str(e)
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -261,11 +236,13 @@ async def reject_question(
     question_id: str = Path(..., description="Question ID"),
     reason: Optional[str] = Query(None, description="Rejection reason"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Reject a pending question"""
     try:
-        question = await question_service.reject_question(question_id, current_user.clerk_id, reason)
+        question = await question_service.reject_question(
+            question_id, current_user.clerk_id, reason
+        )
         return question
     except HTTPException:
         raise
@@ -279,16 +256,20 @@ async def request_revision(
     question_id: str = Path(..., description="Question ID"),
     notes: str = Query(..., description="Revision notes"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Request revision for a pending question"""
     try:
-        question = await question_service.request_revision(question_id, current_user.clerk_id, notes)
+        question = await question_service.request_revision(
+            question_id, current_user.clerk_id, notes
+        )
         return question
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to request revision", question_id=question_id, error=str(e))
+        logger.error(
+            "Failed to request revision", question_id=question_id, error=str(e)
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -298,12 +279,17 @@ async def bulk_approve_questions(
     request: Request,
     question_ids: List[str],
     current_user: ClerkUserContext = Depends(require_tutor),
-    question_service: QuestionService = Depends(get_question_service)
+    question_service: QuestionService = Depends(get_question_service),
 ):
     """Approve multiple questions at once"""
     try:
-        result = await question_service.bulk_approve_questions(question_ids, current_user.clerk_id)
-        return {"approved_count": result.get("approved_count", 0), "total_requested": len(question_ids)}
+        result = await question_service.bulk_approve_questions(
+            question_ids, current_user.clerk_id
+        )
+        return {
+            "approved_count": result.get("approved_count", 0),
+            "total_requested": len(question_ids),
+        }
     except Exception as e:
         logger.error("Failed to bulk approve questions", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to bulk approve questions")

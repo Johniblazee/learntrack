@@ -1,13 +1,13 @@
-import { useUser, UserButton } from '@clerk/clerk-react'
+import { useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Header } from "@/components/ui/header"
-import { FileText, BookOpen, ArrowLeft } from "lucide-react"
+import { FileText, ArrowLeft } from "lucide-react"
 
 export default function AssignmentsPage() {
-  const { isLoaded, isSignedIn, user } = useUser()
+  const { isLoaded, isSignedIn } = useUser()
   const navigate = useNavigate()
 
   useEffect(() => {

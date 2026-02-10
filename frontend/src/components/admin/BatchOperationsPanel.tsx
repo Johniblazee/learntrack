@@ -1,5 +1,5 @@
-import React from 'react'
-import { CheckSquare, Square, Power, PowerOff, Trash2, Ban, AlertTriangle, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { CheckSquare, Square, Power, PowerOff, Trash2, AlertTriangle, Loader2 } from 'lucide-react'
 
 export type BatchOperationType = 'activate' | 'deactivate' | 'delete' | 'suspend'
 
@@ -22,8 +22,8 @@ export function BatchOperationsPanel({
   isLoading,
   entityType
 }: BatchOperationsPanelProps) {
-  const [showConfirm, setShowConfirm] = React.useState<BatchOperationType | null>(null)
-  const [reason, setReason] = React.useState('')
+  const [showConfirm, setShowConfirm] = useState<BatchOperationType | null>(null)
+  const [reason, setReason] = useState('')
 
   const handleOperation = async (operation: BatchOperationType) => {
     if (operation === 'delete' || operation === 'suspend' || operation === 'deactivate') {

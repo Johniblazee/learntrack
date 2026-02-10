@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { AdminMetrics } from '../../components/admin/AdminMetrics'
 import { Activity, RefreshCw } from 'lucide-react'

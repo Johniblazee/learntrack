@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { usePerformanceChart } from "@/hooks/useQueries"
 import { BarChart3 } from "lucide-react"
 
@@ -24,7 +24,7 @@ export function PerformanceChart() {
   const [selectedPeriod, setSelectedPeriod] = useState("30days")
   const days = periodToDays[selectedPeriod] || 30
 
-  const { data: chartData, isLoading, error } = usePerformanceChart(days)
+  const { data: chartData, isLoading } = usePerformanceChart(days)
 
   // Get the description text based on selected period
   const getDescription = () => {
