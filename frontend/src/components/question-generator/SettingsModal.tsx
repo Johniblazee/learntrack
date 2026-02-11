@@ -28,6 +28,12 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  QUESTION_TYPES as QUESTION_TYPE_VALUES,
+  QUESTION_TYPE_LABELS,
+  DIFFICULTIES as DIFFICULTY_VALUES,
+  DIFFICULTY_LABELS,
+} from '@/lib/constants'
 
 export interface GenerationSettings {
   subject: string
@@ -57,17 +63,33 @@ const BLOOMS_LEVELS = [
   { id: 'create', label: 'Create', description: 'Produce new or original work' },
 ]
 
-const QUESTION_TYPES = [
-  { id: 'multiple-choice', label: 'Multiple Choice', icon: '○' },
-  { id: 'true-false', label: 'True/False', icon: '✓' },
-  { id: 'short-answer', label: 'Short Answer', icon: '≡' },
-  { id: 'essay', label: 'Essay', icon: '¶' },
+const QUESTION_TYPE_OPTIONS = [
+  {
+    id: QUESTION_TYPE_VALUES.MULTIPLE_CHOICE,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.MULTIPLE_CHOICE],
+    icon: '○',
+  },
+  {
+    id: QUESTION_TYPE_VALUES.TRUE_FALSE,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.TRUE_FALSE],
+    icon: '✓',
+  },
+  {
+    id: QUESTION_TYPE_VALUES.SHORT_ANSWER,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.SHORT_ANSWER],
+    icon: '≡',
+  },
+  {
+    id: QUESTION_TYPE_VALUES.ESSAY,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.ESSAY],
+    icon: '¶',
+  },
 ]
 
-const DIFFICULTIES = [
-  { id: 'easy', label: 'Easy', color: 'bg-green-500' },
-  { id: 'medium', label: 'Medium', color: 'bg-amber-500' },
-  { id: 'hard', label: 'Hard', color: 'bg-red-500' },
+const DIFFICULTY_OPTIONS = [
+  { id: DIFFICULTY_VALUES.EASY, label: DIFFICULTY_LABELS[DIFFICULTY_VALUES.EASY], color: 'bg-green-500' },
+  { id: DIFFICULTY_VALUES.MEDIUM, label: DIFFICULTY_LABELS[DIFFICULTY_VALUES.MEDIUM], color: 'bg-amber-500' },
+  { id: DIFFICULTY_VALUES.HARD, label: DIFFICULTY_LABELS[DIFFICULTY_VALUES.HARD], color: 'bg-red-500' },
   { id: 'mixed', label: 'Mixed', color: 'bg-blue-500' },
 ]
 
@@ -218,7 +240,7 @@ export function SettingsModal({
                   className="py-4"
                 >
                   <div className="grid grid-cols-2 gap-2">
-                    {QUESTION_TYPES.map((type) => (
+                    {QUESTION_TYPE_OPTIONS.map((type) => (
                       <button
                         key={type.id}
                         onClick={() => toggleQuestionType(type.id)}
@@ -258,7 +280,7 @@ export function SettingsModal({
                   <div className="space-y-2">
                     <Label>Difficulty Level</Label>
                     <div className="flex gap-2">
-                      {DIFFICULTIES.map((diff) => (
+                      {DIFFICULTY_OPTIONS.map((diff) => (
                         <button
                           key={diff.id}
                           onClick={() => updateSetting('difficulty', diff.id)}

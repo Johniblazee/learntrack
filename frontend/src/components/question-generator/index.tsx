@@ -7,6 +7,7 @@ import { useAuth } from '@clerk/clerk-react'
 import { toast } from '@/contexts/ToastContext'
 import { cn } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/config'
+import { QUESTION_TYPES, DIFFICULTIES } from '@/lib/constants'
 import { ChatPanel, ChatMessage } from './ChatPanel'
 import { SettingsModal, GenerationSettings } from './SettingsModal'
 
@@ -39,8 +40,8 @@ export function OpenCanvasGenerator() {
     subject: '',
     topic: '',
     questionCount: 3,
-    questionTypes: ['multiple-choice'],
-    difficulty: 'medium',
+    questionTypes: [QUESTION_TYPES.MULTIPLE_CHOICE],
+    difficulty: DIFFICULTIES.MEDIUM,
     aiProvider: 'groq',
     modelName: 'llama-3.3-70b-versatile',
     bloomsLevels: [],

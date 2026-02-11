@@ -83,7 +83,3 @@ api_router.include_router(
 
 # Admin router (super admin only)
 api_router.include_router(admin_router)
-
-# Still disabled:
-# api_router.include_router(files.router, prefix="/files", tags=["files"])
-# api_router.include_router(communications.router, prefix="/communications", tags=["communications"])

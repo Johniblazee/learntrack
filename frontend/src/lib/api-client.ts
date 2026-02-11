@@ -4,6 +4,7 @@ import { API_BASE_URL } from './config'
 
 // Use centralized API configuration
 const API_ROOT = API_BASE_URL
+let globalTokenGetter: (() => Promise<string | null>) | null = null
 
 export interface ApiResponse<T = any> {
   data?: T
@@ -119,6 +120,46 @@ export class ApiClient {
       body: data ? JSON.stringify(data) : undefined,
     })
   }
+}
+
+export function setTokenGetter(getter: () => Promise<string | null>) {
+  globalTokenGetter = getter
+}
+
+const globalApiClient = new ApiClient(() => {
+  return globalTokenGetter ? globalTokenGetter() : Promise.resolve(null)
+})
+
+async function makeLegacyRequest<T = any>(
+  method: 'get' | 'post' | 'put' | 'delete' | 'patch',
+  endpoint: string,
+  payload?: any
+): Promise<{ data: T; status: number }> {
+  const response =
+    method === 'get' || method === 'delete'
+      ? await globalApiClient[method]<T>(endpoint)
+      : await globalApiClient[method]<T>(endpoint, payload)
+
+  if (response.error) {
+    throw new ApiError(response.error, response.status, response)
+  }
+
+  return {
+    data: response.data as T,
+    status: response.status,
+  }
+}
+
+// Backwards-compatible API surface used by legacy callers
+export const api = {
+  get: <T = any>(endpoint: string) => makeLegacyRequest<T>('get', endpoint),
+  post: <T = any>(endpoint: string, data?: any) =>
+    makeLegacyRequest<T>('post', endpoint, data),
+  put: <T = any>(endpoint: string, data?: any) =>
+    makeLegacyRequest<T>('put', endpoint, data),
+  delete: <T = any>(endpoint: string) => makeLegacyRequest<T>('delete', endpoint),
+  patch: <T = any>(endpoint: string, data?: any) =>
+    makeLegacyRequest<T>('patch', endpoint, data),
 }
 
 /**

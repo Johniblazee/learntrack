@@ -320,23 +320,3 @@ def list_prompts() -> List[str]:
                 prompts.append(rel_path)
 
     return sorted(prompts)
-
-
-def clear_cache() -> None:
-    """Clear the prompt cache. Useful for testing or forcing reload."""
-    global _prompt_cache
-    _prompt_cache.clear()
-    logger.debug("Prompt cache cleared")
-
-
-# Convenience sync version for non-async contexts (use sparingly)
-def get_prompt_sync(name: str, **variables) -> str:
-    """
-    Synchronous version of get_prompt.
-
-    WARNING: This should only be used in non-async contexts.
-    In async code, always use await get_prompt().
-    """
-    import asyncio
-
-    return asyncio.run(get_prompt(name, **variables))

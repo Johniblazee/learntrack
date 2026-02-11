@@ -44,6 +44,12 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuth } from '@clerk/clerk-react'
 import { API_BASE_URL } from '@/lib/config'
+import {
+  QUESTION_TYPES as QUESTION_TYPE_VALUES,
+  QUESTION_TYPE_LABELS,
+  DIFFICULTIES as DIFFICULTY_VALUES,
+  DIFFICULTY_LABELS,
+} from '@/lib/constants'
 
 interface Material {
   _id: string
@@ -93,16 +99,40 @@ interface ConfigSidebarProps {
 }
 
 const questionTypes = [
-  { value: 'multiple-choice', label: 'Multiple Choice' },
-  { value: 'true-false', label: 'True/False' },
-  { value: 'short-answer', label: 'Short Answer' },
-  { value: 'essay', label: 'Essay' },
+  {
+    value: QUESTION_TYPE_VALUES.MULTIPLE_CHOICE,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.MULTIPLE_CHOICE],
+  },
+  {
+    value: QUESTION_TYPE_VALUES.TRUE_FALSE,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.TRUE_FALSE],
+  },
+  {
+    value: QUESTION_TYPE_VALUES.SHORT_ANSWER,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.SHORT_ANSWER],
+  },
+  {
+    value: QUESTION_TYPE_VALUES.ESSAY,
+    label: QUESTION_TYPE_LABELS[QUESTION_TYPE_VALUES.ESSAY],
+  },
 ]
 
 const difficulties = [
-  { value: 'easy', label: 'Easy', dotColor: 'bg-green-500' },
-  { value: 'medium', label: 'Medium', dotColor: 'bg-yellow-500' },
-  { value: 'hard', label: 'Hard', dotColor: 'bg-red-500' },
+  {
+    value: DIFFICULTY_VALUES.EASY,
+    label: DIFFICULTY_LABELS[DIFFICULTY_VALUES.EASY],
+    dotColor: 'bg-green-500',
+  },
+  {
+    value: DIFFICULTY_VALUES.MEDIUM,
+    label: DIFFICULTY_LABELS[DIFFICULTY_VALUES.MEDIUM],
+    dotColor: 'bg-yellow-500',
+  },
+  {
+    value: DIFFICULTY_VALUES.HARD,
+    label: DIFFICULTY_LABELS[DIFFICULTY_VALUES.HARD],
+    dotColor: 'bg-red-500',
+  },
 ]
 
 const bloomsOptions = [

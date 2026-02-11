@@ -24,6 +24,7 @@ from app.core.audit_middleware import AuditLoggingMiddleware
 from app.core.health import health_checker, HealthStatus
 from app.core.logging_config import RequestLoggingMiddleware, configure_logging
 from app.core.cache import get_cache_stats
+from app.core.migrations import get_migration_runner
 
 # Configure structured logging
 configure_logging()
@@ -115,14 +116,30 @@ async def startup_event():
     try:
         await database.connect_to_database()
 
+        if database.database is None:
+            raise RuntimeError("Database connection is not initialized")
+
+        db_ref = database.database
+
         # Store database reference in app state for middleware access
-        app.state.db = database.database
+        app.state.db = db_ref
+
+        # Run pending MongoDB migrations
+        try:
+            migration_runner = get_migration_runner(db_ref)
+            migration_results = await migration_runner.migrate()
+            app.state.migration_results = migration_results
+            logger.info("Database migrations checked", **migration_results)
+        except Exception as migration_error:
+            logger.error(
+                "Failed to run database migrations", error=str(migration_error)
+            )
 
         # Setup audit log TTL index for automatic cleanup
         try:
             from app.services.audit_log_service import AuditLogService
 
-            audit_service = AuditLogService(database.database)
+            audit_service = AuditLogService(db_ref)
             await audit_service.setup_ttl_index()
         except Exception as e:
             logger.warning(

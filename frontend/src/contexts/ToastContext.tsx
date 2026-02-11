@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useCallback, useState, useEffect, useMemo, useRef } from 'react'
+import { createContext, useCallback, useState, useEffect, useMemo, useRef } from 'react'
 import { ToastContainer, ToastType, ToastProps } from "@/components/ui/animated-toast"
 
 interface ToastOptions {
@@ -140,14 +140,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </ToastContext.Provider>
   )
-}
-
-export function useAnimatedToast() {
-  const context = useContext(ToastContext)
-  if (!context) {
-    throw new Error("useAnimatedToast must be used within a ToastProvider")
-  }
-  return context
 }
 
 // Standalone toast object that can be used outside of React components

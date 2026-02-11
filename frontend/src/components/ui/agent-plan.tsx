@@ -63,7 +63,7 @@ export function AgentPlan({ tasks: initialTasks }: AgentPlanProps) {
     }));
   };
 
-  const taskVariants = {
+  const taskVariants: Record<string, any> = {
     hidden: { 
       opacity: 0, 
       y: prefersReducedMotion ? 0 : -5 
@@ -85,7 +85,7 @@ export function AgentPlan({ tasks: initialTasks }: AgentPlanProps) {
     }
   };
 
-  const subtaskListVariants = {
+  const subtaskListVariants: Record<string, any> = {
     hidden: { 
       opacity: 0, 
       height: 0,
@@ -113,7 +113,7 @@ export function AgentPlan({ tasks: initialTasks }: AgentPlanProps) {
     }
   };
 
-  const subtaskVariants = {
+  const subtaskVariants: Record<string, any> = {
     hidden: { 
       opacity: 0, 
       x: prefersReducedMotion ? 0 : -10 
@@ -135,7 +135,7 @@ export function AgentPlan({ tasks: initialTasks }: AgentPlanProps) {
     }
   };
 
-  const statusBadgeVariants = {
+  const statusBadgeVariants: Record<string, any> = {
     initial: { scale: 1 },
     animate: { 
       scale: prefersReducedMotion ? 1 : [1, 1.08, 1],

@@ -540,22 +540,22 @@ class EnhancedClerkJWTBearer:
             logger.error("Failed to sync user to database", error=str(e))
             # Don't fail authentication if database sync fails
 
-    # def _create_dev_user_context(self) -> ClerkUserContext:
-    #     """Create development user context for testing"""
-    #     return ClerkUserContext(
-    #         user_id="dev_user_123",
-    #         clerk_id="dev_user_123",
-    #         email="dev@test.com",
-    #         name="Development User",
-    #         role=UserRole.TUTOR,
-    #         roles=[UserRole.TUTOR],
-    #         permissions=["read", "write", "create", "delete", "manage_students"],
-    #         session_id="dev_session",
-    #         created_at=datetime.now(timezone.utc),
-    #         last_sign_in=datetime.now(timezone.utc),
-    #         tutor_id="dev_user_123",  # Dev user is a tutor, so uses own clerk_id
-    #         student_ids=[]
-    #     )
+    def _create_dev_user_context(self) -> ClerkUserContext:
+        """Create development user context for local testing."""
+        return ClerkUserContext(
+            user_id="dev_user_123",
+            clerk_id="dev_user_123",
+            email="dev@test.com",
+            name="Development User",
+            role=UserRole.TUTOR,
+            roles=[UserRole.TUTOR],
+            permissions=["read", "write", "create", "delete", "manage_students"],
+            session_id="dev_session",
+            created_at=datetime.now(timezone.utc),
+            last_sign_in=datetime.now(timezone.utc),
+            tutor_id="dev_user_123",
+            student_ids=[],
+        )
 
 
 # Global instance

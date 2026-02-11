@@ -12,8 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Search, RefreshCw, Trash2, RotateCcw, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { api } from '@/lib/api';
+import { toast } from '@/contexts/ToastContext';
+import { api } from '@/lib/api-client';
 
 interface DocumentItem {
   id: string;
@@ -67,8 +67,6 @@ export function DocumentList({ onSelectDocument }: DocumentListProps) {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
-  const { toast } = useToast();
-
   const fetchDocuments = useCallback(async () => {
     try {
       setLoading(true);
@@ -85,11 +83,11 @@ export function DocumentList({ onSelectDocument }: DocumentListProps) {
       setDocuments(response.data.items);
       setTotal(response.data.total);
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to load documents', variant: 'destructive' });
+      toast.error('Failed to load documents');
     } finally {
       setLoading(false);
     }
-  }, [page, perPage, search, statusFilter, toast]);
+  }, [page, perPage, search, statusFilter]);
 
   useEffect(() => {
     fetchDocuments();
@@ -118,11 +116,11 @@ export function DocumentList({ onSelectDocument }: DocumentListProps) {
     try {
       setBatchLoading(true);
       await api.post('/documents/batch/delete', { file_ids: Array.from(selectedIds) });
-      toast({ title: 'Success', description: `Deleted ${selectedIds.size} documents` });
+      toast.success(`Deleted ${selectedIds.size} documents`);
       setSelectedIds(new Set());
       fetchDocuments();
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to delete documents', variant: 'destructive' });
+      toast.error('Failed to delete documents');
     } finally {
       setBatchLoading(false);
     }
@@ -133,11 +131,11 @@ export function DocumentList({ onSelectDocument }: DocumentListProps) {
     try {
       setBatchLoading(true);
       await api.post('/documents/batch/resync', { file_ids: Array.from(selectedIds), force: true });
-      toast({ title: 'Success', description: `Queued ${selectedIds.size} documents for re-sync` });
+      toast.success(`Queued ${selectedIds.size} documents for re-sync`);
       setSelectedIds(new Set());
       fetchDocuments();
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to resync documents', variant: 'destructive' });
+      toast.error('Failed to resync documents');
     } finally {
       setBatchLoading(false);
     }

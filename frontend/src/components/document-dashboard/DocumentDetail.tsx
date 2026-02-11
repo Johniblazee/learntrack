@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, RefreshCw, ExternalLink, FileText, Clock, CheckCircle, XCircle, Hash } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { api } from '@/lib/api';
+import { toast } from '@/contexts/ToastContext';
+import { api } from '@/lib/api-client';
 
 interface DocumentDetailData {
   id: string;
@@ -55,15 +55,13 @@ export function DocumentDetail({ documentId, onBack }: DocumentDetailProps) {
   const [document, setDocument] = useState<DocumentDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [resyncing, setResyncing] = useState(false);
-  const { toast } = useToast();
-
   const fetchDocument = async () => {
     try {
       setLoading(true);
       const response = await api.get(`/documents/dashboard/${documentId}`);
       setDocument(response.data);
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to load document details', variant: 'destructive' });
+      toast.error('Failed to load document details');
     } finally {
       setLoading(false);
     }
@@ -77,10 +75,10 @@ export function DocumentDetail({ documentId, onBack }: DocumentDetailProps) {
     try {
       setResyncing(true);
       await api.post(`/documents/${documentId}/resync?force=true`);
-      toast({ title: 'Success', description: 'Document queued for re-sync' });
+      toast.success('Document queued for re-sync');
       fetchDocument();
     } catch (error) {
-      toast({ title: 'Error', description: 'Failed to resync document', variant: 'destructive' });
+      toast.error('Failed to resync document');
     } finally {
       setResyncing(false);
     }
