@@ -16,7 +16,7 @@ class SocketClient {
     }
 
     this.socket = io(SOCKET_URL, {
-      path: '/socket.io',
+      path: '/ws/socket.io',
       auth: { token },
       autoConnect: true,
       reconnection: true,

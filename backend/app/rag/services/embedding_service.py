@@ -40,6 +40,13 @@ LOCAL_MODELS: Dict[str, EmbeddingModel] = {
         max_sequence_length=512,
         is_cached=True,
     ),
+    "all-MiniLM-L12-v2": EmbeddingModel(
+        name="all-MiniLM-L12-v2",
+        dimensions=384,
+        description="Balanced quality and speed model for retrieval",
+        max_sequence_length=512,
+        is_cached=True,
+    ),
     # Medium-quality models
     "all-mpnet-base-v2": EmbeddingModel(
         name="all-mpnet-base-v2",
@@ -72,6 +79,8 @@ LOCAL_MODELS: Dict[str, EmbeddingModel] = {
     ),
 }
 
+DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L12-v2"
+
 
 class EmbeddingService:
     """
@@ -79,7 +88,7 @@ class EmbeddingService:
     Replaces custom implementation with LangChain SentenceTransformerEmbeddings
     """
 
-    def __init__(self, model_name: str = "e5-base-v2"):
+    def __init__(self, model_name: str = DEFAULT_EMBEDDING_MODEL):
         if model_name not in LOCAL_MODELS:
             raise ValueError(
                 f"Unknown model: {model_name}. Available models: {list(LOCAL_MODELS.keys())}"
@@ -238,7 +247,9 @@ _default_embedding_service = None
 _default_embedding_service_lock = threading.Lock()
 
 
-def get_embedding_service(model_name: str = "e5-base-v2") -> EmbeddingService:
+def get_embedding_service(
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+) -> EmbeddingService:
     """Get or create default embedding service"""
     global _default_embedding_service
     with _default_embedding_service_lock:
@@ -250,6 +261,8 @@ def get_embedding_service(model_name: str = "e5-base-v2") -> EmbeddingService:
         return _default_embedding_service
 
 
-def create_embedding_service(model_name: str = "e5-base-v2") -> EmbeddingService:
+def create_embedding_service(
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+) -> EmbeddingService:
     """Create a new embedding service instance"""
     return EmbeddingService(model_name)

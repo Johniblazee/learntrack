@@ -2,17 +2,19 @@ import { useState, useEffect } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
 import { API_BASE_URL } from '@/lib/config'
 
-interface VisibleUser {
-  clerk_id: string
-  name: string
-  email: string
-  role: string
+interface VisibleStudent {
+  _id?: string
+  clerk_id?: string
+  name?: string
+  email?: string
+  role?: string
+  [key: string]: unknown
 }
 
 interface VisibilityData {
-  visibleUsers: VisibleUser[]
+  visibleUsers: string[]
   visibleUserIds: string[]
-  visibleStudents: VisibleUser[]
+  visibleStudents: VisibleStudent[]
   loading: boolean
   error: string | null
   canSeeUser: (userId: string) => boolean
@@ -23,8 +25,8 @@ interface VisibilityData {
 export function useVisibility(): VisibilityData {
   const { getToken } = useAuth()
   const { user } = useUser()
-  const [visibleUsers, setVisibleUsers] = useState<VisibleUser[]>([])
-  const [visibleStudents, setVisibleStudents] = useState<VisibleUser[]>([])
+  const [visibleUsers, setVisibleUsers] = useState<string[]>([])
+  const [visibleStudents, setVisibleStudents] = useState<VisibleStudent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,7 +44,11 @@ export function useVisibility(): VisibilityData {
 
       if (response.ok) {
         const data = await response.json()
-        setVisibleUsers(data)
+        if (Array.isArray(data)) {
+          setVisibleUsers(data.filter((value): value is string => typeof value === 'string'))
+        } else {
+          setVisibleUsers([])
+        }
       } else {
         throw new Error('Failed to fetch visible users')
       }
@@ -81,7 +87,11 @@ export function useVisibility(): VisibilityData {
   }, [user])
 
   const canSeeUser = (userId: string): boolean => {
-    return visibleUsers.some(u => u.clerk_id === userId)
+    if (!userId) {
+      return false
+    }
+
+    return userId === user?.id || visibleUsers.includes(userId)
   }
 
   const canAccessConversation = async (conversationId: string): Promise<boolean> => {
@@ -98,7 +108,11 @@ export function useVisibility(): VisibilityData {
 
       if (response.ok) {
         const data = await response.json()
-        return data.can_access === true
+        if (typeof data === 'boolean') {
+          return data
+        }
+
+        return data?.can_access === true
       }
       return false
     } catch (err) {
@@ -114,7 +128,7 @@ export function useVisibility(): VisibilityData {
 
   return {
     visibleUsers,
-    visibleUserIds: visibleUsers.map(u => u.clerk_id),
+    visibleUserIds: visibleUsers,
     visibleStudents,
     loading,
     error,

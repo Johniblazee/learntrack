@@ -21,6 +21,8 @@ from app.agents.graph.state import (
     Difficulty,
     BloomsLevel,
     GenerationSession,
+    GeneratedQuestion,
+    SourceCitation,
 )
 from app.agents.graph.question_generator_graph import QuestionGeneratorAgent
 from app.agents.streaming.sse_handler import SSEHandler
@@ -40,6 +42,7 @@ from app.utils.enums import (
     normalize_question_type,
     normalize_difficulty,
     normalize_provider,
+    normalize_blooms_level,
 )
 
 logger = structlog.get_logger()
@@ -49,6 +52,59 @@ router = APIRouter()
 async def get_session_service(db=Depends(get_database)):
     """Dependency for session service"""
     return GenerationSessionService(db)
+
+
+def _stored_to_generated_question(stored: StoredQuestion) -> GeneratedQuestion:
+    """Convert persisted session question shape into graph question shape."""
+    citations = []
+    for citation in stored.source_citations or []:
+        try:
+            citations.append(SourceCitation(**citation))
+        except Exception:
+            continue
+
+    return GeneratedQuestion(
+        question_id=stored.question_id,
+        type=_normalize_graph_question_type(stored.type),
+        difficulty=_normalize_graph_difficulty(stored.difficulty),
+        blooms_level=normalize_blooms_level(stored.blooms_level),
+        question_text=stored.question_text,
+        options=stored.options,
+        correct_answer=stored.correct_answer,
+        explanation=stored.explanation,
+        source_citations=citations,
+        tags=stored.tags or [],
+        quality_score=stored.quality_score or 0.85,
+        is_valid=True,
+    )
+
+
+def _normalize_graph_question_type(value: Optional[str]) -> QuestionType:
+    raw = (value or "multiple-choice").strip().lower().replace("_", "-")
+    if raw in {"mcq", "multiple choice"}:
+        raw = "multiple-choice"
+    elif raw in {"true false", "true_false", "true/false"}:
+        raw = "true-false"
+    elif raw in {"short answer", "short_answer"}:
+        raw = "short-answer"
+    try:
+        return QuestionType(raw)
+    except ValueError:
+        return QuestionType.MULTIPLE_CHOICE
+
+
+def _normalize_graph_difficulty(value: Optional[str]) -> Difficulty:
+    raw = (value or "medium").strip().lower()
+    if raw in {"beginner", "low"}:
+        raw = "easy"
+    elif raw in {"intermediate"}:
+        raw = "medium"
+    elif raw in {"advanced", "high"}:
+        raw = "hard"
+    try:
+        return Difficulty(raw)
+    except ValueError:
+        return Difficulty.MEDIUM
 
 
 class GenerateRequest(BaseModel):
@@ -387,7 +443,7 @@ async def generate_questions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/edit")
+@router.post("/edit", response_class=StreamingResponse)
 async def edit_question(
     request: EditQuestionRequest,
     session_id: str = Query(..., description="Generation session ID"),
@@ -396,134 +452,156 @@ async def edit_question(
     session_service: GenerationSessionService = Depends(get_session_service),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """
-    Edit a single question from a generation session.
-
-    Allows editing:
-    - Question text
-    - Options (for multiple-choice)
-    - Regenerate with different sources
-    """
+    """Edit a question via LangGraph and stream progress as SSE events."""
     try:
-        # Retrieve session from database
         session = await session_service.get_session(session_id, current_user.clerk_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        # Find the question to edit
-        question_to_edit = None
-        question_index = -1
-        for i, q in enumerate(session.questions):
-            if q.question_id == request.question_id:
-                question_to_edit = q
-                question_index = i
-                break
-
+        question_to_edit = next(
+            (q for q in session.questions if q.question_id == request.question_id), None
+        )
         if not question_to_edit:
             raise HTTPException(status_code=404, detail="Question not found in session")
 
-        # Initialize AI for editing
+        config_data = session.config or {}
+        question_types = config_data.get("question_types") or [question_to_edit.type]
+        if isinstance(question_types, str):
+            question_types = [question_types]
+
+        blooms_levels = "AUTO"
+        raw_blooms_levels = config_data.get("blooms_levels")
+        if isinstance(raw_blooms_levels, list) and raw_blooms_levels:
+            blooms_levels = [
+                normalize_blooms_level(level) for level in raw_blooms_levels
+            ]
+
+        config = GenerationConfig(
+            question_count=max(len(session.questions), 1),
+            question_types=[
+                _normalize_graph_question_type(q_type) for q_type in question_types
+            ],
+            difficulty=_normalize_graph_difficulty(
+                config_data.get("difficulty", question_to_edit.difficulty)
+            ),
+            blooms_levels=blooms_levels,
+            subject=config_data.get("subject"),
+            topic=config_data.get("topic"),
+            grade_level=config_data.get("grade_level"),
+        )
+
+        config_service = TenantAIConfigService(database)
+        tenant_config = await config_service.get_or_create_default(
+            current_user.tutor_id
+        )
+        ai_provider = normalize_provider(tenant_config.default_provider)
+
         ai_manager = await get_tenant_ai_manager(current_user.tutor_id, database)
-        provider = ai_manager.get_provider()
+        provider = ai_manager.get_provider(ai_provider)
         llm = provider.llm
 
-        # Create edit prompt
-        edit_prompt = f"""You are editing an existing question. Here is the original question:
+        agent = QuestionGeneratorAgent(llm=llm, rag_service=rag_service)
+        existing_questions = [
+            _stored_to_generated_question(stored_q) for stored_q in session.questions
+        ]
 
-Question Type: {question_to_edit.type}
-Question Text: {question_to_edit.question_text}
-Options: {question_to_edit.options if question_to_edit.options else "N/A"}
-Correct Answer: {question_to_edit.correct_answer}
-Explanation: {question_to_edit.explanation}
+        sse_handler = SSEHandler(session_id=session_id)
 
-The user wants to make the following changes:
-{request.edit_instruction}
-
-Please provide the edited question in the same format. Keep the question type the same unless specifically asked to change it.
-
-Respond with a JSON object containing:
-- question_text: The edited question text
-- options: Array of options (for multiple-choice) or null
-- correct_answer: The correct answer
-- explanation: Updated explanation
-"""
-
-        # Get edited question from LLM
-        from langchain_core.messages import HumanMessage
-
-        response = await llm.ainvoke([HumanMessage(content=edit_prompt)])
-
-        # Parse the response
-        import json
-        import re
-
-        # Try to extract JSON from the response
-        response_text = response.content
-        json_match = re.search(r"\{[\s\S]*\}", response_text)
-
-        if json_match:
+        async def run_edit():
             try:
-                edited_data = json.loads(json_match.group())
-
-                # Update the question in the session
-                updated_question = StoredQuestion(
-                    question_id=question_to_edit.question_id,
-                    type=question_to_edit.type,
-                    question_text=edited_data.get(
-                        "question_text", question_to_edit.question_text
-                    ),
-                    options=edited_data.get("options", question_to_edit.options),
-                    correct_answer=edited_data.get(
-                        "correct_answer", question_to_edit.correct_answer
-                    ),
-                    explanation=edited_data.get(
-                        "explanation", question_to_edit.explanation
-                    ),
-                    difficulty=question_to_edit.difficulty,
-                    source_ids=request.new_source_ids or question_to_edit.source_ids,
-                    status=question_to_edit.status,
-                    metadata={
-                        "edited": True,
-                        "edit_instruction": request.edit_instruction,
-                    },
+                result = await agent.generate(
+                    prompt=session.original_prompt or request.edit_instruction,
+                    config=config,
+                    user_id=current_user.clerk_id,
+                    tenant_id=current_user.tutor_id,
+                    material_ids=request.new_source_ids or session.material_ids,
+                    sse_handler=sse_handler,
+                    existing_session_id=session_id,
+                    existing_questions=existing_questions,
+                    target_question_id=request.question_id,
+                    user_query=request.edit_instruction,
                 )
 
-                # Update in database
-                result = await session_service.collection.update_one(
-                    {
-                        "_id": session_id,
-                        "user_id": current_user.clerk_id,
-                        "questions.question_id": request.question_id,
-                    },
-                    {
-                        "$set": {
-                            f"questions.{question_index}": updated_question.model_dump()
-                        }
-                    },
+                edited_question = next(
+                    (
+                        q
+                        for q in result.questions
+                        if q.question_id == request.question_id
+                    ),
+                    None,
                 )
+                if not edited_question:
+                    raise ValueError("Edited question not found in LangGraph output")
 
-                if result.modified_count > 0:
-                    return {
-                        "message": "Question edited successfully",
-                        "question_id": request.question_id,
-                        "edited_question": updated_question.model_dump(),
-                    }
-                else:
-                    raise HTTPException(
-                        status_code=500, detail="Failed to update question in database"
-                    )
+                update_payload = {
+                    "type": edited_question.type.value,
+                    "difficulty": edited_question.difficulty.value,
+                    "blooms_level": edited_question.blooms_level.value,
+                    "question_text": edited_question.question_text,
+                    "options": edited_question.options,
+                    "correct_answer": edited_question.correct_answer,
+                    "explanation": edited_question.explanation,
+                    "source_citations": [
+                        citation.model_dump(mode="json")
+                        for citation in edited_question.source_citations
+                    ],
+                    "tags": edited_question.tags,
+                    "quality_score": edited_question.quality_score,
+                }
+                if request.new_source_ids:
+                    update_payload["source_ids"] = request.new_source_ids
 
-            except json.JSONDecodeError:
-                raise HTTPException(
-                    status_code=500, detail="Failed to parse AI response"
+                success = await session_service.update_question_content(
+                    session_id=session_id,
+                    user_id=current_user.clerk_id,
+                    question_id=request.question_id,
+                    update_data=update_payload,
                 )
-        else:
-            raise HTTPException(status_code=500, detail="AI did not return valid JSON")
+                if not success:
+                    raise ValueError("Failed to persist edited question")
+
+                if not sse_handler._is_closed:
+                    await sse_handler.send_done(len(result.questions))
+
+            except Exception as e:
+                logger.error("LangGraph edit failed", error=str(e))
+                await sse_handler.send_error(str(e))
+
+        async def stream_events():
+            import asyncio
+            import json
+
+            session_event = {
+                "event_type": "session:created",
+                "session_id": session_id,
+                "timestamp": session.updated_at.isoformat()
+                if hasattr(session, "updated_at")
+                else None,
+            }
+            yield f"event: session:created\ndata: {json.dumps(session_event)}\n\n"
+
+            edit_task = asyncio.create_task(run_edit())
+            try:
+                async for event in sse_handler.event_generator():
+                    yield event
+            finally:
+                if not edit_task.done():
+                    await edit_task
+
+        return StreamingResponse(
+            stream_events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Edit failed", error=str(e))
+        logger.error("Failed to start edit stream", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

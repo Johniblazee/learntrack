@@ -152,7 +152,7 @@ app.include_router(api_router, prefix="/api/v1")
 
 # Mount Socket.IO app for WebSocket support
 socket_app = get_socket_app()
-app.mount("/socket.io", socket_app)
+app.mount("/ws", socket_app)
 
 # Authentication removed - no user role endpoint needed
 

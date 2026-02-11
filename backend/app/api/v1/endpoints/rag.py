@@ -429,6 +429,41 @@ async def delete_document_embeddings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/migrate-embeddings", response_model=Dict[str, Any])
+async def migrate_embeddings_to_active_collection(
+    source_collections: Optional[List[str]] = Query(
+        default=None,
+        description="Optional explicit source collections to migrate from",
+    ),
+    batch_size: int = Query(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Backfill batch size",
+    ),
+    max_documents: Optional[int] = Query(
+        default=None,
+        ge=1,
+        description="Optional cap for number of migrated documents",
+    ),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Backfill embeddings from legacy collections into active model collection."""
+    try:
+        rag_service = RAGService(database)
+        result = await rag_service.backfill_embeddings(
+            source_collections=source_collections,
+            batch_size=batch_size,
+            max_documents=max_documents,
+        )
+        result["requested_by"] = current_user.clerk_id
+        return result
+    except Exception as e:
+        logger.error("Failed to migrate embeddings", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_rag_stats(
     current_user: ClerkUserContext = Depends(require_tutor),

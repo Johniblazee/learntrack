@@ -2,7 +2,7 @@
  * Conversations View - Real-time chat interface
  * Design: Split panel with conversation list (left) and chat area (right)
  */
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -44,7 +44,7 @@ interface Conversation {
 
 export default function ConversationsView() {
   const { getToken, userId } = useAuth()
-  const { visibleUserIds } = useVisibility()
+  const { visibleUserIds, loading: visibilityLoading } = useVisibility()
   const [searchQuery, setSearchQuery] = useState("")
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
@@ -119,20 +119,40 @@ export default function ConversationsView() {
       })
       const data = await response.json()
 
-      const allConversations = data.conversations || []
-      const visibleConversations = allConversations.filter((conv: Conversation) => {
-        return conv.participants.every(participantId =>
-          participantId === userId || visibleUserIds.includes(participantId)
-        )
-      })
-
-      setConversations(visibleConversations)
+      setConversations(data.conversations || [])
     } catch (error) {
       console.error("Failed to load conversations:", error)
     } finally {
       setLoading(false)
     }
   }
+
+  const visibleConversations = useMemo(() => {
+    if (!userId || visibilityLoading) {
+      return []
+    }
+
+    return conversations.filter((conv) => {
+      return conv.participants.every(
+        (participantId) => participantId === userId || visibleUserIds.includes(participantId)
+      )
+    })
+  }, [conversations, userId, visibilityLoading, visibleUserIds])
+
+  useEffect(() => {
+    if (!selectedConversation || visibilityLoading) {
+      return
+    }
+
+    const stillVisible = visibleConversations.some(
+      (conversation) => conversation._id === selectedConversation._id
+    )
+
+    if (!stillVisible) {
+      setSelectedConversation(null)
+      setMessages([])
+    }
+  }, [selectedConversation, visibilityLoading, visibleConversations])
 
   const loadMessages = async (conversationId: string) => {
     try {
@@ -249,10 +269,12 @@ export default function ConversationsView() {
     return labels[role] || role.charAt(0).toUpperCase() + role.slice(1)
   }
 
-  const filteredConversations = conversations.filter((conv) => {
+  const filteredConversations = visibleConversations.filter((conv) => {
     const { name } = getOtherParticipant(conv)
     return name.toLowerCase().includes(searchQuery.toLowerCase())
   })
+
+  const isConversationsLoading = loading || visibilityLoading
 
 
   return (
@@ -276,7 +298,7 @@ export default function ConversationsView() {
         {/* Conversations List */}
         <ScrollArea className="flex-1">
           <div className="p-2">
-            {loading ? (
+            {isConversationsLoading ? (
               /* Conversation List Skeleton */
               <div className="space-y-1">
                 {Array.from({ length: 6 }).map((_, i) => (

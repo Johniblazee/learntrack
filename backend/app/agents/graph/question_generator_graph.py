@@ -191,6 +191,8 @@ class QuestionGeneratorAgent:
         tenant_id: str,
         material_ids: Optional[list] = None,
         sse_handler: Optional[SSEHandler] = None,
+        existing_session_id: Optional[str] = None,
+        existing_questions: Optional[list] = None,
         # Agent action parameters
         target_question_id: Optional[str] = None,
         user_query: Optional[str] = None,
@@ -206,6 +208,8 @@ class QuestionGeneratorAgent:
             tenant_id: Tenant ID for multi-tenancy
             material_ids: Optional list of material IDs to use
             sse_handler: Optional SSE handler for streaming
+            existing_session_id: Optional existing session ID for update flows
+            existing_questions: Optional existing questions for update flows
             target_question_id: Optional ID of question to update/rewrite
             user_query: Optional query about content (for respondToQuery)
             new_theme: Optional new theme parameters (for rewriteArtifactTheme)
@@ -213,7 +217,8 @@ class QuestionGeneratorAgent:
         Returns:
             GenerationSession with results
         """
-        session_id = str(uuid.uuid4())
+        session_id = existing_session_id or str(uuid.uuid4())
+        initial_questions = existing_questions or []
 
         logger.info(
             "Starting agentic generation",
@@ -237,8 +242,8 @@ class QuestionGeneratorAgent:
             "selected_material_ids": material_ids or [],
             "retrieved_chunks": [],
             # Questions
-            "questions": [],
-            "current_question_index": 0,
+            "questions": initial_questions,
+            "current_question_index": len(initial_questions),
             # Thinking/reasoning
             "thinking_steps": [],
             # Status flags

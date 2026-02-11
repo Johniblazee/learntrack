@@ -1,7 +1,7 @@
 /**
  * Floating chat widget - accessible from all pages
  */
-import { useState, useEffect, useRef, type ChangeEvent } from 'react'
+import { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react'
 import { MessageCircle, X, Send, Minimize2, Maximize2 } from 'lucide-react';
 import { useAuth } from '@clerk/clerk-react';
 import { Button } from '@/components/ui/button';
@@ -38,10 +38,11 @@ interface Conversation {
 
 export default function ChatWidget() {
   const { getToken, userId } = useAuth();
-  const { visibleUserIds } = useVisibility();
+  const { visibleUserIds, loading: visibilityLoading } = useVisibility();
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -118,26 +119,48 @@ export default function ChatWidget() {
 
   const loadConversations = async () => {
     try {
+      setConversationsLoading(true);
       const token = await getToken();
       const response = await fetch(`${API_BASE}/conversations`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
 
-      // Filter conversations based on visibility
-      const allConversations = data.conversations || [];
-      const visibleConversations = allConversations.filter((conv: Conversation) => {
-        // Check if all participants are visible to current user
-        return conv.participants.every(participantId =>
-          participantId === userId || visibleUserIds.includes(participantId)
-        );
-      });
-
-      setConversations(visibleConversations);
+      setConversations(data.conversations || []);
     } catch (error) {
       console.error('Failed to load conversations:', error);
+    } finally {
+      setConversationsLoading(false);
     }
   };
+
+  const visibleConversations = useMemo(() => {
+    if (!userId || visibilityLoading) {
+      return [];
+    }
+
+    return conversations.filter((conv) =>
+      conv.participants.every(
+        (participantId) => participantId === userId || visibleUserIds.includes(participantId)
+      )
+    );
+  }, [conversations, userId, visibilityLoading, visibleUserIds]);
+
+  useEffect(() => {
+    if (!selectedConversation || visibilityLoading) {
+      return;
+    }
+
+    const stillVisible = visibleConversations.some(
+      (conversation) => conversation._id === selectedConversation._id
+    );
+
+    if (!stillVisible) {
+      socketClient.leaveConversation(selectedConversation._id);
+      setSelectedConversation(null);
+      setMessages([]);
+    }
+  }, [selectedConversation, visibilityLoading, visibleConversations]);
 
   const loadUnreadCount = async () => {
     try {
@@ -326,14 +349,18 @@ export default function ChatWidget() {
           {/* Conversation List or Messages */}
           {!selectedConversation ? (
             <ScrollArea className="flex-1 p-4">
-              {conversations.length === 0 ? (
+              {conversationsLoading || visibilityLoading ? (
+                <div className="text-center text-muted-foreground py-8">
+                  <p className="text-sm">Loading conversations...</p>
+                </div>
+              ) : visibleConversations.length === 0 ? (
                 <div className="text-center text-muted-foreground py-8">
                   <MessageCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                   <p className="text-sm">No conversations yet</p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {conversations.map((conv) => (
+                  {visibleConversations.map((conv) => (
                     <div
                       key={conv._id}
                       onClick={() => handleSelectConversation(conv)}

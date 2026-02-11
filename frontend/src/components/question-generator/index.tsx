@@ -135,41 +135,93 @@ export function OpenCanvasGenerator() {
           }),
         })
 
-        if (!response.ok) {
-          throw new Error('Update failed')
-        }
+        if (!response.ok) throw new Error('Update failed')
 
-        const data = await response.json()
-        const editedQuestion = data.edited_question as GeneratedQuestion | undefined
+        const reader = response.body?.getReader()
+        if (!reader) throw new Error('No response body')
 
-        if (editedQuestion) {
-          setQuestions(prev => {
-            const index = prev.findIndex(q => q.question_id === referencedQuestionId)
-            if (index === -1) return prev
+        const decoder = new TextDecoder()
+        let assistantContent = ''
+        let buffer = ''
+        let updatedQuestion = false
 
-            const previousQuestion = prev[index]
-            const versions = [...(previousQuestion.versions || []), previousQuestion]
-            const updated = {
-              ...previousQuestion,
-              ...editedQuestion,
-              status: 'pending' as const,
-              versions,
-              currentVersionIndex: versions.length,
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+
+            try {
+              const data = JSON.parse(line.slice(6)) as StreamEvent
+
+              if (data.event_type === 'agent:thinking' && data.step) {
+                assistantContent += `💭 ${data.step}\n`
+              } else if (data.event_type === 'agent:action' && data.step) {
+                assistantContent += `⚡ ${data.step}\n`
+              } else if (data.event_type === 'generation:question_complete' && data.question_data) {
+                const editedQuestion = data.question_data
+                updatedQuestion = true
+
+                setQuestions(prev => {
+                  const index = prev.findIndex(q => q.question_id === referencedQuestionId)
+                  if (index === -1) return prev
+
+                  const previousQuestion = prev[index]
+                  const versions = [...(previousQuestion.versions || []), previousQuestion]
+                  const updated = {
+                    ...previousQuestion,
+                    ...editedQuestion,
+                    status: 'pending' as const,
+                    versions,
+                    currentVersionIndex: versions.length,
+                  }
+
+                  const next = [...prev]
+                  next[index] = updated
+                  return next
+                })
+              }
+
+              setChatMessages(prev => {
+                const lastMsg = prev[prev.length - 1]
+                if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
+                  return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent || 'Updating question...' }]
+                }
+                return [...prev, {
+                  id: `assistant-${Date.now()}`,
+                  role: 'assistant',
+                  content: assistantContent || 'Updating question...',
+                  timestamp: new Date(),
+                  isStreaming: true,
+                  referencedQuestionId,
+                }]
+              })
+            } catch {
+              console.warn('Failed to parse edit stream event:', line)
             }
-
-            const next = [...prev]
-            next[index] = updated
-            return next
-          })
+          }
         }
 
-        setChatMessages(prev => [...prev, {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: 'Updated the referenced question and saved a new version.',
-          timestamp: new Date(),
-          referencedQuestionId,
-        }])
+        setChatMessages(prev => {
+          const lastMsg = prev[prev.length - 1]
+          if (lastMsg?.role === 'assistant') {
+            return [...prev.slice(0, -1), {
+              ...lastMsg,
+              content: assistantContent || (updatedQuestion
+                ? 'Updated the referenced question and saved a new version.'
+                : 'Edit completed.'),
+              isStreaming: false,
+            }]
+          }
+          return prev
+        })
+
+        await fetchSessions()
       } else {
         const response = await fetch(`${API_BASE_URL}/question-generator/generate`, {
           method: 'POST',
