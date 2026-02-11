@@ -25,6 +25,12 @@ interface Session {
   rejected_count: number
 }
 
+interface ChatApiResponse {
+  response: string
+  ready_to_generate?: boolean
+  missing_fields?: string[]
+}
+
 export function OpenCanvasGenerator() {
   const { getToken } = useAuth()
 
@@ -44,6 +50,7 @@ export function OpenCanvasGenerator() {
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isChatResponding, setIsChatResponding] = useState(false)
   const [isSavingToBank, setIsSavingToBank] = useState(false)
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([])
   const [streamingContent, setStreamingContent] = useState('')
@@ -100,9 +107,185 @@ export function OpenCanvasGenerator() {
     fetchSessions()
   }, [fetchSessions])
 
+  const getErrorDetail = async (response: Response, fallback: string): Promise<string> => {
+    try {
+      const data = await response.json()
+      if (typeof data?.detail === 'string' && data.detail.trim()) {
+        return data.detail
+      }
+      if (typeof data?.error === 'string' && data.error.trim()) {
+        return data.error
+      }
+    } catch {
+      // ignore JSON parsing errors
+    }
+    return fallback
+  }
+
+  const buildGenerationPrompt = useCallback((explicitPrompt?: string): string | null => {
+    const directPrompt = explicitPrompt?.trim()
+    if (directPrompt) {
+      return directPrompt
+    }
+
+    const recentUserMessages = chatMessages
+      .filter(message => message.role === 'user')
+      .map(message => message.content.trim())
+      .filter(Boolean)
+
+    if (recentUserMessages.length > 0) {
+      return recentUserMessages.slice(-3).join('\n')
+    }
+
+    if (settings.subject || settings.topic) {
+      return `Generate ${settings.questionCount} question(s) for ${settings.subject || 'this subject'} on ${settings.topic || 'this topic'}.`
+    }
+
+    return null
+  }, [chatMessages, settings.questionCount, settings.subject, settings.topic])
+
+  const runGeneration = useCallback(async (explicitPrompt?: string) => {
+    if (isGenerating || isChatResponding) return
+
+    const generationPrompt = buildGenerationPrompt(explicitPrompt)
+    if (!generationPrompt) {
+      toast.error('Add requirements in chat or set subject/topic before generating')
+      return
+    }
+
+    setIsGenerating(true)
+    setStreamingContent('')
+
+    try {
+      const token = await getToken()
+      const bloomsLevels = settings.bloomsLevels.length > 0
+        ? settings.bloomsLevels.map(level => level.toUpperCase())
+        : undefined
+
+      const response = await fetch(`${API_BASE_URL}/question-generator/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          prompt: generationPrompt,
+          question_count: settings.questionCount,
+          question_types: settings.questionTypes,
+          difficulty: settings.difficulty,
+          subject: settings.subject,
+          topic: settings.topic,
+          blooms_levels: bloomsLevels,
+          material_ids: settings.materialIds,
+          ai_provider: settings.aiProvider,
+          model_name: settings.modelName,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(await getErrorDetail(response, 'Failed to generate questions'))
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let assistantContent = ''
+      let buffer = ''
+      let sessionId: string | null = currentSessionId
+      let appendedCount = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+
+          try {
+            const data = JSON.parse(line.slice(6)) as StreamEvent
+
+            if (data.event_type === 'error:message') {
+              throw new Error(data.error_message || 'Question generation failed')
+            }
+
+            if (data.event_type === 'session:created' && data.session_id) {
+              sessionId = data.session_id
+              setCurrentSessionId(sessionId)
+            } else if (data.event_type === 'agent:thinking' && data.step) {
+              assistantContent += `💭 ${data.step}\n`
+            } else if (data.event_type === 'agent:action' && data.step) {
+              assistantContent += `⚡ ${data.step}\n`
+            } else if (data.event_type === 'generation:chunk' && data.content) {
+              setStreamingContent(prev => prev + data.content)
+            } else if (data.event_type === 'generation:question_complete' && data.question_data) {
+              const question = {
+                ...data.question_data,
+                session_id: sessionId || undefined,
+                status: 'pending' as const,
+              }
+              appendedCount += 1
+              setQuestions(prev => [...prev, question])
+              setStreamingContent('')
+            }
+
+            setChatMessages(prev => {
+              const lastMsg = prev[prev.length - 1]
+              if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
+                return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent || 'Generating...' }]
+              }
+              return [...prev, {
+                id: `assistant-${Date.now()}`,
+                role: 'assistant',
+                content: assistantContent || 'Generating...',
+                timestamp: new Date(),
+                isStreaming: true,
+              }]
+            })
+          } catch (streamError) {
+            throw streamError
+          }
+        }
+      }
+
+      setChatMessages(prev => {
+        const lastMsg = prev[prev.length - 1]
+        if (lastMsg?.role === 'assistant') {
+          return [...prev.slice(0, -1), {
+            ...lastMsg,
+            content: assistantContent || `Generated ${appendedCount} question(s).`,
+            isStreaming: false,
+          }]
+        }
+        return prev
+      })
+
+      await fetchSessions()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to generate questions'
+      console.error('Generate error:', error)
+      toast.error(message)
+    } finally {
+      setIsGenerating(false)
+      setStreamingContent('')
+    }
+  }, [
+    isGenerating,
+    isChatResponding,
+    buildGenerationPrompt,
+    getToken,
+    settings,
+    currentSessionId,
+    fetchSessions,
+  ])
+
   // Handle chat message (for refining/updating questions)
   const handleSendMessage = useCallback(async (message: string, referencedQuestionId?: string) => {
-    if (isGenerating) return
+    if (isGenerating || isChatResponding) return
 
     // Add user message
     const userMessage: ChatMessage = {
@@ -117,13 +300,29 @@ export function OpenCanvasGenerator() {
     // Clear selection after sending
     setSelectedQuestionId(null)
 
-    setIsGenerating(true)
-    setStreamingContent('')
+    let pendingAssistantId: string | null = null
 
     try {
       const token = await getToken()
-      if (referencedQuestionId && currentSessionId) {
-        const response = await fetch(`${API_BASE_URL}/question-generator/edit?session_id=${currentSessionId}`, {
+      const isGenerateCommand = /^\/generate(?:\s|$)/i.test(message)
+      if (isGenerateCommand) {
+        const commandPrompt = message.replace(/^\/generate\s*/i, '').trim()
+        await runGeneration(commandPrompt || undefined)
+        return
+      }
+
+      if (referencedQuestionId) {
+        const targetQuestion = questions.find(question => question.question_id === referencedQuestionId)
+        const sessionIdForEdit = currentSessionId || targetQuestion?.session_id
+
+        if (!sessionIdForEdit) {
+          throw new Error('Missing session context for question edit')
+        }
+
+        setIsGenerating(true)
+        setStreamingContent('')
+
+        const response = await fetch(`${API_BASE_URL}/question-generator/edit?session_id=${sessionIdForEdit}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -135,7 +334,9 @@ export function OpenCanvasGenerator() {
           }),
         })
 
-        if (!response.ok) throw new Error('Update failed')
+        if (!response.ok) {
+          throw new Error(await getErrorDetail(response, 'Failed to update question'))
+        }
 
         const reader = response.body?.getReader()
         if (!reader) throw new Error('No response body')
@@ -158,6 +359,10 @@ export function OpenCanvasGenerator() {
 
             try {
               const data = JSON.parse(line.slice(6)) as StreamEvent
+
+              if (data.event_type === 'error:message') {
+                throw new Error(data.error_message || 'Question edit failed')
+              }
 
               if (data.event_type === 'agent:thinking' && data.step) {
                 assistantContent += `💭 ${data.step}\n`
@@ -201,8 +406,12 @@ export function OpenCanvasGenerator() {
                   referencedQuestionId,
                 }]
               })
-            } catch {
-              console.warn('Failed to parse edit stream event:', line)
+            } catch (streamError) {
+              if (streamError instanceof SyntaxError) {
+                console.warn('Failed to parse edit stream event:', line)
+                continue
+              }
+              throw streamError
             }
           }
         }
@@ -223,120 +432,96 @@ export function OpenCanvasGenerator() {
 
         await fetchSessions()
       } else {
-        const response = await fetch(`${API_BASE_URL}/question-generator/generate`, {
+        setIsChatResponding(true)
+        const chatPendingId = `assistant-pending-${Date.now()}`
+        pendingAssistantId = chatPendingId
+        setChatMessages(prev => [...prev, {
+          id: chatPendingId,
+          role: 'assistant',
+          content: 'Thinking...',
+          timestamp: new Date(),
+          isStreaming: true,
+        }])
+
+        const historyPayload = [...chatMessages, userMessage]
+          .slice(-10)
+          .map(chat => ({ role: chat.role, content: chat.content }))
+
+        const response = await fetch(`${API_BASE_URL}/question-generator/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
-            prompt: message,
+            message,
+            history: historyPayload,
             question_count: settings.questionCount,
             question_types: settings.questionTypes,
-            difficulty: settings.difficulty,
             subject: settings.subject,
             topic: settings.topic,
-            blooms_levels: settings.bloomsLevels,
-            material_ids: settings.materialIds,
             ai_provider: settings.aiProvider,
+            model_name: settings.modelName,
           }),
         })
 
-        if (!response.ok) throw new Error('Update failed')
-
-        const reader = response.body?.getReader()
-        if (!reader) throw new Error('No response body')
-
-        const decoder = new TextDecoder()
-        let assistantContent = ''
-        let buffer = ''
-        let sessionId: string | null = currentSessionId
-        let appendedCount = 0
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-
-            try {
-              const data = JSON.parse(line.slice(6)) as StreamEvent
-
-              if (data.event_type === 'session:created' && data.session_id) {
-                sessionId = data.session_id
-                setCurrentSessionId(sessionId)
-              } else if (data.event_type === 'agent:thinking' && data.step) {
-                assistantContent += `💭 ${data.step}\n`
-              } else if (data.event_type === 'agent:action' && data.step) {
-                assistantContent += `⚡ ${data.step}\n`
-              } else if (data.event_type === 'generation:chunk' && data.content) {
-                setStreamingContent(prev => prev + data.content)
-              } else if (data.event_type === 'generation:question_complete' && data.question_data) {
-                const question = {
-                  ...data.question_data,
-                  session_id: sessionId || undefined,
-                  status: 'pending' as const,
-                }
-                appendedCount += 1
-                setQuestions(prev => [...prev, question])
-                setStreamingContent('')
-              }
-
-              setChatMessages(prev => {
-                const lastMsg = prev[prev.length - 1]
-                if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
-                  return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent || 'Generating...' }]
-                }
-                return [...prev, {
-                  id: `assistant-${Date.now()}`,
-                  role: 'assistant',
-                  content: assistantContent || 'Generating...',
-                  timestamp: new Date(),
-                  isStreaming: true,
-                }]
-              })
-            } catch {
-              console.warn('Failed to parse update stream event:', line)
-            }
-          }
+        if (!response.ok) {
+          throw new Error(await getErrorDetail(response, 'Failed to send chat message'))
         }
 
-        setChatMessages(prev => {
-          const lastMsg = prev[prev.length - 1]
-          if (lastMsg?.role === 'assistant') {
-            return [...prev.slice(0, -1), {
-              ...lastMsg,
-              content: assistantContent || `Generated ${appendedCount} follow-up question(s).`,
-              isStreaming: false,
-            }]
+        const data = await response.json() as ChatApiResponse
+        setChatMessages(prev => prev.map(chatMessage => {
+          if (chatMessage.id !== pendingAssistantId) {
+            return chatMessage
           }
-          return prev
-        })
 
-        await fetchSessions()
+          return {
+            ...chatMessage,
+            content: data.response || 'Could you share a bit more detail?',
+            isStreaming: false,
+            timestamp: new Date(),
+          }
+        }))
       }
 
     } catch (error) {
-      console.error('Update error:', error)
-      toast.error('Failed to update question')
+      const message = error instanceof Error ? error.message : 'Failed to send message'
+      if (pendingAssistantId) {
+        setChatMessages(prev => prev.map(chatMessage => {
+          if (chatMessage.id !== pendingAssistantId) {
+            return chatMessage
+          }
+
+          return {
+            ...chatMessage,
+            content: 'Sorry, I ran into an issue responding. Please try again.',
+            isStreaming: false,
+            timestamp: new Date(),
+          }
+        }))
+      }
+      console.error('Question generator chat error:', error)
+      toast.error(message)
     } finally {
       setIsGenerating(false)
+      setIsChatResponding(false)
       setStreamingContent('')
     }
   }, [
     isGenerating,
-    questions.length,
+    isChatResponding,
     chatMessages,
     getToken,
     currentSessionId,
+    questions,
+    runGeneration,
     settings,
     fetchSessions,
   ])
+
+  const handleGenerateFromChat = useCallback(async () => {
+    await runGeneration()
+  }, [runGeneration])
 
   // Handle question actions
   const handleApprove = useCallback(async (questionId: string) => {
@@ -651,6 +836,16 @@ export function OpenCanvasGenerator() {
         <div className="flex items-center gap-2">
 
           <Button
+            size="sm"
+            onClick={handleGenerateFromChat}
+            disabled={isGenerating || isChatResponding}
+            className="bg-[#5c4a38] hover:bg-[#4a3c2e] gap-2"
+          >
+            <Sparkles className="h-4 w-4" />
+            {isGenerating ? 'Generating...' : isChatResponding ? 'Waiting...' : 'Generate Questions'}
+          </Button>
+
+          <Button
             variant="outline"
             size="sm"
             onClick={() => setIsSettingsOpen(true)}
@@ -724,7 +919,7 @@ export function OpenCanvasGenerator() {
         <div className="w-[30%] overflow-hidden">
           <ChatPanel
             messages={chatMessages}
-            isStreaming={isGenerating}
+            isStreaming={isGenerating || isChatResponding}
             onSendMessage={handleSendMessage}
             onClearChat={handleClearChat}
             selectedQuestionId={selectedQuestionId}

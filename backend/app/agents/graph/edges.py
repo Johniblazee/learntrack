@@ -113,7 +113,9 @@ def check_iteration_limit(state: AgentState) -> bool:
 # =============================================================================
 
 
-def should_continue_after_analysis(state: AgentState) -> Literal["continue", "clarify", "error"]:
+def should_continue_after_analysis(
+    state: AgentState,
+) -> Literal["continue", "clarify", "error"]:
     """
     Determine next step after prompt analysis.
 
@@ -187,7 +189,7 @@ def determine_completion(state: AgentState) -> Literal["complete", "continue", "
     if state.get("error"):
         return "error"
 
-    config = state.get("config")
+    config = state.get("generation_config")
     questions = state.get("questions", [])
 
     if not config:
@@ -214,23 +216,18 @@ OPEN_CANVAS_EDGE_MAPPINGS = {
         "update_artifact": "update_artifact",
         "rewrite_artifact": "rewrite_artifact",
         "rewrite_artifact_theme": "rewrite_artifact_theme",
-        "respond_to_query": "respond_to_query"
+        "respond_to_query": "respond_to_query",
     },
     "after_artifact": {
         "generate_followup": "generate_followup",
-        "clean_state": "clean_state"
+        "clean_state": "clean_state",
     },
-    "after_respond": {
-        "clean_state": "clean_state"
-    },
-    "after_followup": {
-        "reflect": "reflect",
-        "clean_state": "clean_state"
-    },
+    "after_respond": {"clean_state": "clean_state"},
+    "after_followup": {"reflect": "reflect", "clean_state": "clean_state"},
     "after_reflect": {
         "generate_artifact": "generate_artifact",
-        "clean_state": "clean_state"
-    }
+        "clean_state": "clean_state",
+    },
 }
 
 
@@ -239,22 +236,21 @@ EDGE_MAPPINGS = {
     "after_analysis": {
         "continue": "retrieve_materials",
         "clarify": "end",
-        "error": "end"
+        "error": "end",
     },
     "after_generation": {
         "validate": "validate_questions",
         "skip": "end",
-        "error": "end"
+        "error": "end",
     },
     "after_validation": {
         "pass": "end",
         "regenerate": "generate_questions",
-        "partial": "end"
+        "partial": "end",
     },
     "completion_check": {
         "complete": "end",
         "continue": "generate_questions",
-        "error": "end"
-    }
+        "error": "end",
+    },
 }
-

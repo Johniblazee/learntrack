@@ -36,7 +36,7 @@ class GenerateFollowupNode(BaseNode):
         await self.emit_thinking("Generating follow-up suggestions...")
 
         try:
-            config = state["config"]
+            config = state["generation_config"]
             topic = config.topic or state.get("original_prompt", "")[:50]
 
             suggestions = []
@@ -327,4 +327,3 @@ class CleanStateNode(BaseNode):
         self.add_thinking_step(state, "observation", "Generation complete")
 
         return state
-

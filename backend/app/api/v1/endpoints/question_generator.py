@@ -5,12 +5,13 @@ Provides streaming SSE endpoints for question generation using the
 LangGraph ReAct agent architecture.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.core.dependencies import get_rag_service, get_database, get_question_service
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
@@ -132,6 +133,30 @@ class GenerateRequest(BaseModel):
     )
 
 
+class ChatTurn(BaseModel):
+    role: str = Field(..., description="Message role: user or assistant")
+    content: str = Field(..., description="Message content")
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., description="User's chat message")
+    history: Optional[List[ChatTurn]] = Field(
+        default=None, description="Recent conversation turns"
+    )
+    ai_provider: Optional[str] = Field(default=None, description="AI provider to use")
+    model_name: Optional[str] = Field(default=None, description="Specific model to use")
+    question_count: Optional[int] = Field(default=None, ge=1, le=20)
+    question_types: Optional[List[str]] = Field(default=None)
+    subject: Optional[str] = Field(default=None)
+    topic: Optional[str] = Field(default=None)
+
+
+class ChatResponse(BaseModel):
+    response: str
+    ready_to_generate: bool
+    missing_fields: List[str] = Field(default_factory=list)
+
+
 class EditQuestionRequest(BaseModel):
     """Request body for editing a question"""
 
@@ -149,6 +174,144 @@ class SessionResponse(BaseModel):
     status: str
     questions_count: int
     message: str
+
+
+def _get_missing_generation_fields(request: ChatRequest) -> List[str]:
+    missing_fields = []
+    if not request.subject:
+        missing_fields.append("subject")
+    if not request.topic:
+        missing_fields.append("topic")
+    if not request.question_types:
+        missing_fields.append("question_types")
+    if not request.question_count:
+        missing_fields.append("question_count")
+    return missing_fields
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat_about_question_generation(
+    request: ChatRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Fast chat endpoint for planning requirements before running generation."""
+    try:
+        config_service = TenantAIConfigService(database)
+        tenant_config = await config_service.get_or_create_default(
+            current_user.tutor_id
+        )
+
+        ai_provider = (
+            normalize_provider(request.ai_provider)
+            if request.ai_provider
+            else tenant_config.default_provider
+        )
+        model_name = request.model_name or tenant_config.default_model
+
+        if ai_provider not in tenant_config.enabled_providers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider {ai_provider} is not enabled for this tenant",
+            )
+
+        provider_config = (
+            tenant_config.provider_configs.get(ai_provider)
+            if tenant_config.provider_configs
+            else None
+        )
+        if (
+            provider_config
+            and provider_config.enabled_models
+            and model_name not in provider_config.enabled_models
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {model_name} is not enabled for provider {ai_provider}",
+            )
+
+        ai_manager = await get_tenant_ai_manager(current_user.tutor_id, database)
+        provider = ai_manager.get_provider(ai_provider)
+        if not provider:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider {ai_provider} is not available",
+            )
+
+        if model_name and hasattr(provider, "set_model"):
+            try:
+                provider.set_model(model_name)
+            except ValueError:
+                logger.warning(
+                    "Failed to set requested chat model, using provider default",
+                    provider=ai_provider,
+                    model=model_name,
+                )
+
+        missing_fields = _get_missing_generation_fields(request)
+        ready_to_generate = len(missing_fields) == 0
+
+        system_prompt = (
+            "You are an AI teaching assistant helping a tutor plan question generation. "
+            "Respond conversationally and concisely. Do not start generating questions yet. "
+            "Help the tutor clarify requirements (subject, topic, question types, count, difficulty) "
+            "until they explicitly request generation."
+        )
+
+        if missing_fields:
+            system_prompt += (
+                "\nCurrent missing fields for generation readiness: "
+                + ", ".join(missing_fields)
+                + ". Ask only for the most important missing detail next."
+            )
+
+        context_summary = (
+            f"\nCurrent settings:\n"
+            f"- Subject: {request.subject or 'not set'}\n"
+            f"- Topic: {request.topic or 'not set'}\n"
+            f"- Question count: {request.question_count or 'not set'}\n"
+            f"- Question types: {', '.join(request.question_types or []) or 'not set'}"
+        )
+
+        messages: List[Any] = [SystemMessage(content=system_prompt + context_summary)]
+        for turn in (request.history or [])[-10:]:
+            content = (turn.content or "").strip()
+            if not content:
+                continue
+            role = (turn.role or "").strip().lower()
+            if role == "assistant":
+                messages.append(AIMessage(content=content))
+            else:
+                messages.append(HumanMessage(content=content))
+        messages.append(HumanMessage(content=request.message.strip()))
+
+        llm = getattr(provider, "llm", None)
+        if llm is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Provider {ai_provider} has no active model configured",
+            )
+
+        llm_response = await llm.ainvoke(messages)
+        response_content = llm_response.content
+        if isinstance(response_content, list):
+            response_content = "\n".join(
+                str(part) for part in response_content if part is not None
+            )
+        response_text = (
+            str(response_content).strip() or "Can you share a bit more detail?"
+        )
+
+        return ChatResponse(
+            response=response_text,
+            ready_to_generate=ready_to_generate,
+            missing_fields=missing_fields,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Question generator chat failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to process chat message")
 
 
 @router.post("/generate", response_class=StreamingResponse)
@@ -175,7 +338,7 @@ async def generate_questions(
         # Build config with blooms_levels
         blooms = "AUTO"
         if request.blooms_levels and len(request.blooms_levels) > 0:
-            blooms = [BloomsLevel(level) for level in request.blooms_levels]
+            blooms = [normalize_blooms_level(level) for level in request.blooms_levels]
 
         question_types = request.question_types or ["multiple-choice"]
         config = GenerationConfig(

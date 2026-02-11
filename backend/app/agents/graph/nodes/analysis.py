@@ -47,7 +47,7 @@ class PromptAnalyzerNode(BaseNode):
                 subject=analysis_data.get("subject", "General"),
                 topic=analysis_data.get("topic", ""),
                 question_count=analysis_data.get(
-                    "question_count", state["config"].question_count
+                    "question_count", state["generation_config"].question_count
                 ),
                 question_types=[
                     normalize_question_type(t)
@@ -72,11 +72,11 @@ class PromptAnalyzerNode(BaseNode):
             state["needs_clarification"] = analysis.needs_clarification
 
             # Update config with extracted values
-            state["config"].subject = analysis.subject
-            state["config"].topic = analysis.topic
-            state["config"].question_types = analysis.question_types
-            state["config"].difficulty = analysis.difficulty
-            state["config"].blooms_levels = analysis.blooms_levels
+            state["generation_config"].subject = analysis.subject
+            state["generation_config"].topic = analysis.topic
+            state["generation_config"].question_types = analysis.question_types
+            state["generation_config"].difficulty = analysis.difficulty
+            state["generation_config"].blooms_levels = analysis.blooms_levels
 
             self.add_thinking_step(
                 state,
@@ -90,4 +90,3 @@ class PromptAnalyzerNode(BaseNode):
             state["needs_clarification"] = False
 
         return state
-

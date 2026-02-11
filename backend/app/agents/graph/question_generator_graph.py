@@ -233,7 +233,7 @@ class QuestionGeneratorAgent:
             "session_id": session_id,
             "user_id": user_id,
             "tenant_id": tenant_id,
-            "config": config,
+            "generation_config": config,
             # Prompt and analysis
             "original_prompt": prompt,
             "enhanced_prompt": None,

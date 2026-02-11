@@ -36,7 +36,7 @@ class QuestionGeneratorNode(BaseNode):
 
     async def __call__(self, state: AgentState) -> AgentState:
         """Generate questions based on config and materials"""
-        config = state["config"]
+        config = state["generation_config"]
         total = config.question_count
 
         await self.emit_action(f"Generating {total} question(s)...")
@@ -101,7 +101,7 @@ IMPORTANT: Your response must contain exactly {total} question objects in a sing
 
     def _build_request(self, state: AgentState) -> str:
         """Build the generation request"""
-        config = state["config"]
+        config = state["generation_config"]
         types = ", ".join([t.value for t in config.question_types])
 
         return f"""
@@ -206,7 +206,7 @@ class GenerateArtifactNode(BaseNode):
 
     async def __call__(self, state: AgentState) -> AgentState:
         """Generate new question set artifact with progressive streaming"""
-        config = state["config"]
+        config = state["generation_config"]
         total = config.question_count
 
         current_iteration = state.get("iteration_count", 0)
@@ -312,7 +312,7 @@ class GenerateArtifactNode(BaseNode):
             try:
                 web_query = (
                     state.get("web_search_query")
-                    or f"{state['config'].subject or ''} {state['config'].topic or ''} {query}"
+                    or f"{state['generation_config'].subject or ''} {state['generation_config'].topic or ''} {query}"
                 )
                 web_chunks = await perform_web_search(
                     web_search_service=self.web_search_service,
@@ -361,7 +361,7 @@ class GenerateArtifactNode(BaseNode):
         existing_questions: List[GeneratedQuestion],
     ) -> Optional[GeneratedQuestion]:
         """Generate a single question with streaming content to UI"""
-        config = state["config"]
+        config = state["generation_config"]
         q_types = config.question_types
         q_type = q_types[(question_number - 1) % len(q_types)]
 
@@ -483,4 +483,3 @@ Output as a single JSON object (not an array).
         except Exception as e:
             logger.error(f"Failed to parse question {question_number}", error=str(e))
             return None
-

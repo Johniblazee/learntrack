@@ -403,7 +403,7 @@ export function ChatPanel({
           placeholder={
             selectedQuestionId 
               ? "Type your update for the selected question..."
-              : "Type instructions... (e.g., 'Add 2 more multiple choice')"
+              : "Chat to refine requirements, then click Generate or use /generate"
           }
           disabled={isStreaming}
           selectedModel={settings?.modelName}

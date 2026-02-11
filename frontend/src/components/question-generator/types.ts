@@ -21,4 +21,6 @@ export interface StreamEvent {
   step?: string
   content?: string
   question_data?: GeneratedQuestion
+  error_message?: string
+  error_code?: string
 }
