@@ -1,6 +1,7 @@
 """
 Assignment models and schemas
 """
+
 from datetime import datetime, date, timezone
 from typing import List, Optional, Dict
 from enum import Enum
@@ -12,6 +13,7 @@ from app.models.user import PyObjectId
 
 class AssignmentStatus(str, Enum):
     """Assignment status"""
+
     DRAFT = "draft"  # Added for backward compatibility
     SCHEDULED = "scheduled"
     PUBLISHED = "published"  # Added for backward compatibility
@@ -22,6 +24,7 @@ class AssignmentStatus(str, Enum):
 
 class AssignmentType(str, Enum):
     """Assignment types"""
+
     PRACTICE = "practice"
     QUIZ = "quiz"
     EXAM = "exam"
@@ -30,6 +33,7 @@ class AssignmentType(str, Enum):
 
 class QuestionAssignment(BaseModel):
     """Question within an assignment"""
+
     question_id: str
     points: int = 1
     order: int = 0
@@ -37,6 +41,7 @@ class QuestionAssignment(BaseModel):
 
 class AssignmentBase(BaseModel):
     """Base assignment model"""
+
     title: str
     description: Optional[str] = None
     subject_id: str
@@ -47,37 +52,40 @@ class AssignmentBase(BaseModel):
     max_attempts: int = 1
     shuffle_questions: bool = False
     show_results_immediately: bool = True
-    tutor_id: str = Field(..., description="Tutor ID - references the tutor's Clerk user ID")
 
 
 class AssignmentCreate(AssignmentBase):
     """Assignment creation model"""
+
     student_ids: Optional[List[str]] = None  # Individual students
     group_ids: Optional[List[str]] = None  # Student groups
     subject_filter: Optional[str] = None  # Filter students by subject
     question_ids: List[str]
 
-    @validator('question_ids')
+    @validator("question_ids")
     def validate_questions(cls, v):
         if not v:
-            raise ValueError('Assignment must have at least one question')
+            raise ValueError("Assignment must have at least one question")
         return v
 
     @root_validator(skip_on_failure=True)
     def validate_assignment_targets(cls, values):
         """Ensure at least one target is specified"""
-        student_ids = values.get('student_ids')
-        group_ids = values.get('group_ids')
-        subject_filter = values.get('subject_filter')
+        student_ids = values.get("student_ids")
+        group_ids = values.get("group_ids")
+        subject_filter = values.get("subject_filter")
 
         if not any([student_ids, group_ids, subject_filter]):
-            raise ValueError('Assignment must target at least one student, group, or subject')
+            raise ValueError(
+                "Assignment must target at least one student, group, or subject"
+            )
 
         return values
 
 
 class AssignmentUpdate(BaseModel):
     """Assignment update model"""
+
     title: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[datetime] = None
@@ -90,10 +98,13 @@ class AssignmentUpdate(BaseModel):
 
 class AssignmentInDB(AssignmentBase):
     """Assignment model as stored in database"""
+
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     tutor_id: str
     student_ids: List[str] = []  # Made optional with default for backward compatibility
-    questions: List[QuestionAssignment] = []  # Made optional with default for backward compatibility
+    questions: List[
+        QuestionAssignment
+    ] = []  # Made optional with default for backward compatibility
     status: AssignmentStatus = AssignmentStatus.SCHEDULED
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -115,7 +126,7 @@ class AssignmentInDB(AssignmentBase):
     # Reference materials
     reference_materials: List[str] = []  # Material IDs
 
-    @validator('id', pre=True)
+    @validator("id", pre=True)
     def convert_objectid_to_str(cls, v):
         """Convert ObjectId to string"""
         if isinstance(v, ObjectId):
@@ -125,23 +136,26 @@ class AssignmentInDB(AssignmentBase):
     model_config = ConfigDict(
         populate_by_name=True,
         arbitrary_types_allowed=True,
-        json_encoders={ObjectId: str}
+        json_encoders={ObjectId: str},
     )
 
 
 class Assignment(AssignmentInDB):
     """Assignment response model"""
+
     pass
 
 
 class AssignmentWithProgress(Assignment):
     """Assignment with student progress"""
+
     student_progress: List[Dict] = []
     completion_rate: float = 0.0
 
 
 class AssignmentForStudent(BaseModel):
     """Assignment model for student view"""
+
     id: str
     title: str
     description: Optional[str]

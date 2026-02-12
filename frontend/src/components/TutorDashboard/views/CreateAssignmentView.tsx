@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,6 +16,7 @@ import StudentSelector from '@/components/StudentSelector'
 import QuestionBankSelector, { QuestionItem } from '@/components/QuestionBankSelector'
 
 export default function CreateAssignmentView() {
+  const queryClient = useQueryClient()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [assignmentType, setAssignmentType] = useState<'individual' | 'group' | 'subject'>('individual')
   const [isQuestionSelectorOpen, setIsQuestionSelectorOpen] = useState(false)
@@ -48,6 +50,12 @@ export default function CreateAssignmentView() {
       return
     }
 
+    const resolvedSubject = formData.subject || formData.selectedSubject
+    if (!resolvedSubject) {
+      toast.error('Please select a subject')
+      return
+    }
+
     // Check if at least one target is selected
     const hasTarget = 
       (assignmentType === 'individual' && formData.selectedStudents.length > 0) ||
@@ -71,9 +79,9 @@ export default function CreateAssignmentView() {
         title: formData.title,
         description: formData.description,
         due_date: formData.dueDate,
-        subject_id: formData.subject,
+        subject_id: resolvedSubject,
         topic: formData.topic,
-        questions: formData.selectedQuestions,
+        question_ids: formData.selectedQuestions,
         student_ids: assignmentType === 'individual' ? formData.selectedStudents : undefined,
         group_ids: assignmentType === 'group' ? formData.selectedGroups : undefined,
         subject_filter: assignmentType === 'subject' ? formData.selectedSubject : undefined,
@@ -88,6 +96,13 @@ export default function CreateAssignmentView() {
       toast.success('Assignment created successfully!', {
         description: `"${formData.title}" has been assigned to students`
       })
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['assignments'] }),
+        queryClient.invalidateQueries({ queryKey: ['assignments', 'my'] }),
+        queryClient.invalidateQueries({ queryKey: ['student-dashboard-stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['student-progress-analytics'] }),
+      ])
 
       // Reset form
       setFormData({

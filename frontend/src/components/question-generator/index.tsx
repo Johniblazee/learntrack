@@ -207,49 +207,45 @@ export function OpenCanvasGenerator() {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
 
-          try {
-            const data = JSON.parse(line.slice(6)) as StreamEvent
+          const data = JSON.parse(line.slice(6)) as StreamEvent
 
-            if (data.event_type === 'error:message') {
-              throw new Error(data.error_message || 'Question generation failed')
-            }
-
-            if (data.event_type === 'session:created' && data.session_id) {
-              sessionId = data.session_id
-              setCurrentSessionId(sessionId)
-            } else if (data.event_type === 'agent:thinking' && data.step) {
-              assistantContent += `💭 ${data.step}\n`
-            } else if (data.event_type === 'agent:action' && data.step) {
-              assistantContent += `⚡ ${data.step}\n`
-            } else if (data.event_type === 'generation:chunk' && data.content) {
-              setStreamingContent(prev => prev + data.content)
-            } else if (data.event_type === 'generation:question_complete' && data.question_data) {
-              const question = {
-                ...data.question_data,
-                session_id: sessionId || undefined,
-                status: 'pending' as const,
-              }
-              appendedCount += 1
-              setQuestions(prev => [...prev, question])
-              setStreamingContent('')
-            }
-
-            setChatMessages(prev => {
-              const lastMsg = prev[prev.length - 1]
-              if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
-                return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent || 'Generating...' }]
-              }
-              return [...prev, {
-                id: `assistant-${Date.now()}`,
-                role: 'assistant',
-                content: assistantContent || 'Generating...',
-                timestamp: new Date(),
-                isStreaming: true,
-              }]
-            })
-          } catch (streamError) {
-            throw streamError
+          if (data.event_type === 'error:message') {
+            throw new Error(data.error_message || 'Question generation failed')
           }
+
+          if (data.event_type === 'session:created' && data.session_id) {
+            sessionId = data.session_id
+            setCurrentSessionId(sessionId)
+          } else if (data.event_type === 'agent:thinking' && data.step) {
+            assistantContent += `💭 ${data.step}\n`
+          } else if (data.event_type === 'agent:action' && data.step) {
+            assistantContent += `⚡ ${data.step}\n`
+          } else if (data.event_type === 'generation:chunk' && data.content) {
+            setStreamingContent(prev => prev + data.content)
+          } else if (data.event_type === 'generation:question_complete' && data.question_data) {
+            const question = {
+              ...data.question_data,
+              session_id: sessionId || undefined,
+              status: 'pending' as const,
+            }
+            appendedCount += 1
+            setQuestions(prev => [...prev, question])
+            setStreamingContent('')
+          }
+
+          setChatMessages(prev => {
+            const lastMsg = prev[prev.length - 1]
+            if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
+              return [...prev.slice(0, -1), { ...lastMsg, content: assistantContent || 'Generating...' }]
+            }
+            return [...prev, {
+              id: `assistant-${Date.now()}`,
+              role: 'assistant',
+              content: assistantContent || 'Generating...',
+              timestamp: new Date(),
+              isStreaming: true,
+            }]
+          })
         }
       }
 

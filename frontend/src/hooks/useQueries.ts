@@ -372,10 +372,13 @@ export function useMyAssignments() {
   return useQuery({
     queryKey: ['assignments', 'my'],
     queryFn: async () => {
-      const response = await client.get('/assignments/student/')
+      const response = await client.get('/assignments/student/me')
       if (response.error) throw new Error(response.error)
-      return response.data
+      return response.data?.items || response.data || []
     },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 90 * 1000,
   })
 }
 
@@ -652,6 +655,8 @@ export function useStudentDashboardStats() {
       }
     },
     staleTime: 60 * 1000, // 1 minute
+    refetchOnWindowFocus: true,
+    refetchInterval: 120 * 1000,
   })
 }
 
@@ -679,6 +684,8 @@ export function useStudentProgressAnalytics() {
       }
     },
     staleTime: 60 * 1000, // 1 minute
+    refetchOnWindowFocus: true,
+    refetchInterval: 120 * 1000,
   })
 }
 
@@ -745,5 +752,4 @@ export function useStudentAssignmentsList(studentId: string | undefined) {
     enabled: !!studentId,
   })
 }
-
 

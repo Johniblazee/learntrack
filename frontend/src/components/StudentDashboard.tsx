@@ -1,526 +1,618 @@
 "use client"
 
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { useMemo, useState } from "react"
+import { useClerk, useUser } from "@clerk/clerk-react"
+import {
+  Bell,
+  BookOpen,
+  CheckCircle2,
+  Clock3,
+  FolderOpen,
+  GraduationCap,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Search,
+  Settings,
+  Sparkles,
+  TrendingUp,
+  Trophy,
+  Users,
+  X,
+} from "lucide-react"
+
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, BookOpen, Clock, CheckCircle, Star, Calendar, Trophy, Target } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { toast } from "@/contexts/ToastContext"
-
-
-import { ThemeToggle } from '@/components/ui/theme-toggle'
-import { Skeleton } from '@/components/ui/skeleton'
-import { useMyAssignments, useStudentDashboardStats, useStudentProgressAnalytics } from '@/hooks/useQueries'
-import { useUser } from '@clerk/clerk-react'
+import { useMyAssignments, useStudentDashboardStats, useStudentProgressAnalytics } from "@/hooks/useQueries"
+import { cn } from "@/lib/utils"
 
 interface StudentDashboardProps {
   onBack?: () => void
 }
 
-interface Assignment {
+interface AssignmentCardData {
   id: string
   title: string
   subject: string
-  topic: string
-  dueDate: Date
+  dueDate: Date | null
   questionCount: number
-  completedQuestions: number
-  status: "pending" | "in-progress" | "completed"
-  score?: number
+  progress: number
+  status: string
 }
 
-interface Question {
-  id: string
-  question: string
-  type: "multiple-choice" | "short-answer"
-  options?: string[]
-  userAnswer?: string
-  isCorrect?: boolean
+const MENTOR_PLACEHOLDERS = [
+  { name: "Marcus Thorne", role: "Product Designer" },
+  { name: "Elena Rodriguez", role: "React Developer" },
+]
+
+function toAssignmentCards(items: any[]): AssignmentCardData[] {
+  return items.map((item, index) => {
+    const questionCount =
+      item.question_count ?? item.questionCount ?? item.questions?.length ?? 0
+    const completedQuestions =
+      item.completed_questions ??
+      item.completedQuestions ??
+      (String(item.status).toLowerCase() === "completed" ? questionCount : 0)
+    const computedProgress =
+      questionCount > 0 ? Math.round((completedQuestions / questionCount) * 100) : 0
+
+    const status = String(item.status ?? "pending").toLowerCase()
+    const progressFromStatus = status === "completed" ? 100 : status === "active" ? 55 : 0
+    const progress = computedProgress > 0 ? computedProgress : progressFromStatus
+
+    return {
+      id: String(item.id ?? item._id ?? `assignment-${index}`),
+      title: item.title ?? "Untitled Assignment",
+      subject:
+        item.subject_name ??
+        item.subject?.name ??
+        item.subject_id?.name ??
+        item.subject_id ??
+        "General Studies",
+      dueDate: item.due_date || item.dueDate ? new Date(item.due_date ?? item.dueDate) : null,
+      questionCount,
+      progress,
+      status,
+    }
+  })
+}
+
+function formatDueDate(date: Date | null): string {
+  if (!date) return "No due date"
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+}
+
+function formatRelativeDueDate(date: Date | null): string {
+  if (!date) return "No due date"
+  const now = new Date()
+  const dayDiff = Math.ceil((date.getTime() - now.getTime()) / 86400000)
+  if (dayDiff < 0) return `${Math.abs(dayDiff)} day${Math.abs(dayDiff) > 1 ? "s" : ""} overdue`
+  if (dayDiff === 0) return "Due today"
+  if (dayDiff === 1) return "Due tomorrow"
+  return `Due in ${dayDiff} days`
+}
+
+function getStatusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "completed") return "default"
+  if (status === "active" || status === "in_progress") return "secondary"
+  if (status === "overdue" || status === "archived") return "destructive"
+  return "outline"
+}
+
+function getWeekDays(datesWithTasks: Set<string>) {
+  const now = new Date()
+  const currentDay = (now.getDay() + 6) % 7
+  const monday = new Date(now)
+  monday.setDate(now.getDate() - currentDay)
+
+  return Array.from({ length: 7 }).map((_, i) => {
+    const date = new Date(monday)
+    date.setDate(monday.getDate() + i)
+    const key = date.toDateString()
+    return {
+      date,
+      label: date.toLocaleDateString(undefined, { weekday: "short" }),
+      isToday: key === now.toDateString(),
+      hasTask: datesWithTasks.has(key),
+      isWeekend: i >= 5,
+    }
+  })
 }
 
 export default function StudentDashboard({ onBack }: StudentDashboardProps) {
-  // Get user info from Clerk
   const { user } = useUser()
-  const studentName = user?.fullName || user?.firstName || "Student"
+  const { signOut } = useClerk()
 
-  // Use React Query for assignments
-  const { data: assignments = [], isLoading: loading } = useMyAssignments()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
 
-  // Fetch dashboard stats
+  const { data: rawAssignments = [], isLoading: assignmentsLoading } = useMyAssignments()
   const { data: dashboardStats, isLoading: statsLoading } = useStudentDashboardStats()
-
-  // Fetch progress analytics
   const { data: progressAnalytics, isLoading: analyticsLoading } = useStudentProgressAnalytics()
 
-  // All assignments now come from API
-  const displayAssignments = assignments as Assignment[]
+  const studentName = user?.fullName || user?.firstName || "Student"
+  const assignments = useMemo(() => toAssignmentCards(rawAssignments as any[]), [rawAssignments])
 
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
-  const [selectedAnswer, setSelectedAnswer] = useState("")
-  const [showingQuestion, setShowingQuestion] = useState(false)
+  const visibleAssignments = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase()
+    const sorted = [...assignments].sort((a, b) => {
+      const aTime = a.dueDate ? a.dueDate.getTime() : Number.POSITIVE_INFINITY
+      const bTime = b.dueDate ? b.dueDate.getTime() : Number.POSITIVE_INFINITY
+      return aTime - bTime
+    })
+    if (!query) return sorted
+    return sorted.filter((item) => {
+      return item.title.toLowerCase().includes(query) || item.subject.toLowerCase().includes(query)
+    })
+  }, [assignments, searchTerm])
 
-  // Placeholder function for submitting an answer
-  const submitAnswer = () => {
-    handleNextQuestion();
-  };
+  const workingAssignments = visibleAssignments
+    .filter((item) => item.status !== "completed" && item.status !== "archived")
+    .slice(0, 3)
 
-  // Questions should come from backend; empty default here
-  const activeAssignmentQuestions: Question[] = []
+  const datesWithTasks = new Set(
+    assignments
+      .map((item) => item.dueDate)
+      .filter((value): value is Date => Boolean(value))
+      .map((date) => date.toDateString())
+  )
 
-  const startAssignment = (assignmentId: string) => {
-    // Assignment runner flow will be connected to backend assignment questions.
-    // Keep this state-safe while surfacing intent to the user.
-    if (!assignmentId || activeAssignmentQuestions.length === 0) {
-      toast.info('Assignment workspace is coming soon')
-      return
+  const weekDays = useMemo(() => getWeekDays(datesWithTasks), [datesWithTasks])
+
+  const gpa = useMemo(() => {
+    const avg = Number(dashboardStats?.overall_average ?? 0)
+    if (!avg) return "--"
+    return Math.min(4, avg / 25).toFixed(2)
+  }, [dashboardStats?.overall_average])
+
+  const totalAssignments = dashboardStats?.total_assignments ?? assignments.length
+  const completedAssignments = dashboardStats?.completed ?? 0
+  const completionRate = totalAssignments > 0 ? Math.round((completedAssignments / totalAssignments) * 100) : 0
+  const pendingAssignments = dashboardStats?.pending ?? Math.max(totalAssignments - completedAssignments, 0)
+
+  const weeklyEvents = useMemo(() => {
+    const assignmentEvents = assignments
+      .filter((item) => item.dueDate)
+      .slice(0, 2)
+      .map((item, index) => ({
+        time: index === 0 ? "10:00 AM" : "2:30 PM",
+        title: item.title,
+        context: `${item.subject} - ${formatRelativeDueDate(item.dueDate)}`,
+        tone: index === 0 ? "primary" : "danger",
+      }))
+
+    if (assignmentEvents.length > 0) return assignmentEvents
+
+    return [
+      {
+        time: "10:00 AM",
+        title: "History of Art Seminar",
+        context: "Main Hall - Dr. Sarah Jenkins",
+        tone: "primary",
+      },
+      {
+        time: "2:30 PM",
+        title: "Quiz: UI Foundations",
+        context: "Online Portal - Timed (45 mins)",
+        tone: "danger",
+      },
+    ]
+  }, [assignments])
+
+  const recentActivity = useMemo(() => {
+    if (progressAnalytics?.recent_submissions?.length) {
+      return progressAnalytics.recent_submissions.slice(0, 3).map((item: any) => ({
+        title: item.score >= 85 ? "Strong Submission" : "Assignment Submitted",
+        detail: `${item.assignment_title || "Assignment"} in ${item.subject || "General"}`,
+        stamp: item.submitted_at ? new Date(item.submitted_at).toLocaleDateString() : "Recently",
+        tone: item.score >= 85 ? "success" : "primary",
+      }))
     }
-    setShowingQuestion(true)
-    setCurrentQuestionIndex(0)
+
+    return [
+      {
+        title: "Assignment Submitted",
+        detail: "User Persona Study for UI Design 101.",
+        stamp: "2 hours ago",
+        tone: "success",
+      },
+      {
+        title: "New Grade Posted",
+        detail: "You received an A+ in Color Theory Quiz.",
+        stamp: "Yesterday",
+        tone: "primary",
+      },
+      {
+        title: "Mentor Feedback",
+        detail: "Marcus left a comment on your portfolio project.",
+        stamp: "3 days ago",
+        tone: "info",
+      },
+    ]
+  }, [progressAnalytics?.recent_submissions])
+
+  const handleStartAssignment = (assignment: AssignmentCardData) => {
+    toast.info("Assignment workspace is being prepared", {
+      description: `Opening ${assignment.title}`,
+    })
   }
 
-  const handleNextQuestion = () => {
-    if (currentQuestionIndex < activeAssignmentQuestions.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1)
-    } else {
-      // End of assignment
-      setShowingQuestion(false)
-      toast.success("Assignment submitted successfully!")
-    }
+  const handleSignOut = async () => {
+    await signOut()
   }
 
-  const currentQuestion = activeAssignmentQuestions[currentQuestionIndex]
-
-  if (showingQuestion) {
-    return (
-      <div className="min-h-screen bg-background text-foreground p-4">
-        <div className="max-w-3xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <Button variant="ghost" onClick={() => setShowingQuestion(false)}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-            <div className="text-sm text-gray-500">Question 8 of 10</div>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Algebra Practice Set 1</CardTitle>
-                  <CardDescription>Mathematics • Algebra</CardDescription>
-                </div>
-                <Badge variant="outline">Due: Dec 25</Badge>
-              </div>
-              <Progress value={70} className="mt-4" />
-              <p className="text-sm text-gray-600">7 of 10 questions completed</p>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-4">{currentQuestion.question}</h3>
-
-                {currentQuestion.type === "multiple-choice" && currentQuestion.options && (
-                  <RadioGroup value={selectedAnswer} onValueChange={setSelectedAnswer}>
-                    <div className="space-y-3">
-                      {currentQuestion.options.map((option, index) => (
-                        <div key={index} className="flex items-center space-x-2">
-                          <RadioGroupItem value={option} id={`option-${index}`} />
-                          <Label htmlFor={`option-${index}`} className="text-base">
-                            {option}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
-                  </RadioGroup>
-                )}
-
-                {currentQuestion.type === "short-answer" && (
-                  <Textarea
-                    placeholder="Enter your answer here..."
-                    value={selectedAnswer}
-                    onChange={(e) => setSelectedAnswer(e.target.value)}
-                    rows={4}
-                  />
-                )}
-              </div>
-
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => alert("Going to the previous question is not yet implemented.")}>Previous Question</Button>
-                <Button onClick={submitAnswer} disabled={!selectedAnswer}>
-                  Next Question
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    )
-  }
+  const navItemBase = "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50/30 dark:from-gray-900 dark:via-gray-800 dark:to-slate-900">
-      {/* Header */}
-      <div className="bg-white dark:bg-slate-900 shadow-sm border-b border-gray-200 dark:border-slate-700 p-4 sm:p-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center w-full sm:w-auto">
-            {onBack && (
-              <Button variant="ghost" onClick={onBack} className="mr-2 sm:mr-4">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Back</span>
+    <div className="h-screen overflow-hidden bg-background text-foreground animate-in fade-in">
+      <div className="flex h-full">
+        <div
+          className={cn(
+            "fixed inset-0 z-40 bg-black/30 transition-opacity lg:hidden",
+            sidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
+          )}
+          onClick={() => setSidebarOpen(false)}
+        />
+
+        <aside
+          className={cn(
+            "fixed left-0 top-0 z-50 flex h-full w-72 flex-col border-r border-border bg-card transition-transform duration-300 lg:static lg:z-auto lg:w-64 lg:translate-x-0",
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          )}
+        >
+          <div className="flex items-center justify-between p-5 lg:justify-start">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <GraduationCap className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-lufga text-xl font-bold tracking-tight">LearnTrack</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Student Hub</p>
+              </div>
+            </div>
+            <Button className="lg:hidden" variant="ghost" size="icon" onClick={() => setSidebarOpen(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <nav className="space-y-1 px-4 py-3">
+            <button className={cn(navItemBase, "w-full bg-primary text-primary-foreground")}>
+              <LayoutDashboard className="h-4 w-4" />
+              Dashboard
+            </button>
+            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+              <BookOpen className="h-4 w-4" />
+              My Courses
+            </button>
+            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+              <CheckCircle2 className="h-4 w-4" />
+              Assignments
+            </button>
+            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+              <TrendingUp className="h-4 w-4" />
+              Grades
+            </button>
+            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+              <FolderOpen className="h-4 w-4" />
+              Library
+            </button>
+          </nav>
+
+          <div className="mt-auto p-4">
+            <Card className="border-primary/25 bg-primary/10">
+              <CardContent className="space-y-3 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-primary">Pro Plan</p>
+                <p className="text-xs text-muted-foreground">Unlock advanced mentorship and personalized exam simulations.</p>
+                <Button className="w-full" size="sm">Upgrade Now</Button>
+              </CardContent>
+            </Card>
+
+            <button
+              className="mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              onClick={handleSignOut}
+            >
+              <LogOut className="h-4 w-4" />
+              Log Out
+            </button>
+          </div>
+        </aside>
+
+        <main className="flex min-w-0 flex-1 flex-col">
+          <header className="h-16 border-b border-border/80 bg-background/80 px-4 backdrop-blur-sm sm:px-6 lg:px-8">
+            <div className="flex h-full items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
+                  <Menu className="h-5 w-5" />
+                </Button>
+                {onBack && (
+                  <Button variant="ghost" size="sm" onClick={onBack}>
+                    Back
+                  </Button>
+                )}
+                <div className="relative hidden w-full max-w-md sm:block">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    className="pl-10"
+                    placeholder="Search assignments, subjects, resources..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 sm:gap-3">
+                <Button variant="outline" size="icon" className="relative">
+                  <Bell className="h-4 w-4" />
+                  {pendingAssignments > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />}
+                </Button>
+                <Button variant="outline" size="icon">
+                  <Settings className="h-4 w-4" />
+                </Button>
+                <div className="hidden items-center gap-2 sm:flex">
+                  <div className="text-right">
+                    <p className="text-sm font-semibold leading-none">{studentName}</p>
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Student</p>
+                  </div>
+                  <Avatar className="h-9 w-9 border border-primary/40">
+                    <AvatarFallback>{studentName.slice(0, 2).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h1 className="font-lufga text-3xl font-bold tracking-tight">Welcome back, {studentName}</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {pendingAssignments > 0
+                    ? `You have ${pendingAssignments} assignment${pendingAssignments > 1 ? "s" : ""} due soon.`
+                    : "You are all caught up. Keep your momentum going."}
+                </p>
+              </div>
+              <Button className="w-full md:w-auto">
+                <Sparkles className="mr-2 h-4 w-4" />
+                Resume Learning Session
               </Button>
-            )}
-            <div className="flex-1 min-w-0">
-              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white truncate">Student Dashboard</h1>
-              <p className="text-sm sm:text-base text-gray-600 dark:text-slate-400 mt-1 hidden sm:block">Welcome back, {studentName}! Ready to learn?</p>
             </div>
-          </div>
-          <div className="flex items-center space-x-3 sm:space-x-4 w-full sm:w-auto justify-end">
-            <ThemeToggle />
-            <div className="text-right">
-              <p className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">{studentName}</p>
-              <p className="text-xs text-gray-600 dark:text-slate-400">Student</p>
+
+            <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3 lg:gap-6">
+              <Card>
+                <CardContent className="flex items-center justify-between p-5">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Overall GPA</p>
+                    <p className="mt-1 text-3xl font-bold text-primary">{statsLoading ? <Skeleton className="h-8 w-14" /> : gpa}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Grade: {dashboardStats?.current_grade || "--"}
+                    </p>
+                  </div>
+                  <div className="rounded-full border-4 border-primary/20 p-3">
+                    <Trophy className="h-6 w-6 text-primary" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="flex items-center justify-between p-5">
+                  <div className="min-w-0">
+                    <p className="text-sm text-muted-foreground">Course Completion</p>
+                    <p className="mt-1 text-3xl font-bold">{statsLoading ? <Skeleton className="h-8 w-12" /> : `${completionRate}%`}</p>
+                    <p className="mt-2 text-xs text-primary">
+                      {completedAssignments}/{totalAssignments} assignments completed
+                    </p>
+                  </div>
+                  <div className="rounded-full border-4 border-primary/25 p-3">
+                    <CheckCircle2 className="h-6 w-6 text-primary" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="flex items-center justify-between p-5">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Active Workload</p>
+                    <p className="mt-1 text-3xl font-bold">{statsLoading ? <Skeleton className="h-8 w-10" /> : pendingAssignments}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">Assignments in progress or pending</p>
+                  </div>
+                  <div className="rounded-full bg-primary/10 p-3">
+                    <Clock3 className="h-6 w-6 text-primary" />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Stats Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Overall Average Card */}
-          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-purple-100 text-sm font-medium">Overall Average</p>
-                  <p className="text-3xl font-bold">
-                    {statsLoading ? (
-                      <Skeleton className="h-9 w-16" />
+            <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
+              <div className="space-y-8 xl:col-span-2">
+                <section>
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="font-lufga text-xl font-semibold">Currently Working On</h2>
+                    <Button variant="ghost" size="sm" className="text-primary">View All</Button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {assignmentsLoading ? (
+                      Array.from({ length: 2 }).map((_, index) => (
+                        <Card key={index}><CardContent className="space-y-3 p-5"><Skeleton className="h-4 w-28" /><Skeleton className="h-5 w-full" /><Skeleton className="h-2 w-full" /></CardContent></Card>
+                      ))
+                    ) : workingAssignments.length === 0 ? (
+                      <Card>
+                        <CardContent className="p-6 text-center">
+                          <BookOpen className="mx-auto mb-2 h-10 w-10 text-muted-foreground/60" />
+                          <p className="font-medium">No active assignments</p>
+                          <p className="text-sm text-muted-foreground">New assignments from your tutor will appear here.</p>
+                        </CardContent>
+                      </Card>
                     ) : (
-                      `${dashboardStats?.overall_average || 0}%`
-                    )}
-                  </p>
-                  <p className="text-purple-100 text-xs mt-1">
-                    Grade: {dashboardStats?.current_grade || '--'}
-                  </p>
-                </div>
-                <Target className="w-8 h-8 text-purple-200" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Completed Assignments Card */}
-          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-green-100 text-sm font-medium">Completed</p>
-                  <p className="text-3xl font-bold">
-                    {statsLoading ? (
-                      <Skeleton className="h-9 w-12" />
-                    ) : (
-                      dashboardStats?.completed || 0
-                    )}
-                  </p>
-                  <p className="text-green-100 text-xs mt-1">assignments</p>
-                </div>
-                <CheckCircle className="w-8 h-8 text-green-200" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Pending Tasks Card */}
-          <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-orange-100 text-sm font-medium">Pending</p>
-                  <p className="text-3xl font-bold">
-                    {statsLoading ? (
-                      <Skeleton className="h-9 w-10" />
-                    ) : (
-                      dashboardStats?.pending || 0
-                    )}
-                  </p>
-                  <p className="text-orange-100 text-xs mt-1">tasks due</p>
-                </div>
-                <Clock className="w-8 h-8 text-orange-200" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Total Assignments Card */}
-          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-blue-100 text-sm font-medium">Total Assignments</p>
-                  <p className="text-3xl font-bold">
-                    {statsLoading ? (
-                      <Skeleton className="h-9 w-12" />
-                    ) : (
-                      dashboardStats?.total_assignments || 0
-                    )}
-                  </p>
-                  <p className="text-blue-100 text-xs mt-1">all time</p>
-                </div>
-                <BookOpen className="w-8 h-8 text-blue-200" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Main Content */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Upcoming Assignments */}
-            <Card className="shadow-lg border-0">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-xl font-bold text-gray-900 dark:text-white">Upcoming Assignments</CardTitle>
-                  <Button variant="outline" size="sm">View All</Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {loading ? (
-                    // Loading skeleton
-                    Array.from({ length: 3 }).map((_, index) => (
-                      <div key={index} className="p-4 bg-gray-50 dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-700">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="space-y-2">
-                            <Skeleton className="h-5 w-32" />
-                            <Skeleton className="h-4 w-24" />
-                          </div>
-                          <Skeleton className="h-6 w-16" />
-                        </div>
-                        <Skeleton className="h-8 w-full mt-3" />
-                      </div>
-                    ))
-                  ) : displayAssignments.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500 dark:text-slate-400">
-                      <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                      <p>No assignments yet</p>
-                      <p className="text-sm">Your assignments will appear here</p>
-                    </div>
-                  ) : (
-                    displayAssignments.slice(0, 5).map((assignment) => {
-                      const dueDate = new Date(assignment.dueDate)
-                      const now = new Date()
-                      const isToday = dueDate.toDateString() === now.toDateString()
-                      const isTomorrow = dueDate.toDateString() === new Date(now.getTime() + 86400000).toDateString()
-                      const dueDateLabel = isToday ? 'Today' : isTomorrow ? 'Tomorrow' : dueDate.toLocaleDateString()
-                      const progress = assignment.questionCount > 0
-                        ? Math.round((assignment.completedQuestions / assignment.questionCount) * 100)
-                        : 0
-
-                      return (
-                        <div key={assignment.id} className="p-4 bg-gray-50 dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-700">
-                          <div className="flex items-center justify-between mb-3">
-                            <div>
-                              <h3 className="font-semibold text-gray-900 dark:text-white">{assignment.title}</h3>
-                              <p className="text-sm text-gray-600 dark:text-slate-400">{assignment.subject}</p>
-                            </div>
-                            <div className="text-right">
-                              <Badge
-                                variant={isToday ? 'destructive' : isTomorrow ? 'default' : 'secondary'}
-                                className="mb-1"
-                              >
-                                {dueDateLabel}
-                              </Badge>
-                              <p className="text-xs text-gray-500 dark:text-slate-500">
-                                {assignment.questionCount} questions
-                              </p>
-                            </div>
-                          </div>
-                          {progress > 0 && (
-                            <div className="space-y-1">
-                              <div className="flex justify-between text-sm">
-                                <span className="text-gray-600 dark:text-slate-400">Progress</span>
-                                <span className="text-gray-900 dark:text-white">{progress}%</span>
+                      workingAssignments.map((assignment) => (
+                        <Card key={assignment.id} className="transition-colors hover:border-primary/50">
+                          <CardContent className="space-y-4 p-5">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <Badge variant="secondary" className="mb-2">{assignment.subject}</Badge>
+                                <p className="truncate text-lg font-semibold">{assignment.title}</p>
+                                <p className="text-sm text-muted-foreground">{formatRelativeDueDate(assignment.dueDate)} - {formatDueDate(assignment.dueDate)}</p>
                               </div>
-                              <Progress value={progress} className="h-2" />
+                              <div className="text-right">
+                                <p className="text-xs font-semibold text-primary">{assignment.progress}% done</p>
+                                <p className="text-xs text-muted-foreground">{assignment.questionCount} questions</p>
+                              </div>
                             </div>
-                          )}
-                          <div className="flex justify-between items-center mt-3">
-                            <Badge
-                              variant={assignment.status === 'pending' ? 'outline' : assignment.status === 'completed' ? 'default' : 'secondary'}
-                              className="text-xs"
+
+                            <Progress value={assignment.progress} className="h-2" />
+
+                            <div className="flex items-center justify-between">
+                              <Badge variant={getStatusBadgeVariant(assignment.status)}>
+                                {assignment.status.replace("_", " ")}
+                              </Badge>
+                              <Button size="sm" variant="outline" onClick={() => handleStartAssignment(assignment)}>
+                                {assignment.progress > 0 ? "Continue" : "Start"}
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))
+                    )}
+                  </div>
+                </section>
+
+                <section>
+                  <h2 className="mb-4 font-lufga text-xl font-semibold">Weekly Schedule</h2>
+                  <Card>
+                    <CardContent className="p-5">
+                      <div className="grid grid-cols-7 gap-2">
+                        {weekDays.map((day) => (
+                          <div key={day.label} className="text-center">
+                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{day.label}</p>
+                            <div
+                              className={cn(
+                                "relative rounded-lg border px-1 py-2",
+                                day.isToday ? "border-primary bg-primary text-primary-foreground" : "border-border",
+                                day.isWeekend && !day.isToday && "opacity-70"
+                              )}
                             >
-                              {assignment.status === 'pending' ? 'Not Started' : assignment.status === 'completed' ? 'Completed' : 'In Progress'}
-                            </Badge>
-                            <Button size="sm" variant="outline" onClick={() => startAssignment(assignment.id)}>
-                              {assignment.status === 'pending' ? 'Start' : assignment.status === 'completed' ? 'Review' : 'Continue'}
-                            </Button>
+                              <p className="text-lg font-bold">{day.date.getDate()}</p>
+                              {day.isToday && <p className="text-[9px] font-bold uppercase">Today</p>}
+                              {day.hasTask && !day.isToday && <span className="absolute bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-primary" />}
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Subject Progress */}
-            <Card className="shadow-lg border-0">
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold">Subject Progress</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {analyticsLoading ? (
-                    // Loading skeleton
-                    Array.from({ length: 3 }).map((_, index) => (
-                      <div key={index} className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Skeleton className="h-5 w-24" />
-                          <Skeleton className="h-5 w-16" />
-                        </div>
-                        <Skeleton className="h-2 w-full" />
+                        ))}
                       </div>
-                    ))
-                  ) : !progressAnalytics?.subject_performance?.length ? (
-                    <div className="text-center py-6 text-gray-500 dark:text-slate-400">
-                      <Target className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No subject data yet</p>
-                    </div>
-                  ) : (
-                    progressAnalytics.subject_performance.map((subject, index) => {
-                      const colors = ['bg-blue-500', 'bg-green-500', 'bg-primary', 'bg-orange-500', 'bg-pink-500']
-                      const color = colors[index % colors.length]
-                      const grade = subject.score >= 90 ? 'A' : subject.score >= 85 ? 'A-' : subject.score >= 80 ? 'B+' : subject.score >= 75 ? 'B' : 'C'
 
-                      return (
-                        <div key={index} className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-3">
-                              <div className={`w-3 h-3 rounded-full ${color}`}></div>
-                              <span className="font-medium text-gray-900 dark:text-white">{subject.subject}</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Badge variant="outline" className="text-xs">{grade}</Badge>
-                              <span className="text-sm text-gray-600 dark:text-slate-400">{subject.score}%</span>
+                      <div className="mt-6 space-y-3">
+                        {weeklyEvents.map((event, index) => (
+                          <div
+                            key={`${event.title}-${index}`}
+                            className={cn(
+                              "rounded-lg border-l-4 bg-muted/35 p-3",
+                              event.tone === "primary" ? "border-primary" : "border-destructive"
+                            )}
+                          >
+                            <div className="flex items-start gap-4">
+                              <p className="w-20 text-sm font-semibold">{event.time}</p>
+                              <div>
+                                <p className="text-sm font-semibold">{event.title}</p>
+                                <p className="text-xs text-muted-foreground">{event.context}</p>
+                              </div>
                             </div>
                           </div>
-                          <Progress value={subject.score} className="h-2" />
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </section>
+              </div>
+
+              <div className="space-y-8">
+                <section>
+                  <h2 className="mb-4 font-lufga text-xl font-semibold">Recent Activity</h2>
+                  <Card>
+                    <CardContent className="p-5">
+                      {analyticsLoading ? (
+                        <div className="space-y-4">
+                          {Array.from({ length: 3 }).map((_, index) => (
+                            <div key={index} className="space-y-2"><Skeleton className="h-4 w-36" /><Skeleton className="h-3 w-full" /></div>
+                          ))}
                         </div>
-                      )
-                    })
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+                      ) : (
+                        <div className="space-y-5">
+                          {recentActivity.map((item, index) => (
+                            <div key={`${item.title}-${index}`} className="relative pl-7">
+                              <span
+                                className={cn(
+                                  "absolute left-0 top-1 h-4 w-4 rounded-full",
+                                  item.tone === "success" && "bg-green-500/30",
+                                  item.tone === "primary" && "bg-primary/30",
+                                  item.tone === "info" && "bg-blue-500/30"
+                                )}
+                              />
+                              <p className="text-sm font-semibold">{item.title}</p>
+                              <p className="text-xs text-muted-foreground">{item.detail}</p>
+                              <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">{item.stamp}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </section>
 
-          {/* Right Sidebar */}
-          <div className="space-y-6">
-            {/* Recent Achievements */}
-            <Card className="shadow-lg border-0 bg-white dark:bg-slate-900">
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold flex items-center">
-                  <Trophy className="w-5 h-5 mr-2 text-yellow-500" />
-                  Recent Achievements
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-6 text-gray-500 dark:text-slate-400">
-                  <Trophy className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No achievements yet</p>
-                  <p className="text-xs mt-1">Complete assignments to earn achievements!</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recent Grades */}
-            <Card className="shadow-lg border-0 bg-white dark:bg-slate-900">
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold flex items-center">
-                  <Target className="w-5 h-5 mr-2 text-blue-600" />
-                  Recent Grades
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {analyticsLoading ? (
+                <section>
+                  <h2 className="mb-4 font-lufga text-xl font-semibold">Top Mentors</h2>
                   <div className="space-y-3">
-                    {Array.from({ length: 3 }).map((_, index) => (
-                      <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                        <div className="space-y-1">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-3 w-16" />
-                        </div>
-                        <Skeleton className="h-6 w-10" />
-                      </div>
+                    {MENTOR_PLACEHOLDERS.map((mentor) => (
+                      <Card key={mentor.name} className="transition-colors hover:border-primary/60">
+                        <CardContent className="flex items-center gap-4 p-3">
+                          <Avatar className="h-11 w-11">
+                            <AvatarFallback>{mentor.name.split(" ").map((part) => part[0]).join("")}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold">{mentor.name}</p>
+                            <p className="text-[10px] uppercase tracking-wide text-primary">{mentor.role}</p>
+                          </div>
+                          <Button variant="ghost" size="sm">
+                            <Users className="h-4 w-4" />
+                          </Button>
+                        </CardContent>
+                      </Card>
                     ))}
                   </div>
-                ) : !progressAnalytics?.recent_submissions?.length ? (
-                  <div className="text-center py-6 text-gray-500 dark:text-slate-400">
-                    <Target className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No grades yet</p>
-                    <p className="text-xs mt-1">Complete assignments to see your grades</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {progressAnalytics.recent_submissions.slice(0, 4).map((submission: any, index: number) => {
-                      const score = submission.score || 0
-                      const grade = score >= 90 ? 'A' : score >= 85 ? 'A-' : score >= 80 ? 'B+' : score >= 75 ? 'B' : score >= 70 ? 'B-' : 'C'
-                      const colorClass = score >= 85
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-                        : score >= 75
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
-                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                </section>
 
-                      return (
-                        <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-800 rounded-lg hover:shadow-md transition-all duration-200">
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-900 dark:text-white text-sm">{submission.assignment_title || 'Assignment'}</p>
-                            <p className="text-xs text-gray-600 dark:text-slate-400">{submission.subject || 'Subject'}</p>
+                <section>
+                  <Card className="bg-gradient-to-br from-primary/20 via-primary/10 to-background">
+                    <CardHeader>
+                      <CardTitle className="font-lufga text-lg">Subject Performance</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {analyticsLoading ? (
+                        <Skeleton className="h-20 w-full" />
+                      ) : progressAnalytics?.subject_performance?.length ? (
+                        progressAnalytics.subject_performance.slice(0, 3).map((subject: any, index: number) => (
+                          <div key={`${subject.subject}-${index}`} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <p className="font-medium">{subject.subject}</p>
+                              <p className="text-muted-foreground">{subject.score}%</p>
+                            </div>
+                            <Progress value={subject.score || 0} className="h-2" />
                           </div>
-                          <div className="text-right">
-                            <Badge className={`mb-1 border-0 ${colorClass}`}>
-                              {grade}
-                            </Badge>
-                            <p className="text-xs text-gray-500 dark:text-slate-500 font-medium">{score}%</p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Quick Actions */}
-            <Card className="shadow-lg border-0 bg-white dark:bg-slate-900">
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold flex items-center">
-                  <Star className="w-5 h-5 mr-2 text-purple-600" />
-                  Quick Actions
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Button className="w-full justify-start bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white border-0 shadow-md hover:shadow-lg transition-all duration-200">
-                  <BookOpen className="w-4 h-4 mr-2" />
-                  Start Study Session
-                </Button>
-                <Button variant="outline" className="w-full justify-start hover:bg-gray-50 dark:hover:bg-slate-800 transition-all duration-200">
-                  <Calendar className="w-4 h-4 mr-2" />
-                  View Schedule
-                </Button>
-                <Button variant="outline" className="w-full justify-start hover:bg-gray-50 dark:hover:bg-slate-800 transition-all duration-200">
-                  <Trophy className="w-4 h-4 mr-2" />
-                  View Achievements
-                </Button>
-                <Button variant="outline" className="w-full justify-start hover:bg-gray-50 dark:hover:bg-slate-800 transition-all duration-200">
-                  <Target className="w-4 h-4 mr-2" />
-                  Set Goals
-                </Button>
-              </CardContent>
-            </Card>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Complete assignments to unlock subject analytics.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </section>
+              </div>
+            </div>
           </div>
-        </div>
+        </main>
       </div>
     </div>
   )
