@@ -370,8 +370,15 @@ async def submit_answer(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Submit answer for a question in assignment"""
-    # TODO: Implement progress service
-    return {"message": "Submit answer endpoint - to be implemented"}
+    logger.warning(
+        "Submit answer endpoint called before implementation",
+        assignment_id=assignment_id,
+        student_id=current_user.clerk_id,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Answer submission is not available yet.",
+    )
 
 
 @router.get("/subject/{subject_id}/analytics", response_model=Dict[str, Any])
@@ -381,5 +388,12 @@ async def get_subject_analytics(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get analytics for a subject"""
-    # TODO: Implement progress service
-    return {"message": "Subject analytics endpoint - to be implemented"}
+    logger.warning(
+        "Subject analytics endpoint called before implementation",
+        subject_id=subject_id,
+        tutor_id=current_user.clerk_id,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Subject analytics is not available yet.",
+    )

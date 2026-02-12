@@ -62,7 +62,7 @@ export default function StudentOnboarding() {
       if (response.ok) {
         toast.success('Welcome to LearnTrack! 🎉')
         localStorage.setItem('onboarding_complete', 'true')
-        navigate('/student-dashboard')
+        navigate('/dashboard')
       } else {
         toast.error('Failed to save profile')
       }
@@ -76,7 +76,7 @@ export default function StudentOnboarding() {
 
   const handleSkip = () => {
     localStorage.setItem('onboarding_complete', 'true')
-    navigate('/student-dashboard')
+    navigate('/dashboard')
   }
 
   return (

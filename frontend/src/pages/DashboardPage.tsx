@@ -9,8 +9,6 @@ import { Card } from '@/components/ui/card'
 
 type DashboardView = 'tutor' | 'student' | 'parent'
 
-const CROSS_VIEW_CLERK_ID = 'user_33bbM70rwXsrbn1GWQTGORD9d8T'
-
 const VIEW_LABELS: Record<DashboardView, string> = {
   tutor: 'Tutor',
   student: 'Student',
@@ -24,7 +22,8 @@ export default function DashboardPage() {
 
   // Get user role from metadata (check both public and unsafe metadata)
   const userRole = (user?.publicMetadata?.role || user?.unsafeMetadata?.role) as string | undefined
-  const canSwitchAllViews = user?.id === CROSS_VIEW_CLERK_ID
+  const isSuperAdmin = userRole === 'super_admin' || Boolean(user?.publicMetadata?.is_super_admin || user?.unsafeMetadata?.is_super_admin)
+  const canSwitchAllViews = isSuperAdmin
 
   const initialView = useMemo<DashboardView>(() => {
     if (userRole === 'student' || userRole === 'parent' || userRole === 'tutor') {
