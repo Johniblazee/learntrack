@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -18,14 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Edit, Search, X, Users, UserPlus, RefreshCw, Loader2 } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
 import { useApiClient } from '@/lib/api-client'
-
-interface Student {
-  _id: string
-  clerk_id: string
-  name: string
-  email: string
-  avatar_url?: string
-}
+import { getStudentInitials, useGroupMembers } from './group-members-shared'
 
 interface Group {
   _id: string
@@ -53,13 +46,21 @@ export function EditGroupModal({
   const [description, setDescription] = useState('')
   const [imageUrl, setImageUrl] = useState<string>('')
   const [loading, setLoading] = useState(false)
-  const [loadingStudents, setLoadingStudents] = useState(false)
   const [regeneratingImage, setRegeneratingImage] = useState(false)
-  const [allStudents, setAllStudents] = useState<Student[]>([])
-  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([])
-  const [searchTerm, setSearchTerm] = useState('')
   const [showAddStudents, setShowAddStudents] = useState(false)
   const client = useApiClient()
+  const {
+    loadingStudents,
+    memberIds: selectedStudentIds,
+    setMemberIds: setSelectedStudentIds,
+    currentMembers,
+    filteredAvailableStudents,
+    searchTerm,
+    setSearchTerm,
+  } = useGroupMembers({
+    open,
+    initialMemberIds: group?.studentIds || [],
+  })
 
   // Fetch all students when modal opens
   useEffect(() => {
@@ -67,10 +68,6 @@ export function EditGroupModal({
       setName(group.name)
       setDescription(group.description || '')
       setImageUrl(group.imageUrl || '')
-      // Filter out any null/undefined values from studentIds
-      const validStudentIds = (group.studentIds || []).filter((id): id is string => id != null && id !== '')
-      setSelectedStudentIds(validStudentIds)
-      fetchAllStudents()
     }
   }, [open, group])
 
@@ -80,44 +77,7 @@ export function EditGroupModal({
       setSearchTerm('')
       setShowAddStudents(false)
     }
-  }, [open])
-
-  const fetchAllStudents = async () => {
-    try {
-      setLoadingStudents(true)
-      const response = await client.get('/students?per_page=100')
-      if (response.error) throw new Error(response.error)
-      setAllStudents(response.data?.items || [])
-    } catch (error) {
-      console.error('Failed to fetch students:', error)
-      toast.error('Failed to load students')
-    } finally {
-      setLoadingStudents(false)
-    }
-  }
-
-  // Get current members
-  const currentMembers = useMemo(() => {
-    return allStudents.filter(s => selectedStudentIds.includes(s._id))
-  }, [allStudents, selectedStudentIds])
-
-  // Get available students (not in group)
-  const availableStudents = useMemo(() => {
-    return allStudents.filter(s => !selectedStudentIds.includes(s._id))
-  }, [allStudents, selectedStudentIds])
-
-  // Filter available students by search
-  const filteredAvailableStudents = useMemo(() => {
-    if (!searchTerm.trim()) return availableStudents
-    const term = searchTerm.toLowerCase()
-    return availableStudents.filter(
-      s => s.name.toLowerCase().includes(term) || s.email.toLowerCase().includes(term)
-    )
-  }, [availableStudents, searchTerm])
-
-  const getInitials = (name: string) => {
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-  }
+  }, [open, setSearchTerm])
 
   const handleAddStudent = (studentId: string) => {
     setSelectedStudentIds(prev => [...prev, studentId])
@@ -332,12 +292,12 @@ export function EditGroupModal({
                             checked={false}
                             onCheckedChange={() => handleAddStudent(student._id)}
                           />
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={student.avatar_url} alt={student.name} />
-                            <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                              {getInitials(student.name)}
-                            </AvatarFallback>
-                          </Avatar>
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={student.avatar_url} alt={student.name} />
+                              <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                                {getStudentInitials(student.name)}
+                              </AvatarFallback>
+                            </Avatar>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{student.name}</p>
                             <p className="text-xs text-muted-foreground truncate">{student.email}</p>
@@ -380,7 +340,7 @@ export function EditGroupModal({
                       <Avatar className="h-10 w-10">
                         <AvatarImage src={student.avatar_url} alt={student.name} />
                         <AvatarFallback className="bg-primary/10 text-primary">
-                          {getInitials(student.name)}
+                          {getStudentInitials(student.name)}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
@@ -421,4 +381,3 @@ export function EditGroupModal({
     </Dialog>
   )
 }
-

@@ -1,20 +1,17 @@
 import { useState } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Progress } from '@/components/ui/progress'
 import { toast } from '@/contexts/ToastContext'
 import { BookOpen, User, CheckCircle } from 'lucide-react'
-import { API_BASE_URL } from '@/lib/config'
+import { OnboardingShell } from './onboarding-shared'
+import { completeOnboarding, saveOnboardingProfile, useOnboardingSteps } from './onboarding-utils'
 
 export default function StudentOnboarding() {
   const { getToken } = useAuth()
   const { user } = useUser()
   const navigate = useNavigate()
-  const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
 
   const [formData, setFormData] = useState({
@@ -24,45 +21,28 @@ export default function StudentOnboarding() {
   })
 
   const totalSteps = 2
-  const progress = (step / totalSteps) * 100
+  const { step, handleNext, handleBack } = useOnboardingSteps({
+    totalSteps,
+    validateStep: (currentStep) => {
+      if (currentStep === 1 && !formData.displayName) {
+        return 'Please enter your name'
+      }
 
-  const handleNext = () => {
-    if (step === 1 && !formData.displayName) {
-      toast.error('Please enter your name')
-      return
-    }
-    if (step < totalSteps) {
-      setStep(step + 1)
-    }
-  }
-
-  const handleBack = () => {
-    if (step > 1) {
-      setStep(step - 1)
-    }
-  }
+      return null
+    },
+  })
 
   const handleComplete = async () => {
     try {
       setLoading(true)
-      const token = await getToken()
-
-      const response = await fetch(`${API_BASE_URL}/users/me`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: formData.displayName,
-          grade: formData.grade,
-        })
+      const responseOk = await saveOnboardingProfile(getToken, {
+        name: formData.displayName,
+        grade: formData.grade,
       })
 
-      if (response.ok) {
+      if (responseOk) {
         toast.success('Welcome to LearnTrack! 🎉')
-        localStorage.setItem('onboarding_complete', 'true')
-        navigate('/dashboard')
+        completeOnboarding(navigate)
       } else {
         toast.error('Failed to save profile')
       }
@@ -75,30 +55,25 @@ export default function StudentOnboarding() {
   }
 
   const handleSkip = () => {
-    localStorage.setItem('onboarding_complete', 'true')
-    navigate('/dashboard')
+    completeOnboarding(navigate)
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-4">
-      <Card className="w-full max-w-2xl shadow-xl">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center">
-            <BookOpen className="w-8 h-8 text-white" />
-          </div>
-          <CardTitle className="text-3xl font-bold">Welcome to LearnTrack!</CardTitle>
-          <CardDescription className="text-lg">
-            Let's set up your student profile
-          </CardDescription>
-          <div className="mt-4">
-            <Progress value={progress} className="h-2" />
-            <p className="text-sm text-gray-600 dark:text-slate-400 mt-2">
-              Step {step} of {totalSteps}
-            </p>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-6">
+    <OnboardingShell
+      backgroundClassName="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-slate-900 dark:to-slate-800"
+      title="Welcome to LearnTrack!"
+      description="Let's set up your student profile"
+      icon={BookOpen}
+      iconContainerClassName="bg-blue-600"
+      step={step}
+      totalSteps={totalSteps}
+      loading={loading}
+      nextButtonClassName="bg-blue-600 hover:bg-blue-700"
+      onBack={handleBack}
+      onNext={handleNext}
+      onComplete={handleComplete}
+      onSkip={handleSkip}
+    >
           {/* Step 1: Display Name */}
           {step === 1 && (
             <div className="space-y-4 animate-in fade-in duration-300">
@@ -121,7 +96,9 @@ export default function StudentOnboarding() {
                 <Input
                   id="displayName"
                   value={formData.displayName}
-                  onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, displayName: e.target.value })
+                  }
                   placeholder="e.g., John Smith"
                   className="text-lg"
                   autoFocus
@@ -162,7 +139,9 @@ export default function StudentOnboarding() {
                 <Input
                   id="interests"
                   value={formData.interests}
-                  onChange={(e) => setFormData({ ...formData, interests: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, interests: e.target.value })
+                  }
                   placeholder="e.g., Math, Science, Sports, Music"
                 />
                 <p className="text-xs text-gray-500 dark:text-slate-400">
@@ -186,39 +165,7 @@ export default function StudentOnboarding() {
               </div>
             </div>
           )}
-
-          {/* Navigation Buttons */}
-          <div className="flex items-center justify-between pt-6 border-t border-gray-200 dark:border-slate-700">
-            <div>
-              {step > 1 && (
-                <Button variant="outline" onClick={handleBack} disabled={loading}>
-                  Back
-                </Button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" onClick={handleSkip} disabled={loading}>
-                Skip for now
-              </Button>
-              {step < totalSteps ? (
-                <Button onClick={handleNext} className="bg-blue-600 hover:bg-blue-700">
-                  Next
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleComplete}
-                  disabled={loading}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {loading ? 'Saving...' : 'Complete Setup'}
-                </Button>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    </OnboardingShell>
   )
 }
 

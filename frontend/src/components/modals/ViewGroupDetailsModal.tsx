@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -16,14 +16,7 @@ import { Users, Calendar, UserPlus, Search, X, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
-
-interface Student {
-  _id: string
-  clerk_id: string
-  name: string
-  email: string
-  avatar_url?: string
-}
+import { getStudentInitials, useGroupMembers } from './group-members-shared'
 
 interface Group {
   _id: string
@@ -48,23 +41,22 @@ export function ViewGroupDetailsModal({
   group,
   onGroupUpdated
 }: ViewGroupDetailsModalProps) {
-  const [loadingStudents, setLoadingStudents] = useState(false)
-  const [allStudents, setAllStudents] = useState<Student[]>([])
-  const [memberIds, setMemberIds] = useState<string[]>([])
   const [showAddStudents, setShowAddStudents] = useState(false)
-  const [searchTerm, setSearchTerm] = useState('')
   const [saving, setSaving] = useState(false)
   const client = useApiClient()
-
-  // Fetch students when modal opens
-  useEffect(() => {
-    if (open && group) {
-      // Filter out any null/undefined values from studentIds
-      const validStudentIds = (group.studentIds || []).filter((id): id is string => id != null && id !== '')
-      setMemberIds(validStudentIds)
-      fetchAllStudents()
-    }
-  }, [open, group])
+  const {
+    allStudents,
+    loadingStudents,
+    memberIds,
+    setMemberIds,
+    currentMembers,
+    filteredAvailableStudents,
+    searchTerm,
+    setSearchTerm,
+  } = useGroupMembers({
+    open,
+    initialMemberIds: group?.studentIds || [],
+  })
 
   // Reset state when modal closes
   useEffect(() => {
@@ -72,48 +64,12 @@ export function ViewGroupDetailsModal({
       setShowAddStudents(false)
       setSearchTerm('')
     }
-  }, [open])
-
-  const fetchAllStudents = async () => {
-    try {
-      setLoadingStudents(true)
-      const response = await client.get('/students?per_page=100')
-      if (response.error) throw new Error(response.error)
-      setAllStudents(response.data?.items || [])
-    } catch (error) {
-      console.error('Failed to fetch students:', error)
-      toast.error('Failed to load students')
-    } finally {
-      setLoadingStudents(false)
-    }
-  }
-
-  // Get current members with full data
-  const currentMembers = useMemo(() => {
-    return allStudents.filter(s => memberIds.includes(s._id))
-  }, [allStudents, memberIds])
-
-  // Get available students (not in group)
-  const availableStudents = useMemo(() => {
-    return allStudents.filter(s => !memberIds.includes(s._id))
-  }, [allStudents, memberIds])
-
-  // Filter by search
-  const filteredAvailableStudents = useMemo(() => {
-    if (!searchTerm.trim()) return availableStudents
-    const term = searchTerm.toLowerCase()
-    return availableStudents.filter(
-      s => s.name.toLowerCase().includes(term) || s.email.toLowerCase().includes(term)
-    )
-  }, [availableStudents, searchTerm])
-
-  const getInitials = (name: string) => {
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-  }
+  }, [open, setSearchTerm])
 
   const handleAddStudent = async (studentId: string) => {
     if (!group) return
 
+    const previousMemberIds = [...memberIds]
     const newMemberIds = [...memberIds, studentId]
     setMemberIds(newMemberIds)
 
@@ -130,7 +86,7 @@ export function ViewGroupDetailsModal({
       onGroupUpdated?.()
     } catch (error: any) {
       // Revert on error
-      setMemberIds(memberIds)
+      setMemberIds(previousMemberIds)
       toast.error('Failed to add student', {
         description: error.message
       })
@@ -142,6 +98,7 @@ export function ViewGroupDetailsModal({
   const handleRemoveStudent = async (studentId: string) => {
     if (!group) return
 
+    const previousMemberIds = [...memberIds]
     const newMemberIds = memberIds.filter(id => id !== studentId)
     setMemberIds(newMemberIds)
 
@@ -158,7 +115,7 @@ export function ViewGroupDetailsModal({
       onGroupUpdated?.()
     } catch (error: any) {
       // Revert on error
-      setMemberIds([...memberIds, studentId])
+      setMemberIds(previousMemberIds)
       toast.error('Failed to remove student', {
         description: error.message
       })
@@ -268,12 +225,12 @@ export function ViewGroupDetailsModal({
                             disabled={saving}
                             onCheckedChange={() => handleAddStudent(student._id)}
                           />
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={student.avatar_url} alt={student.name} />
-                            <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                              {getInitials(student.name)}
-                            </AvatarFallback>
-                          </Avatar>
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={student.avatar_url} alt={student.name} />
+                              <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                                {getStudentInitials(student.name)}
+                              </AvatarFallback>
+                            </Avatar>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{student.name}</p>
                             <p className="text-xs text-muted-foreground truncate">{student.email}</p>
@@ -310,7 +267,7 @@ export function ViewGroupDetailsModal({
                       <Avatar className="h-10 w-10">
                         <AvatarImage src={student.avatar_url} alt={student.name} />
                         <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-                          {getInitials(student.name)}
+                          {getStudentInitials(student.name)}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
@@ -343,4 +300,3 @@ export function ViewGroupDetailsModal({
     </Dialog>
   )
 }
-
