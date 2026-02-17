@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
+import { useNavigate } from 'react-router-dom'
 import { AdminMetrics } from '../../components/admin/AdminMetrics'
-import { Activity, RefreshCw } from 'lucide-react'
+import { Activity, AlertTriangle, DollarSign, RefreshCw, Server, Sparkles } from 'lucide-react'
 import { API_BASE_URL } from '@/lib/config'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface SystemMetrics {
   total_tutors: number
@@ -24,17 +30,109 @@ interface SystemMetrics {
   metrics_updated_at: string
 }
 
+interface UsageTotals {
+  total_tenants: number
+  tenants_with_usage: number
+  total_requests: number
+  total_tokens: number
+  total_cost_usd: number
+  average_cost_per_request_usd: number
+}
+
+interface UsageByProvider {
+  provider: string
+  request_count: number
+  total_tokens: number
+  total_cost_usd: number
+}
+
+interface UsageByOperation {
+  operation: string
+  request_count: number
+  total_tokens: number
+  total_cost_usd: number
+}
+
+interface TopTenantUsage {
+  tenant_id: string
+  tenant_name: string
+  tenant_email?: string
+  request_count: number
+  total_tokens: number
+  total_cost_usd: number
+  last_request_at?: string
+}
+
+interface QuotaHealth {
+  total_quotas: number
+  active_quotas: number
+  tenants_near_or_over_limit: number
+  tenants_over_daily_limit: number
+  tenants_over_monthly_limit: number
+}
+
+interface AdminUsageSummary {
+  period_days: number
+  period_start: string
+  period_end: string
+  generated_at: string
+  totals: UsageTotals
+  usage_by_provider: UsageByProvider[]
+  usage_by_operation: UsageByOperation[]
+  top_tenants: TopTenantUsage[]
+  quota_health: QuotaHealth
+}
+
+const numberFormatter = new Intl.NumberFormat()
+const compactNumberFormatter = new Intl.NumberFormat(undefined, {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+const currencyFormatter = new Intl.NumberFormat(undefined, {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 2,
+})
+
+function formatNumber(value: number): string {
+  return numberFormatter.format(value)
+}
+
+function formatCompactNumber(value: number): string {
+  return compactNumberFormatter.format(value)
+}
+
+function formatCurrency(value: number): string {
+  return currencyFormatter.format(value)
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) return 'N/A'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'N/A'
+  return date.toLocaleString()
+}
+
 export function AdminDashboardPage() {
   const { getToken } = useAuth()
+  const navigate = useNavigate()
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null)
+  const [usageSummary, setUsageSummary] = useState<AdminUsageSummary | null>(null)
+  const [usageWindowDays, setUsageWindowDays] = useState('30')
   const [isLoading, setIsLoading] = useState(true)
+  const [isUsageLoading, setIsUsageLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [usageError, setUsageError] = useState<string | null>(null)
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
     try {
       setIsLoading(true)
       setError(null)
       const token = await getToken()
+
+      if (!token) {
+        throw new Error('Unable to get authentication token')
+      }
       
       const response = await fetch(`${API_BASE_URL}/admin/dashboard/metrics`, {
         headers: {
@@ -54,11 +152,52 @@ export function AdminDashboardPage() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [getToken])
+
+  const fetchUsageSummary = useCallback(async (days: number) => {
+    try {
+      setIsUsageLoading(true)
+      setUsageError(null)
+
+      const token = await getToken()
+      if (!token) {
+        throw new Error('Unable to get authentication token')
+      }
+
+      const response = await fetch(`${API_BASE_URL}/cost-tracking/admin/usage-summary?days=${days}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch usage summary: ${response.status}`)
+      }
+
+      const data = await response.json()
+      setUsageSummary(data)
+    } catch (err) {
+      setUsageError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setIsUsageLoading(false)
+    }
+  }, [getToken])
+
+  const refreshAll = useCallback(async () => {
+    const days = Number(usageWindowDays)
+    await Promise.all([fetchMetrics(), fetchUsageSummary(days)])
+  }, [fetchMetrics, fetchUsageSummary, usageWindowDays])
 
   useEffect(() => {
     fetchMetrics()
-  }, [])
+  }, [fetchMetrics])
+
+  useEffect(() => {
+    fetchUsageSummary(Number(usageWindowDays))
+  }, [fetchUsageSummary, usageWindowDays])
+
+  const isRefreshing = isLoading || isUsageLoading
 
   return (
     <div className="space-y-6">
@@ -70,14 +209,14 @@ export function AdminDashboardPage() {
             System-wide metrics and statistics
           </p>
         </div>
-        <button
-          onClick={fetchMetrics}
-          disabled={isLoading}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        <Button
+          onClick={refreshAll}
+          disabled={isRefreshing}
+          className="flex items-center gap-2"
         >
-          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           Refresh
-        </button>
+        </Button>
       </div>
 
       {/* Quick Stats Banner */}
@@ -95,6 +234,200 @@ export function AdminDashboardPage() {
 
       {/* Metrics Grid */}
       <AdminMetrics metrics={metrics} isLoading={isLoading} error={error} />
+
+      {/* AI Usage Summary */}
+      <Card className="border border-border">
+        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              AI Usage Summary
+            </CardTitle>
+            <CardDescription>
+              Cross-tenant usage analytics from the cost tracking service.
+            </CardDescription>
+          </div>
+          <Select value={usageWindowDays} onValueChange={setUsageWindowDays}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Select period" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">Last 7 days</SelectItem>
+              <SelectItem value="30">Last 30 days</SelectItem>
+              <SelectItem value="90">Last 90 days</SelectItem>
+              <SelectItem value="365">Last 365 days</SelectItem>
+            </SelectContent>
+          </Select>
+        </CardHeader>
+
+        <CardContent className="space-y-6">
+          {isUsageLoading && !usageSummary ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <Skeleton key={index} className="h-24 w-full" />
+                ))}
+              </div>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <Skeleton className="h-56 w-full" />
+                <Skeleton className="h-56 w-full" />
+              </div>
+              <Skeleton className="h-60 w-full" />
+            </div>
+          ) : usageError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
+              Failed to load AI usage summary: {usageError}
+            </div>
+          ) : usageSummary ? (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Total Cost</p>
+                  <p className="mt-2 text-2xl font-bold text-foreground">{formatCurrency(usageSummary.totals.total_cost_usd)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Avg/request: {formatCurrency(usageSummary.totals.average_cost_per_request_usd)}</p>
+                </div>
+
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Total Requests</p>
+                  <p className="mt-2 text-2xl font-bold text-foreground">{formatNumber(usageSummary.totals.total_requests)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Tokens: {formatCompactNumber(usageSummary.totals.total_tokens)}</p>
+                </div>
+
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Tenants with Usage</p>
+                  <p className="mt-2 text-2xl font-bold text-foreground">{formatNumber(usageSummary.totals.tenants_with_usage)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">of {formatNumber(usageSummary.totals.total_tenants)} total tenants</p>
+                </div>
+
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Quota Risk</p>
+                  <p className="mt-2 text-2xl font-bold text-foreground">{formatNumber(usageSummary.quota_health.tenants_near_or_over_limit)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">tenants near/over configured threshold</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-border p-4">
+                  <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <DollarSign className="h-4 w-4 text-primary" />
+                    Usage by Provider
+                  </h4>
+                  <div className="space-y-3">
+                    {usageSummary.usage_by_provider.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No provider usage found for this period.</p>
+                    ) : (
+                      usageSummary.usage_by_provider.slice(0, 6).map((provider, index) => (
+                        <div key={`${provider.provider}-${index}`} className="flex items-center justify-between gap-3 text-sm">
+                          <div>
+                            <p className="font-medium text-foreground">{provider.provider}</p>
+                            <p className="text-xs text-muted-foreground">{formatNumber(provider.request_count)} requests</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-foreground">{formatCurrency(provider.total_cost_usd)}</p>
+                            <p className="text-xs text-muted-foreground">{formatCompactNumber(provider.total_tokens)} tokens</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border p-4">
+                  <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <Server className="h-4 w-4 text-primary" />
+                    Usage by Operation
+                  </h4>
+                  <div className="space-y-3">
+                    {usageSummary.usage_by_operation.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No operation usage found for this period.</p>
+                    ) : (
+                      usageSummary.usage_by_operation.slice(0, 6).map((operation, index) => (
+                        <div key={`${operation.operation}-${index}`} className="flex items-center justify-between gap-3 text-sm">
+                          <div>
+                            <p className="font-medium text-foreground">{operation.operation}</p>
+                            <p className="text-xs text-muted-foreground">{formatNumber(operation.request_count)} requests</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-foreground">{formatCurrency(operation.total_cost_usd)}</p>
+                            <p className="text-xs text-muted-foreground">{formatCompactNumber(operation.total_tokens)} tokens</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-semibold text-foreground">Top Tenant Usage</h4>
+                  <Badge variant="outline">Top {Math.min(usageSummary.top_tenants.length, 10)}</Badge>
+                </div>
+
+                {usageSummary.top_tenants.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No tenant usage found for this period.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {usageSummary.top_tenants.slice(0, 8).map((tenant) => (
+                      <div key={tenant.tenant_id} className="rounded-lg border border-border p-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="font-medium text-foreground">{tenant.tenant_name}</p>
+                            <p className="text-xs text-muted-foreground">{tenant.tenant_email || tenant.tenant_id}</p>
+                          </div>
+                          <div className="text-left sm:text-right">
+                            <p className="font-semibold text-foreground">{formatCurrency(tenant.total_cost_usd)}</p>
+                            <p className="text-xs text-muted-foreground">{formatNumber(tenant.request_count)} requests | {formatCompactNumber(tenant.total_tokens)} tokens</p>
+                            <p className="text-[11px] text-muted-foreground">Last request: {formatDateTime(tenant.last_request_at)}</p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="mt-2"
+                              onClick={() => navigate(`/admin/tenants/${tenant.tenant_id}`)}
+                            >
+                              View Tenant
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-border p-4">
+                <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Quota Health
+                </h4>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Total Quotas</p>
+                    <p className="mt-1 text-lg font-semibold">{formatNumber(usageSummary.quota_health.total_quotas)}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Active Quotas</p>
+                    <p className="mt-1 text-lg font-semibold">{formatNumber(usageSummary.quota_health.active_quotas)}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Over Daily Limit</p>
+                    <p className="mt-1 text-lg font-semibold text-amber-600">{formatNumber(usageSummary.quota_health.tenants_over_daily_limit)}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Over Monthly Limit</p>
+                    <p className="mt-1 text-lg font-semibold text-red-600">{formatNumber(usageSummary.quota_health.tenants_over_monthly_limit)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Usage summary updated: {formatDateTime(usageSummary.generated_at)}
+              </p>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       {/* Recent Activity Section */}
       <div className="bg-card rounded-xl p-6 shadow-sm border border-border">
