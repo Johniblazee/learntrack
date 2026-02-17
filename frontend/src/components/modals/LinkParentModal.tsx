@@ -18,9 +18,12 @@ import {
 } from '@/components/ui/select'
 import { UserPlus } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
+import { useApiClient } from '@/lib/api-client'
 
 interface Student {
-  _id: string
+  _id?: string
+  id?: string
+  clerk_id?: string
   name: string
 }
 
@@ -37,10 +40,15 @@ export function LinkParentModal({
   students,
   onParentLinked
 }: LinkParentModalProps) {
+  const client = useApiClient()
   const [parentEmail, setParentEmail] = useState('')
   const [parentName, setParentName] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const resolveStudentId = (student: Student): string => {
+    return String(student.clerk_id || student.id || student._id || '')
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,15 +57,17 @@ export function LinkParentModal({
 
     try {
       setLoading(true)
-      // TODO: Implement API call to link parent to student
-      console.log('Linking parent:', {
-        parentEmail,
-        parentName,
-        studentId: selectedStudentId
+      const response = await client.post(`/students/${selectedStudentId}/parents`, {
+        parent_email: parentEmail.trim(),
+        parent_name: parentName.trim(),
       })
 
-      toast.success('Invitation sent successfully!', {
-        description: `An invitation has been sent to ${parentEmail}.`
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      toast.success('Parent linked successfully', {
+        description: response.data?.message || `${parentName.trim()} is now linked.`
       })
 
       // Reset form
@@ -68,8 +78,12 @@ export function LinkParentModal({
       onParentLinked?.()
     } catch (error) {
       console.error('Failed to link parent:', error)
-      toast.error('Failed to send invitation', {
-        description: 'Please try again or contact support if the issue persists.'
+      const description =
+        error instanceof Error
+          ? error.message
+          : 'Please try again or contact support if the issue persists.'
+      toast.error('Failed to link parent', {
+        description
       })
     } finally {
       setLoading(false)
@@ -118,7 +132,10 @@ export function LinkParentModal({
               </SelectTrigger>
               <SelectContent>
                 {students.map((student) => (
-                  <SelectItem key={student._id} value={student._id}>
+                  <SelectItem
+                    key={resolveStudentId(student)}
+                    value={resolveStudentId(student)}
+                  >
                     {student.name}
                   </SelectItem>
                 ))}
@@ -154,4 +171,3 @@ export function LinkParentModal({
     </Dialog>
   )
 }
-

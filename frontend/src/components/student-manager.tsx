@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -26,6 +27,9 @@ import {
   Edit,
   Trash2,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Link,
   Search
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -36,6 +40,9 @@ import { ConfirmDeleteModal } from "@/components/modals/ConfirmDeleteModal"
 import { useStudents, useDeleteStudent } from "@/hooks/useQueries"
 import { Pagination } from "@/components/Pagination"
 import { StudentTableSkeleton } from "@/components/skeletons"
+import { LinkParentModal } from '@/components/modals/LinkParentModal'
+
+type SortField = 'lastActive' | 'progress' | null
 
 interface Student {
   id: string
@@ -43,6 +50,7 @@ interface Student {
   name: string
   email: string
   avatar?: string
+  updatedAt: string
   lastActive: string
   progress: number
   parentName?: string | null
@@ -54,10 +62,14 @@ export default function StudentManager() {
   const [itemsPerPage] = useState(10)
   const [sendMessageModalOpen, setSendMessageModalOpen] = useState(false)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
+  const [linkParentModalOpen, setLinkParentModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
+  const [sortField, setSortField] = useState<SortField>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   // Fetch students using React Query with pagination
   const { data, isLoading, isError, error } = useStudents(currentPage, itemsPerPage)
@@ -87,6 +99,7 @@ export default function StudentManager() {
     name: student.name,
     email: student.email,
     avatar: student.avatar_url || undefined,
+    updatedAt: student.updated_at,
     lastActive: formatLastActive(student.updated_at),
     progress: student.student_profile?.averageScore ?? 0,
     parentName: student.parent_name || null
@@ -99,23 +112,55 @@ export default function StudentManager() {
     }
   }, [isError])
 
-  // Filter students by search term (client-side filtering for now)
-  const filteredStudents = students.filter(student => {
+  // Filter and sort students client-side
+  const filteredStudents = useMemo(() => {
     const searchLower = searchTerm.toLowerCase()
-    return (
+
+    return students.filter((student) => (
       student.name.toLowerCase().includes(searchLower) ||
       student.email.toLowerCase().includes(searchLower)
-    )
-  })
+    ))
+  }, [students, searchTerm])
+
+  const sortedStudents = useMemo(() => {
+    if (!sortField) return filteredStudents
+
+    const sorted = [...filteredStudents].sort((a, b) => {
+      if (sortField === 'progress') {
+        return a.progress - b.progress
+      }
+
+      const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+      const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+      return timeA - timeB
+    })
+
+    return sortDirection === 'asc' ? sorted : sorted.reverse()
+  }, [filteredStudents, sortField, sortDirection])
 
   // Reset to page 1 when search term changes
   useEffect(() => {
     setCurrentPage(1)
   }, [searchTerm])
 
-  // Handle sort (TODO: Implement server-side sorting)
-  const handleSort = (_field: string) => {
-    toast.info('Sorting functionality coming soon')
+  const handleSort = (field: Exclude<SortField, null>) => {
+    if (sortField === field) {
+      setSortDirection((previous) => (previous === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+
+    setSortField(field)
+    setSortDirection('asc')
+  }
+
+  const getSortIcon = (field: Exclude<SortField, null>) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-3 w-3" />
+    }
+
+    return sortDirection === 'asc'
+      ? <ArrowUp className="h-3 w-3" />
+      : <ArrowDown className="h-3 w-3" />
   }
 
   // Handle delete student
@@ -162,6 +207,13 @@ export default function StudentManager() {
                 <UserPlus className="h-4 w-4 mr-2" />
                 Invite Student
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => setLinkParentModalOpen(true)}
+              >
+                <Link className="h-4 w-4 mr-2" />
+                Link Parent
+              </Button>
             </div>
           </div>
 
@@ -183,7 +235,7 @@ export default function StudentManager() {
                           className="flex items-center gap-1 hover:text-foreground transition-colors uppercase"
                         >
                           Last Active
-                          <ArrowUpDown className="h-3 w-3" />
+                          {getSortIcon('lastActive')}
                         </button>
                       </TableHead>
                       <TableHead>
@@ -192,7 +244,7 @@ export default function StudentManager() {
                           className="flex items-center gap-1 hover:text-foreground transition-colors uppercase"
                         >
                           Progress
-                          <ArrowUpDown className="h-3 w-3" />
+                          {getSortIcon('progress')}
                         </button>
                       </TableHead>
                       <TableHead className="text-right">Actions</TableHead>
@@ -216,14 +268,14 @@ export default function StudentManager() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    ) : filteredStudents.length === 0 ? (
+                    ) : sortedStudents.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
                           {searchTerm ? 'No students found matching your search' : 'No students found'}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredStudents.map((student) => (
+                      sortedStudents.map((student) => (
                         <TableRow
                           key={student.id}
                           className="hover:bg-muted/30 transition-colors cursor-pointer"
@@ -276,7 +328,7 @@ export default function StudentManager() {
                                   <MessageCircle className="h-4 w-4 mr-2" />
                                   Send a message
                                 </DropdownMenuItem>
-                                <DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => navigate(`/dashboard/students/${student.slug}`)}>
                                   <Edit className="h-4 w-4 mr-2" />
                                   Edit
                                 </DropdownMenuItem>
@@ -332,6 +384,18 @@ export default function StudentManager() {
         open={inviteModalOpen}
         onOpenChange={setInviteModalOpen}
         role="student"
+      />
+
+      <LinkParentModal
+        open={linkParentModalOpen}
+        onOpenChange={setLinkParentModalOpen}
+        students={students.map((student) => ({
+          _id: student.id,
+          name: student.name,
+        }))}
+        onParentLinked={() => {
+          queryClient.invalidateQueries({ queryKey: ['students'] })
+        }}
       />
 
       {/* Delete Confirmation Modal */}

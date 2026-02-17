@@ -9,8 +9,12 @@ from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from stable locations regardless of current working dir.
+# Priority: existing OS env vars > backend/.env > repo/.env
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT_DIR = BACKEND_DIR.parent
+load_dotenv(REPO_ROOT_DIR / ".env", override=False)
+load_dotenv(BACKEND_DIR / ".env", override=False)
 
 
 class Settings(BaseSettings):

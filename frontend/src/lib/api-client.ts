@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { API_BASE_URL } from './config'
 
@@ -174,7 +174,7 @@ export function useApiClient() {
     return getToken()
   }, [getToken])
 
-  return new ApiClient(memoizedGetToken)
+  return useMemo(() => new ApiClient(memoizedGetToken), [memoizedGetToken])
 }
 
 // Utility functions for common API operations

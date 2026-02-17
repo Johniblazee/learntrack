@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useClerk, useUser } from "@clerk/clerk-react"
+import { useNavigate } from "react-router-dom"
 import {
   Bell,
   BookOpen,
@@ -45,6 +46,8 @@ interface AssignmentCardData {
   progress: number
   status: string
 }
+
+type StudentNavSection = "dashboard" | "courses" | "assignments" | "grades" | "library"
 
 const MENTOR_PLACEHOLDERS = [
   { name: "Marcus Thorne", role: "Product Designer" },
@@ -128,10 +131,20 @@ function getWeekDays(datesWithTasks: Set<string>) {
 export default function StudentDashboard({ onBack }: StudentDashboardProps) {
   const { user } = useUser()
   const { signOut } = useClerk()
+  const navigate = useNavigate()
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null)
+  const [activeNavSection, setActiveNavSection] = useState<StudentNavSection>("dashboard")
+  const [showAllAssignments, setShowAllAssignments] = useState(false)
+
+  const contentScrollRef = useRef<HTMLDivElement | null>(null)
+  const assignmentsSectionRef = useRef<HTMLElement | null>(null)
+  const scheduleSectionRef = useRef<HTMLElement | null>(null)
+  const activitySectionRef = useRef<HTMLElement | null>(null)
+  const performanceSectionRef = useRef<HTMLElement | null>(null)
+  const mentorsSectionRef = useRef<HTMLElement | null>(null)
 
   const { data: rawAssignments = [], isLoading: assignmentsLoading } = useMyAssignments()
   const { data: dashboardStats, isLoading: statsLoading } = useStudentDashboardStats()
@@ -153,9 +166,11 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
     })
   }, [assignments, searchTerm])
 
-  const workingAssignments = visibleAssignments
-    .filter((item) => item.status !== "completed" && item.status !== "archived")
-    .slice(0, 3)
+  const actionableAssignments = visibleAssignments.filter(
+    (item) => item.status !== "completed" && item.status !== "archived"
+  )
+  const workingAssignments = showAllAssignments ? actionableAssignments : actionableAssignments.slice(0, 3)
+  const canExpandAssignments = actionableAssignments.length > 3
 
   const datesWithTasks = new Set(
     assignments
@@ -238,8 +253,51 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
     ]
   }, [progressAnalytics?.recent_submissions])
 
+  const scrollToSection = (
+    section: StudentNavSection,
+    sectionRef?: { current: HTMLElement | null }
+  ) => {
+    setActiveNavSection(section)
+    setSidebarOpen(false)
+
+    if (section === "dashboard") {
+      contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+      return
+    }
+
+    sectionRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
   const handleStartAssignment = (assignment: AssignmentCardData) => {
+    setActiveNavSection("assignments")
     setActiveAssignmentId(assignment.id)
+  }
+
+  const handleResumeLearningSession = () => {
+    const nextAssignment =
+      actionableAssignments.find((assignment) => assignment.progress > 0) || actionableAssignments[0]
+
+    if (nextAssignment) {
+      setActiveNavSection("assignments")
+      setActiveAssignmentId(nextAssignment.id)
+      return
+    }
+
+    scrollToSection("assignments", assignmentsSectionRef)
+  }
+
+  const handleToggleAssignmentsView = () => {
+    if (!canExpandAssignments) {
+      scrollToSection("assignments", assignmentsSectionRef)
+      return
+    }
+
+    setShowAllAssignments((previous) => !previous)
+    scrollToSection("assignments", assignmentsSectionRef)
+  }
+
+  const handleOpenSettings = () => {
+    navigate("/settings")
   }
 
   const handleSignOut = async () => {
@@ -247,6 +305,14 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
   }
 
   const navItemBase = "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
+  const getNavButtonClass = (section: StudentNavSection) =>
+    cn(
+      navItemBase,
+      "w-full",
+      activeNavSection === section
+        ? "bg-primary text-primary-foreground"
+        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+    )
 
   return (
     <div className="h-screen overflow-hidden bg-background text-foreground animate-in fade-in">
@@ -281,23 +347,38 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
           </div>
 
           <nav className="space-y-1 px-4 py-3">
-            <button className={cn(navItemBase, "w-full bg-primary text-primary-foreground")}>
+            <button
+              className={getNavButtonClass("dashboard")}
+              onClick={() => scrollToSection("dashboard")}
+            >
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
             </button>
-            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+            <button
+              className={getNavButtonClass("courses")}
+              onClick={() => scrollToSection("courses", scheduleSectionRef)}
+            >
               <BookOpen className="h-4 w-4" />
               My Courses
             </button>
-            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+            <button
+              className={getNavButtonClass("assignments")}
+              onClick={() => scrollToSection("assignments", assignmentsSectionRef)}
+            >
               <CheckCircle2 className="h-4 w-4" />
               Assignments
             </button>
-            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+            <button
+              className={getNavButtonClass("grades")}
+              onClick={() => scrollToSection("grades", performanceSectionRef)}
+            >
               <TrendingUp className="h-4 w-4" />
               Grades
             </button>
-            <button className={cn(navItemBase, "w-full text-muted-foreground hover:bg-accent hover:text-accent-foreground")}>
+            <button
+              className={getNavButtonClass("library")}
+              onClick={() => scrollToSection("library", mentorsSectionRef)}
+            >
               <FolderOpen className="h-4 w-4" />
               Library
             </button>
@@ -308,7 +389,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
               <CardContent className="space-y-3 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-primary">Pro Plan</p>
                 <p className="text-xs text-muted-foreground">Unlock advanced mentorship and personalized exam simulations.</p>
-                <Button className="w-full" size="sm">Upgrade Now</Button>
+                <Button className="w-full" size="sm" onClick={handleOpenSettings}>Upgrade Now</Button>
               </CardContent>
             </Card>
 
@@ -346,11 +427,16 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
               </div>
 
               <div className="flex items-center gap-2 sm:gap-3">
-                <Button variant="outline" size="icon" className="relative">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="relative"
+                  onClick={() => scrollToSection("grades", activitySectionRef)}
+                >
                   <Bell className="h-4 w-4" />
                   {pendingAssignments > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />}
                 </Button>
-                <Button variant="outline" size="icon">
+                <Button variant="outline" size="icon" onClick={handleOpenSettings}>
                   <Settings className="h-4 w-4" />
                 </Button>
                 <div className="hidden items-center gap-2 sm:flex">
@@ -366,7 +452,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          <div ref={contentScrollRef} className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
             <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
                 <h1 className="font-lufga text-3xl font-bold tracking-tight">Welcome back, {studentName}</h1>
@@ -376,7 +462,11 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
                     : "You are all caught up. Keep your momentum going."}
                 </p>
               </div>
-              <Button className="w-full md:w-auto">
+              <Button
+                className="w-full md:w-auto"
+                onClick={handleResumeLearningSession}
+                disabled={actionableAssignments.length === 0}
+              >
                 <Sparkles className="mr-2 h-4 w-4" />
                 Resume Learning Session
               </Button>
@@ -429,10 +519,17 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
 
             <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
               <div className="space-y-8 xl:col-span-2">
-                <section>
+                <section ref={assignmentsSectionRef}>
                   <div className="mb-4 flex items-center justify-between">
                     <h2 className="font-lufga text-xl font-semibold">Currently Working On</h2>
-                    <Button variant="ghost" size="sm" className="text-primary">View All</Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-primary"
+                      onClick={handleToggleAssignmentsView}
+                    >
+                      {showAllAssignments && canExpandAssignments ? "Show Less" : "View All"}
+                    </Button>
                   </div>
 
                   <div className="space-y-4">
@@ -481,7 +578,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
                   </div>
                 </section>
 
-                <section>
+                <section ref={scheduleSectionRef}>
                   <h2 className="mb-4 font-lufga text-xl font-semibold">Weekly Schedule</h2>
                   <Card>
                     <CardContent className="p-5">
@@ -529,7 +626,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
               </div>
 
               <div className="space-y-8">
-                <section>
+                <section ref={activitySectionRef}>
                   <h2 className="mb-4 font-lufga text-xl font-semibold">Recent Activity</h2>
                   <Card>
                     <CardContent className="p-5">
@@ -562,7 +659,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
                   </Card>
                 </section>
 
-                <section>
+                <section ref={mentorsSectionRef}>
                   <h2 className="mb-4 font-lufga text-xl font-semibold">Top Mentors</h2>
                   <div className="space-y-3">
                     {MENTOR_PLACEHOLDERS.map((mentor) => (
@@ -575,7 +672,11 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
                             <p className="truncate text-sm font-semibold">{mentor.name}</p>
                             <p className="text-[10px] uppercase tracking-wide text-primary">{mentor.role}</p>
                           </div>
-                          <Button variant="ghost" size="sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => scrollToSection("assignments", assignmentsSectionRef)}
+                          >
                             <Users className="h-4 w-4" />
                           </Button>
                         </CardContent>
@@ -584,7 +685,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
                   </div>
                 </section>
 
-                <section>
+                <section ref={performanceSectionRef}>
                   <Card className="bg-gradient-to-br from-primary/20 via-primary/10 to-background">
                     <CardHeader>
                       <CardTitle className="font-lufga text-lg">Subject Performance</CardTitle>

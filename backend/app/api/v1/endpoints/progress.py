@@ -206,38 +206,146 @@ async def get_progress_reports(
 ):
     """Get progress reports data for the reports dashboard (tutor only)"""
     try:
-        progress_service = ProgressService(database)
+        students = await database.students.find(
+            {"tutor_id": current_user.clerk_id, "is_active": True},
+            {"clerk_id": 1, "name": 1},
+        ).to_list(length=500)
 
-        # For now, return empty data structure since we need to build this from student data
-        # This will be populated with actual progress data as the system grows
-        from app.services.student_service import StudentService
+        student_ids = [s.get("clerk_id") for s in students if s.get("clerk_id")]
 
-        student_service = StudentService(database)
+        assignments = await database.assignments.find(
+            {"tutor_id": current_user.clerk_id},
+            {"_id": 1, "subject_id": 1},
+        ).to_list(length=5000)
 
-        # Get students for this tutor
-        students = await student_service.list_students(
-            limit=100, current_user=current_user
+        subject_object_ids = {
+            assignment.get("subject_id")
+            for assignment in assignments
+            if isinstance(assignment.get("subject_id"), ObjectId)
+        }
+
+        subject_docs = []
+        if subject_object_ids:
+            subject_docs = await database.subjects.find(
+                {"_id": {"$in": list(subject_object_ids)}},
+                {"_id": 1, "name": 1},
+            ).to_list(length=500)
+
+        subject_name_by_id = {
+            str(subject.get("_id")): subject.get("name", "") for subject in subject_docs
+        }
+
+        assignment_subject_name = {
+            str(assignment.get("_id")): subject_name_by_id.get(
+                str(assignment.get("subject_id")), ""
+            )
+            for assignment in assignments
+            if assignment.get("_id")
+        }
+
+        progress_query: Dict[str, Any] = {"tutor_id": current_user.clerk_id}
+        if student_ids:
+            progress_query["student_id"] = {"$in": student_ids}
+
+        progress_docs = await database.progress.find(progress_query).to_list(
+            length=10000
         )
 
-        # Create mock performance data based on actual students
-        student_performance = []
-        for student in students:
-            student_performance.append(
-                StudentPerformanceData(
-                    name=student.name,
-                    math=85,
-                    physics=78,
-                    chemistry=92,
+        score_buckets: Dict[str, Dict[str, List[float]]] = {
+            student_id: {"math": [], "physics": [], "chemistry": [], "overall": []}
+            for student_id in student_ids
+        }
+
+        completed_statuses = {
+            SubmissionStatus.SUBMITTED.value,
+            SubmissionStatus.GRADED.value,
+            "completed",
+        }
+
+        def _ensure_tz_aware(value: Any) -> Optional[datetime]:
+            if not isinstance(value, datetime):
+                return None
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value
+
+        now = datetime.now(timezone.utc)
+        weekly_progress: List[WeeklyProgressData] = []
+
+        for week_num in range(4, 0, -1):
+            week_start = now - timedelta(weeks=week_num)
+            week_end = now - timedelta(weeks=week_num - 1)
+
+            assigned = 0
+            completed = 0
+
+            for progress in progress_docs:
+                created_at = _ensure_tz_aware(progress.get("created_at"))
+                if not created_at or not (week_start <= created_at < week_end):
+                    continue
+
+                assigned += 1
+                status_value = str(progress.get("status") or "").lower()
+                if status_value in completed_statuses:
+                    completed += 1
+
+            weekly_progress.append(
+                WeeklyProgressData(
+                    week=f"Week {5 - week_num}",
+                    completed=completed,
+                    assigned=assigned,
                 )
             )
 
-        # Create mock weekly progress data
-        weekly_progress = [
-            WeeklyProgressData(week="Week 1", completed=8, assigned=10),
-            WeeklyProgressData(week="Week 2", completed=12, assigned=15),
-            WeeklyProgressData(week="Week 3", completed=6, assigned=8),
-            WeeklyProgressData(week="Week 4", completed=10, assigned=12),
-        ]
+        for progress in progress_docs:
+            score = progress.get("score")
+            if score is None:
+                continue
+
+            student_id = progress.get("student_id")
+            if student_id not in score_buckets:
+                continue
+
+            try:
+                numeric_score = float(score)
+            except (TypeError, ValueError):
+                continue
+
+            bucket = score_buckets[student_id]
+            bucket["overall"].append(numeric_score)
+
+            assignment_id = str(progress.get("assignment_id") or "")
+            subject_name = assignment_subject_name.get(assignment_id, "").lower()
+
+            if "math" in subject_name:
+                bucket["math"].append(numeric_score)
+            elif "physics" in subject_name:
+                bucket["physics"].append(numeric_score)
+            elif "chem" in subject_name:
+                bucket["chemistry"].append(numeric_score)
+
+        def _avg(values: List[float]) -> int:
+            if not values:
+                return 0
+            return int(round(sum(values) / len(values)))
+
+        student_performance: List[StudentPerformanceData] = []
+        for student in students:
+            student_id = student.get("clerk_id")
+            bucket = score_buckets.get(
+                student_id,
+                {"math": [], "physics": [], "chemistry": [], "overall": []},
+            )
+            overall_score = _avg(bucket["overall"])
+
+            student_performance.append(
+                StudentPerformanceData(
+                    name=student.get("name", "Student"),
+                    math=_avg(bucket["math"]) or overall_score,
+                    physics=_avg(bucket["physics"]),
+                    chemistry=_avg(bucket["chemistry"]),
+                )
+            )
 
         return ProgressReportsResponse(
             student_performance=student_performance, weekly_progress=weekly_progress

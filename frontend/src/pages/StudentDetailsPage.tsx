@@ -82,6 +82,10 @@ export default function StudentDetailsPage() {
   const [activities, setActivities] = useState<Activity[]>([])
   const [progressData, setProgressData] = useState<ProgressData[]>([])
   const [sendMessageModalOpen, setSendMessageModalOpen] = useState(false)
+  const [editProfileModalOpen, setEditProfileModalOpen] = useState(false)
+  const [editProfileName, setEditProfileName] = useState('')
+  const [editProfileEmail, setEditProfileEmail] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
 
   // Parent management state
   const [linkedParents, setLinkedParents] = useState<LinkedParent[]>([])
@@ -374,7 +378,72 @@ export default function StudentDetailsPage() {
   }
 
   const handleEditProfile = () => {
-    toast.info('Edit profile feature coming soon')
+    if (!student) {
+      return
+    }
+
+    setEditProfileName(student.name)
+    setEditProfileEmail(student.email)
+    setEditProfileModalOpen(true)
+  }
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!student) {
+      return
+    }
+
+    const name = editProfileName.trim()
+    const email = editProfileEmail.trim().toLowerCase()
+
+    if (!name || !email) {
+      toast.error('Name and email are required')
+      return
+    }
+
+    try {
+      setSavingProfile(true)
+
+      const response = await client.put(`/students/${student.id}`, {
+        name,
+        email,
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const updatedStudent = response.data as any
+
+      setStudent((previous) => {
+        if (!previous) {
+          return previous
+        }
+
+        return {
+          ...previous,
+          name: updatedStudent?.name || name,
+          email: updatedStudent?.email || email,
+          grade: updatedStudent?.student_profile?.grade || previous.grade,
+        }
+      })
+
+      queryClient.invalidateQueries({ queryKey: ['students'] })
+      toast.success('Student profile updated')
+      setEditProfileModalOpen(false)
+
+      const nextSlug = updatedStudent?.slug
+      if (nextSlug && studentSlug && nextSlug !== studentSlug) {
+        navigate(`/dashboard/students/${nextSlug}`, { replace: true })
+      }
+    } catch (error: any) {
+      console.error('Failed to update student profile:', error)
+      toast.error('Failed to update profile', {
+        description: error.message || 'Please try again.',
+      })
+    } finally {
+      setSavingProfile(false)
+    }
   }
 
   const pendingAssignments = assignments.filter(a => a.status === 'pending')
@@ -874,6 +943,68 @@ export default function StudentDetailsPage() {
           </div>
             </>
           )}
+
+      {/* Edit Profile Modal */}
+      <Dialog open={editProfileModalOpen} onOpenChange={setEditProfileModalOpen}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit className="h-5 w-5 text-primary" />
+              Edit Student Profile
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveProfile} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-student-name">Full Name *</Label>
+              <Input
+                id="edit-student-name"
+                value={editProfileName}
+                onChange={(e) => setEditProfileName(e.target.value)}
+                placeholder="Student name"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-student-email">Email *</Label>
+              <Input
+                id="edit-student-email"
+                type="email"
+                value={editProfileEmail}
+                onChange={(e) => setEditProfileEmail(e.target.value)}
+                placeholder="student@example.com"
+                required
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditProfileModalOpen(false)}
+                disabled={savingProfile}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={savingProfile || !editProfileName.trim() || !editProfileEmail.trim()}
+                className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] border-0 dark:bg-[#C8A882] dark:hover:bg-[#B89872]"
+              >
+                {savingProfile ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Send Message Modal */}
       {student && (

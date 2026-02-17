@@ -4,9 +4,9 @@ Handles JWT validation, user context extraction, and role-based access control
 """
 
 import asyncio
+import base64
 import jwt
 import httpx
-import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException, status, Depends, Request
@@ -90,21 +90,72 @@ class EnhancedClerkJWTBearer:
         self.issuer = settings.CLERK_JWT_ISSUER or self._construct_issuer()
         self._jwks_cache: Optional[Dict] = None
         self._cache_expiry: Optional[datetime] = None
+        self._missing_issuer_logged = False
 
     def _construct_issuer(self) -> Optional[str]:
-        """Return None and warn if CLERK_JWT_ISSUER is not configured."""
+        """Best-effort issuer discovery for local development."""
+        frontend_api = settings.CLERK_FRONTEND_API
+        if frontend_api:
+            issuer = str(frontend_api).strip().rstrip("/")
+            if issuer and not issuer.startswith("http"):
+                issuer = f"https://{issuer}"
+            logger.info("Using CLERK_FRONTEND_API as JWT issuer", issuer=issuer)
+            return issuer
+
+        issuer_from_key = self._derive_issuer_from_publishable_key()
+        if issuer_from_key:
+            logger.info(
+                "Derived Clerk JWT issuer from CLERK_PUBLISHABLE_KEY",
+                issuer=issuer_from_key,
+            )
+            return issuer_from_key
+
         if self.clerk_publishable_key:
             logger.warning(
                 "CLERK_JWT_ISSUER is not set; set it to your Clerk instance URL"
             )
         return None
 
+    def _derive_issuer_from_publishable_key(self) -> Optional[str]:
+        """Derive issuer URL from Clerk publishable key when possible."""
+        key = (self.clerk_publishable_key or "").strip()
+        if not key:
+            return None
+
+        parts = key.split("_", 2)
+        if len(parts) < 3:
+            return None
+
+        encoded_part = parts[2]
+        padding = "=" * (-len(encoded_part) % 4)
+
+        try:
+            decoded = base64.urlsafe_b64decode(
+                f"{encoded_part}{padding}".encode("utf-8")
+            ).decode("utf-8")
+        except Exception:
+            return None
+
+        host = decoded.strip().rstrip("$").rstrip("/")
+        if not host:
+            return None
+
+        if host.startswith("http://") or host.startswith("https://"):
+            return host
+
+        return f"https://{host}"
+
     async def get_jwks(self) -> Dict:
         """Get JSON Web Key Set from Clerk with caching"""
         current_time = datetime.now(timezone.utc)
 
         if not self.issuer:
-            logger.error("CLERK_JWT_ISSUER is not set")
+            if not self._missing_issuer_logged:
+                logger.error(
+                    "CLERK_JWT_ISSUER is not set",
+                    hint="Set CLERK_JWT_ISSUER (or CLERK_FRONTEND_API) in backend/.env",
+                )
+                self._missing_issuer_logged = True
             return {}
 
         # Check cache validity (refresh every hour)
@@ -156,7 +207,7 @@ class EnhancedClerkJWTBearer:
                     key = None
                     for jwk in jwks["keys"]:
                         if jwk.get("kid") == kid:
-                            key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+                            key = jwt.PyJWK.from_dict(jwk)
                             break
 
                     if key:

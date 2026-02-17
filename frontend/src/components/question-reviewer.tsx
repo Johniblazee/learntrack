@@ -9,6 +9,9 @@ import { Input } from "@/components/ui/input"
 import { toast } from '@/contexts/ToastContext'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { MathText } from '@/components/ui/math-text'
 import { API_BASE_URL } from '@/lib/config'
 
@@ -49,6 +52,46 @@ interface ReviewStats {
   averageRating: number
 }
 
+interface GenerationStats {
+  total_generated: number
+  this_month: number
+  success_rate: number
+  avg_quality: number
+  total_sessions: number
+  month_sessions: number
+  approved_questions: number
+  rejected_questions: number
+}
+
+const mapQuestionFromApi = (q: any): Question => ({
+  id: q.question_id || q.id,
+  question_id: q.question_id,
+  session_id: q.session_id,
+  text: q.question_text || q.text,
+  question_text: q.question_text,
+  type: q.type,
+  difficulty: q.difficulty,
+  blooms_level: q.blooms_level,
+  subject: q.subject || 'Generated',
+  topic: q.session_prompt || q.topic || 'AI Generated',
+  options: q.options,
+  correctAnswer: q.correct_answer || q.correctAnswer,
+  correct_answer: q.correct_answer,
+  explanation: q.explanation || '',
+  points: Number(q.points || 1),
+  tags: q.tags || [],
+  status: q.status?.toLowerCase() || 'pending',
+  createdBy: q.created_by || 'AI Generator',
+  createdAt: q.session_created_at || q.created_at || new Date().toISOString(),
+  session_created_at: q.session_created_at,
+  reviewedBy: q.reviewed_by,
+  reviewedAt: q.reviewed_at,
+  reviewComments: q.review_comments,
+  rating: q.rating,
+  usageCount: Number(q.usage_count || 0),
+  successRate: Number(q.success_rate || 0),
+})
+
 export default function QuestionReviewer() {
   const { getToken } = useAuth()
   const [activeTab, setActiveTab] = useState("review")
@@ -56,13 +99,38 @@ export default function QuestionReviewer() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [subjectFilter, setSubjectFilter] = useState("all")
   const [questions, setQuestions] = useState<Question[]>([])
+  const [approvedQuestions, setApprovedQuestions] = useState<Question[]>([])
+  const [analyticsQuestions, setAnalyticsQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(false)
+  const [approvedLoading, setApprovedLoading] = useState(false)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [selectedQuestions, setSelectedQuestions] = useState<Set<string>>(new Set())
+  const [generationStats, setGenerationStats] = useState<GenerationStats | null>(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null)
+  const [editForm, setEditForm] = useState({
+    question_text: '',
+    options_text: '',
+    correct_answer: '',
+    explanation: '',
+  })
 
   // Fetch pending questions from backend
   useEffect(() => {
     fetchPendingQuestions()
+    fetchAnalyticsData()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'approved' && approvedQuestions.length === 0) {
+      fetchApprovedQuestions()
+    }
+
+    if (activeTab === 'analytics' && analyticsQuestions.length === 0) {
+      fetchAnalyticsData()
+    }
+  }, [activeTab])
 
   const fetchPendingQuestions = async () => {
     try {
@@ -77,32 +145,8 @@ export default function QuestionReviewer() {
 
       if (response.ok) {
         const data = await response.json()
-        // Handle paginated response: { items: [...], total, page, per_page }
         const items = data?.items || (Array.isArray(data) ? data : [])
-        // Map the API response to our Question interface
-        const mappedQuestions = items.map((q: any) => ({
-          id: q.question_id || q.id,
-          question_id: q.question_id,
-          session_id: q.session_id,
-          text: q.question_text || q.text,
-          question_text: q.question_text,
-          type: q.type,
-          difficulty: q.difficulty,
-          blooms_level: q.blooms_level,
-          subject: q.subject || 'Generated',
-          topic: q.session_prompt || 'AI Generated',
-          options: q.options,
-          correctAnswer: q.correct_answer || q.correctAnswer,
-          correct_answer: q.correct_answer,
-          explanation: q.explanation || '',
-          points: 1,
-          tags: q.tags || [],
-          status: q.status?.toLowerCase() || 'pending',
-          createdBy: 'AI Generator',
-          createdAt: q.session_created_at || new Date().toISOString(),
-          usageCount: 0,
-          successRate: 0
-        }))
+        const mappedQuestions = items.map(mapQuestionFromApi)
         setQuestions(mappedQuestions)
       } else {
         console.error('Failed to fetch pending questions')
@@ -113,6 +157,71 @@ export default function QuestionReviewer() {
       toast.error('Error loading questions')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchApprovedQuestions = async () => {
+    try {
+      setApprovedLoading(true)
+      const token = await getToken()
+      const response = await fetch(
+        `${API_BASE_URL}/question-generator/all-questions?status=approved&per_page=100`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        const items = data?.items || (Array.isArray(data) ? data : [])
+        setApprovedQuestions(items.map(mapQuestionFromApi))
+      } else {
+        toast.error('Failed to load approved questions')
+      }
+    } catch (error) {
+      console.error('Error fetching approved questions:', error)
+      toast.error('Error loading approved questions')
+    } finally {
+      setApprovedLoading(false)
+    }
+  }
+
+  const fetchAnalyticsData = async () => {
+    try {
+      setAnalyticsLoading(true)
+      const token = await getToken()
+
+      const [statsResponse, questionsResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/question-generator/stats`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+        fetch(`${API_BASE_URL}/question-generator/all-questions?per_page=200`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+      ])
+
+      if (statsResponse.ok) {
+        setGenerationStats(await statsResponse.json())
+      }
+
+      if (questionsResponse.ok) {
+        const allQuestionsData = await questionsResponse.json()
+        const allItems = allQuestionsData?.items || (Array.isArray(allQuestionsData) ? allQuestionsData : [])
+        setAnalyticsQuestions(allItems.map(mapQuestionFromApi))
+      }
+    } catch (error) {
+      console.error('Error fetching analytics data:', error)
+    } finally {
+      setAnalyticsLoading(false)
     }
   }
 
@@ -143,8 +252,33 @@ export default function QuestionReviewer() {
         toast.success('Question approved', {
           description: 'The question has been approved and added to your question bank'
         })
-        // Remove from pending list
-        setQuestions(questions.filter(q => q.id !== questionId))
+
+        if (question) {
+          const approvedQuestion = {
+            ...question,
+            status: 'approved' as const,
+          }
+
+          setApprovedQuestions((previous) => [
+            approvedQuestion,
+            ...previous.filter((q) => q.id !== approvedQuestion.id),
+          ])
+        }
+
+        setQuestions((previous) => previous.filter((q) => q.id !== questionId))
+        setSelectedQuestions((previous) => {
+          const next = new Set(previous)
+          next.delete(questionId)
+          return next
+        })
+
+        setGenerationStats((previous) => {
+          if (!previous) return previous
+          return {
+            ...previous,
+            approved_questions: previous.approved_questions + 1,
+          }
+        })
       } else {
         throw new Error('Failed to approve question')
       }
@@ -183,8 +317,20 @@ export default function QuestionReviewer() {
         toast.success('Question rejected', {
           description: 'The question has been rejected'
         })
-        // Remove from pending list
-        setQuestions(questions.filter(q => q.id !== questionId))
+        setQuestions((previous) => previous.filter((q) => q.id !== questionId))
+        setSelectedQuestions((previous) => {
+          const next = new Set(previous)
+          next.delete(questionId)
+          return next
+        })
+
+        setGenerationStats((previous) => {
+          if (!previous) return previous
+          return {
+            ...previous,
+            rejected_questions: previous.rejected_questions + 1,
+          }
+        })
       } else {
         throw new Error('Failed to reject question')
       }
@@ -219,6 +365,106 @@ export default function QuestionReviewer() {
       }
     } catch (error) {
       console.error('Error requesting revision:', error)
+    }
+  }
+
+  const openEditDialog = (question: Question) => {
+    setEditingQuestion(question)
+    setEditForm({
+      question_text: question.text,
+      options_text: (question.options || []).join('\n'),
+      correct_answer: question.correctAnswer,
+      explanation: question.explanation,
+    })
+    setEditDialogOpen(true)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingQuestion) {
+      return
+    }
+
+    if (!editingQuestion.session_id) {
+      toast.error('Cannot edit this question because session metadata is missing.')
+      return
+    }
+
+    const questionText = editForm.question_text.trim()
+    if (!questionText) {
+      toast.error('Question text is required')
+      return
+    }
+
+    const options = editForm.options_text
+      .split('\n')
+      .map((option) => option.trim())
+      .filter(Boolean)
+
+    const payload: {
+      question_text: string
+      options?: string[]
+      correct_answer?: string
+      explanation?: string
+    } = {
+      question_text: questionText,
+      explanation: editForm.explanation.trim(),
+      correct_answer: editForm.correct_answer.trim(),
+    }
+
+    if (options.length > 0) {
+      payload.options = options
+    }
+
+    try {
+      setIsSavingEdit(true)
+      const token = await getToken()
+      const response = await fetch(
+        `${API_BASE_URL}/question-generator/sessions/${editingQuestion.session_id}/questions/${editingQuestion.id}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        },
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to update question')
+      }
+
+      const updatedQuestion: Question = {
+        ...editingQuestion,
+        text: questionText,
+        question_text: questionText,
+        options: options.length > 0 ? options : editingQuestion.options,
+        correctAnswer: editForm.correct_answer.trim(),
+        correct_answer: editForm.correct_answer.trim(),
+        explanation: editForm.explanation.trim(),
+      }
+
+      setQuestions((previous) =>
+        previous.map((question) =>
+          question.id === updatedQuestion.id ? updatedQuestion : question,
+        ),
+      )
+      setApprovedQuestions((previous) =>
+        previous.map((question) =>
+          question.id === updatedQuestion.id ? updatedQuestion : question,
+        ),
+      )
+
+      toast.success('Question updated successfully')
+      setEditDialogOpen(false)
+      setEditingQuestion(null)
+    } catch (error: any) {
+      console.error('Failed to update question:', error)
+      toast.error('Failed to update question', {
+        description: error.message || 'Please try again later',
+      })
+    } finally {
+      setIsSavingEdit(false)
     }
   }
 
@@ -261,12 +507,18 @@ export default function QuestionReviewer() {
   }
 
   // Review statistics
+  const pendingCount = questions.filter((q) => q.status === 'pending').length
+  const approvedCount = generationStats?.approved_questions ?? approvedQuestions.length
+  const rejectedCount = generationStats?.rejected_questions ?? analyticsQuestions.filter((q) => q.status === 'rejected').length
+  const totalGeneratedCount = generationStats?.total_generated ?? (pendingCount + approvedCount + rejectedCount)
+
+  const ratings = analyticsQuestions.filter((q) => q.rating).map((q) => q.rating || 0)
   const reviewStats: ReviewStats = {
-    totalQuestions: questions.length,
-    pendingReview: questions.filter(q => q.status === 'pending').length,
-    approved: questions.filter(q => q.status === 'approved').length,
-    rejected: questions.filter(q => q.status === 'rejected').length,
-    averageRating: questions.filter(q => q.rating).reduce((acc, q) => acc + (q.rating || 0), 0) / (questions.filter(q => q.rating).length || 1)
+    totalQuestions: totalGeneratedCount,
+    pendingReview: pendingCount,
+    approved: approvedCount,
+    rejected: rejectedCount,
+    averageRating: ratings.length ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : 0,
   }
 
   const getStatusColor = (status: string) => {
@@ -332,6 +584,37 @@ export default function QuestionReviewer() {
 
     return matchesSearch && matchesStatus && matchesSubject
   })
+
+  const filteredApprovedQuestions = approvedQuestions.filter((question) => {
+    const matchesSearch =
+      question.text.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      question.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      question.topic.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesSubject = subjectFilter === 'all' || question.subject === subjectFilter
+    return matchesSearch && matchesSubject
+  })
+
+  const statusBreakdown = analyticsQuestions.reduce<Record<string, number>>((acc, question) => {
+    const normalizedStatus = question.status?.toLowerCase() || 'pending'
+    acc[normalizedStatus] = (acc[normalizedStatus] || 0) + 1
+    return acc
+  }, {})
+
+  const topSubjects = Object.entries(
+    analyticsQuestions.reduce<Record<string, number>>((acc, question) => {
+      const subject = question.subject || 'Uncategorized'
+      acc[subject] = (acc[subject] || 0) + 1
+      return acc
+    }, {}),
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+
+  const approvalRate = generationStats
+    ? (generationStats.approved_questions + generationStats.rejected_questions) > 0
+      ? (generationStats.approved_questions / (generationStats.approved_questions + generationStats.rejected_questions)) * 100
+      : 0
+    : 0
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -788,7 +1071,11 @@ export default function QuestionReviewer() {
                                 Reject
                               </Button>
                               <div className="flex-1"></div>
-                              <Button variant="outline" className="border-border">
+                              <Button
+                                variant="outline"
+                                className="border-border"
+                                onClick={() => openEditDialog(question)}
+                              >
                                 <Edit className="w-4 h-4 mr-2" />
                                 Edit
                               </Button>
@@ -810,46 +1097,236 @@ export default function QuestionReviewer() {
             <CardHeader className="border-b border-border">
               <CardTitle className="flex items-center text-foreground">
                 <CheckCircle className="w-5 h-5 mr-2 text-green-600 dark:text-green-500" />
-                Approved Questions
+                Approved Questions ({filteredApprovedQuestions.length})
               </CardTitle>
               <CardDescription className="text-muted-foreground">
                 Questions that have been reviewed and approved for use
               </CardDescription>
             </CardHeader>
             <CardContent className="p-8">
-              <div className="text-center py-8">
-                <div className="w-16 h-16 rounded-full bg-green-50 dark:bg-green-950/30 flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-500" />
+              {approvedLoading ? (
+                <div className="space-y-4">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="rounded-lg border border-border p-4 space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-5 w-full" />
+                      <Skeleton className="h-4 w-3/4" />
+                    </div>
+                  ))}
                 </div>
-                <p className="text-muted-foreground">Approved questions will be displayed here.</p>
-              </div>
+              ) : filteredApprovedQuestions.length === 0 ? (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-green-50 dark:bg-green-950/30 flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-500" />
+                  </div>
+                  <p className="text-muted-foreground">No approved questions found.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredApprovedQuestions.map((question) => (
+                    <div key={question.id} className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className="bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border-0">
+                            Approved
+                          </Badge>
+                          <Badge variant="outline" className="border-border">
+                            {question.subject}
+                          </Badge>
+                          <Badge variant="outline" className="border-border capitalize">
+                            {question.difficulty}
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(question.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="text-foreground font-medium leading-relaxed">
+                        <MathText>{question.text}</MathText>
+                      </div>
+                      {question.explanation && (
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          {question.explanation}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* Analytics Tab */}
         <TabsContent value="analytics" className="space-y-6">
-          <Card className="border-border shadow-sm bg-card">
-            <CardHeader className="border-b border-border">
-              <CardTitle className="flex items-center text-foreground">
-                <BarChart3 className="w-5 h-5 mr-2 text-primary" />
-                Review Analytics
-              </CardTitle>
-              <CardDescription className="text-muted-foreground">
-                Insights and statistics about question review process
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-8">
-              <div className="text-center py-8">
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                  <BarChart3 className="w-8 h-8 text-primary" />
-                </div>
-                <p className="text-muted-foreground">Review analytics and charts will be displayed here.</p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <Card className="border-border shadow-sm bg-card">
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">Total Generated</p>
+                <p className="text-3xl font-bold text-foreground mt-1">
+                  {generationStats?.total_generated ?? analyticsQuestions.length}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-border shadow-sm bg-card">
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">This Month</p>
+                <p className="text-3xl font-bold text-foreground mt-1">
+                  {generationStats?.this_month ?? 0}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-border shadow-sm bg-card">
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">Approval Rate</p>
+                <p className="text-3xl font-bold text-foreground mt-1">
+                  {approvalRate.toFixed(1)}%
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-border shadow-sm bg-card">
+              <CardContent className="p-5">
+                <p className="text-sm text-muted-foreground">Session Success Rate</p>
+                <p className="text-3xl font-bold text-foreground mt-1">
+                  {generationStats?.success_rate?.toFixed(1) ?? '0.0'}%
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <Card className="border-border shadow-sm bg-card">
+              <CardHeader className="border-b border-border">
+                <CardTitle className="flex items-center text-foreground">
+                  <BarChart3 className="w-5 h-5 mr-2 text-primary" />
+                  Status Breakdown
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                {analyticsLoading ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <Skeleton key={index} className="h-10 w-full" />
+                    ))}
+                  </div>
+                ) : Object.keys(statusBreakdown).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No review activity yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {Object.entries(statusBreakdown)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([status, count]) => (
+                        <div key={status} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                          <span className="text-sm font-medium capitalize text-foreground">
+                            {status.replace('-', ' ')}
+                          </span>
+                          <Badge variant="secondary">{count}</Badge>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border shadow-sm bg-card">
+              <CardHeader className="border-b border-border">
+                <CardTitle className="flex items-center text-foreground">
+                  <BookOpen className="w-5 h-5 mr-2 text-primary" />
+                  Top Subjects
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                {analyticsLoading ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <Skeleton key={index} className="h-10 w-full" />
+                    ))}
+                  </div>
+                ) : topSubjects.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No subject data available yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {topSubjects.map(([subject, count]) => (
+                      <div key={subject} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                        <span className="text-sm font-medium text-foreground">{subject}</span>
+                        <Badge variant="outline" className="border-border">{count} questions</Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Edit Question</DialogTitle>
+            <DialogDescription>
+              Make quick corrections before approval.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-question-text">Question Text</Label>
+              <Textarea
+                id="edit-question-text"
+                rows={4}
+                value={editForm.question_text}
+                onChange={(event) => setEditForm({ ...editForm, question_text: event.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-question-options">Options (one per line)</Label>
+              <Textarea
+                id="edit-question-options"
+                rows={5}
+                value={editForm.options_text}
+                onChange={(event) => setEditForm({ ...editForm, options_text: event.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-correct-answer">Correct Answer</Label>
+              <Input
+                id="edit-correct-answer"
+                value={editForm.correct_answer}
+                onChange={(event) => setEditForm({ ...editForm, correct_answer: event.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-explanation">Explanation</Label>
+              <Textarea
+                id="edit-explanation"
+                rows={4}
+                value={editForm.explanation}
+                onChange={(event) => setEditForm({ ...editForm, explanation: event.target.value })}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+              disabled={isSavingEdit}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveEdit}
+              disabled={isSavingEdit || !editForm.question_text.trim()}
+            >
+              {isSavingEdit ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

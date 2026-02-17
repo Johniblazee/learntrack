@@ -91,9 +91,13 @@ export default function MaterialManager() {
   const [subjectFilter, setSubjectFilter] = useState('all')
   const [sortBy, setSortBy] = useState<'date' | 'name'>('date')
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isUploadingFile, setIsUploadingFile] = useState(false)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [isTogglingShareId, setIsTogglingShareId] = useState<string | null>(null)
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Form state
@@ -107,6 +111,18 @@ export default function MaterialManager() {
     tags: '',
     shared_with_students: true,
     file_size: 0
+  })
+
+  const [editFormData, setEditFormData] = useState({
+    title: '',
+    description: '',
+    material_type: 'pdf' as Material['material_type'],
+    file_url: '',
+    subject_id: '',
+    topic: '',
+    tags: '',
+    shared_with_students: true,
+    file_size: 0,
   })
 
   useEffect(() => {
@@ -317,6 +333,101 @@ export default function MaterialManager() {
     toast.info('File attached', {
       description: 'It will upload automatically when you create the material.',
     })
+  }
+
+  const openEditDialog = (material: Material) => {
+    setEditingMaterial(material)
+    setEditFormData({
+      title: material.title,
+      description: material.description || '',
+      material_type: material.material_type,
+      file_url: material.file_url || '',
+      subject_id: material.subject_id || '',
+      topic: material.topic || '',
+      tags: material.tags.join(', '),
+      shared_with_students: material.shared_with_students,
+      file_size: material.file_size || 0,
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const handleUpdateMaterial = async () => {
+    if (!editingMaterial) {
+      return
+    }
+
+    try {
+      setIsSavingEdit(true)
+      const token = await getToken()
+      const payload = {
+        title: editFormData.title.trim(),
+        description: editFormData.description.trim() || null,
+        material_type: editFormData.material_type,
+        file_url: editFormData.file_url.trim() || null,
+        file_size: editFormData.file_size || null,
+        subject_id: editFormData.subject_id || null,
+        topic: editFormData.topic.trim() || null,
+        tags: editFormData.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        shared_with_students: editFormData.shared_with_students,
+      }
+
+      const response = await fetch(`${API_BASE_URL}/materials/${editingMaterial._id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to update material')
+      }
+
+      toast.success('Material updated successfully')
+      setIsEditDialogOpen(false)
+      setEditingMaterial(null)
+      fetchMaterials()
+    } catch (error) {
+      console.error('Failed to update material:', error)
+      toast.error('Failed to update material')
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  const handleToggleShare = async (material: Material) => {
+    try {
+      setIsTogglingShareId(material._id)
+      const token = await getToken()
+
+      const response = await fetch(`${API_BASE_URL}/materials/${material._id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          shared_with_students: !material.shared_with_students,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to update sharing settings')
+      }
+
+      toast.success(
+        !material.shared_with_students
+          ? 'Material shared with students'
+          : 'Material access restricted',
+      )
+      fetchMaterials()
+    } catch (error) {
+      console.error('Failed to update sharing settings:', error)
+      toast.error('Failed to update sharing settings')
+    } finally {
+      setIsTogglingShareId(null)
+    }
   }
 
   const handleBrowseClick = () => {
@@ -540,7 +651,7 @@ export default function MaterialManager() {
                     {formatFileSize(material.file_size)}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {material.shared_with_students ? 'All Students' : 'Specific'}
+                    {material.shared_with_students ? 'All Students' : 'Private'}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center gap-1 justify-end">
@@ -548,7 +659,7 @@ export default function MaterialManager() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        onClick={() => console.log('Edit:', material._id)}
+                        onClick={() => openEditDialog(material)}
                       >
                         <Edit className="w-4 h-4" />
                       </Button>
@@ -556,7 +667,8 @@ export default function MaterialManager() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        onClick={() => console.log('Share:', material._id)}
+                        onClick={() => handleToggleShare(material)}
+                        disabled={isTogglingShareId === material._id}
                       >
                         <Share2 className="w-4 h-4" />
                       </Button>
@@ -576,6 +688,143 @@ export default function MaterialManager() {
           </Table>
         </div>
       )}
+
+      {/* Edit Material Dialog */}
+      <Dialog
+        open={isEditDialogOpen}
+        onOpenChange={(open) => {
+          setIsEditDialogOpen(open)
+          if (!open) {
+            setEditingMaterial(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Material</DialogTitle>
+            <DialogDescription>
+              Update details and sharing settings for this material
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-title">Title *</Label>
+              <Input
+                id="edit-title"
+                value={editFormData.title}
+                onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                value={editFormData.description}
+                onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                rows={3}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-type">Material Type *</Label>
+                <Select
+                  value={editFormData.material_type}
+                  onValueChange={(value: Material['material_type']) => setEditFormData({ ...editFormData, material_type: value })}
+                >
+                  <SelectTrigger id="edit-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pdf">PDF Document</SelectItem>
+                    <SelectItem value="doc">Word Document</SelectItem>
+                    <SelectItem value="video">Video</SelectItem>
+                    <SelectItem value="image">Image</SelectItem>
+                    <SelectItem value="link">External Link</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-subject">Subject</Label>
+                <Select
+                  value={editFormData.subject_id || 'none'}
+                  onValueChange={(value) => setEditFormData({ ...editFormData, subject_id: value === 'none' ? '' : value })}
+                >
+                  <SelectTrigger id="edit-subject">
+                    <SelectValue placeholder="Select subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No subject</SelectItem>
+                    {subjects.map(subject => (
+                      <SelectItem key={subject._id} value={subject._id}>
+                        {subject.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-file-url">File URL</Label>
+              <Input
+                id="edit-file-url"
+                value={editFormData.file_url}
+                onChange={(e) => setEditFormData({ ...editFormData, file_url: e.target.value })}
+                placeholder="https://..."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-topic">Topic</Label>
+              <Input
+                id="edit-topic"
+                value={editFormData.topic}
+                onChange={(e) => setEditFormData({ ...editFormData, topic: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-tags">Tags (comma-separated)</Label>
+              <Input
+                id="edit-tags"
+                value={editFormData.tags}
+                onChange={(e) => setEditFormData({ ...editFormData, tags: e.target.value })}
+              />
+            </div>
+
+            <div className="rounded-lg border border-border p-3 bg-muted/30 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">Student Access</p>
+                <p className="text-xs text-muted-foreground">
+                  {editFormData.shared_with_students ? 'Visible to students' : 'Hidden from students'}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditFormData({
+                  ...editFormData,
+                  shared_with_students: !editFormData.shared_with_students,
+                })}
+              >
+                {editFormData.shared_with_students ? 'Set Private' : 'Share with Students'}
+              </Button>
+            </div>
+
+            <Button
+              onClick={handleUpdateMaterial}
+              className="w-full bg-primary hover:bg-primary/90"
+              disabled={!editFormData.title.trim() || isSavingEdit}
+            >
+              {isSavingEdit ? 'Saving changes...' : 'Save Changes'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Material Dialog */}
       <Dialog
