@@ -606,14 +606,17 @@ async def get_student_dashboard_stats(
 
         # Calculate stats
         total_assignments = len(assignments)
-        completed = len([p for p in progress_records if p.get("status") == "completed"])
+        completed_statuses = {"completed", "submitted", "graded"}
+        completed = len(
+            [p for p in progress_records if p.get("status") in completed_statuses]
+        )
         pending = total_assignments - completed
 
         # Calculate average score
         completed_scores = [
             p.get("score", 0)
             for p in progress_records
-            if p.get("status") == "completed" and p.get("score")
+            if p.get("status") in completed_statuses and p.get("score") is not None
         ]
         avg_score = (
             round(sum(completed_scores) / len(completed_scores), 1)
@@ -671,7 +674,12 @@ async def get_parent_dashboard_stats(
                             "$cond": [
                                 {
                                     "$and": [
-                                        {"$eq": ["$status", "completed"]},
+                                        {
+                                            "$in": [
+                                                "$status",
+                                                ["completed", "submitted", "graded"],
+                                            ]
+                                        },
                                         {"$ne": ["$score", None]},
                                     ]
                                 },

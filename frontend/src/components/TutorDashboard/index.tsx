@@ -14,6 +14,7 @@ import MaterialManager from "@/components/MaterialManager"
 import { OpenCanvasGenerator } from "@/components/question-generator"
 import ActiveAssignmentsView from "./views/ActiveAssignmentsView"
 import CreateAssignmentView from "./views/CreateAssignmentView"
+import AssignmentTemplatesView from "./views/AssignmentTemplatesView"
 import GradingView from "./views/GradingView"
 import MessagingView from "./views/MessagingView"
 import ConversationsView from "./views/ConversationsView"
@@ -189,6 +190,7 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
             {/* Assignments routes */}
             <Route path="assignments" element={<ActiveAssignmentsView />} />
             <Route path="assignments/create" element={<CreateAssignmentView />} />
+            <Route path="assignments/templates" element={<AssignmentTemplatesView />} />
             <Route path="assignments/grading" element={<GradingView />} />
 
             {/* Messages routes */}

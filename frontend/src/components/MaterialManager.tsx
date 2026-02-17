@@ -92,6 +92,8 @@ export default function MaterialManager() {
   const [sortBy, setSortBy] = useState<'date' | 'name'>('date')
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [isUploadingFile, setIsUploadingFile] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Form state
@@ -152,8 +154,44 @@ export default function MaterialManager() {
   const handleCreateMaterial = async () => {
     try {
       const token = await getToken()
+
+      let resolvedFileUrl = formData.file_url.trim()
+      let resolvedFileSize = formData.file_size
+      let resolvedMaterialType = formData.material_type
+
+      if (!resolvedFileUrl && selectedFile) {
+        setIsUploadingFile(true)
+        const uploadFormData = new FormData()
+        uploadFormData.append('file', selectedFile)
+
+        const uploadResponse = await fetch(`${API_BASE_URL}/materials/upload`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+          body: uploadFormData,
+        })
+
+        const uploadPayload = await uploadResponse.json().catch(() => null)
+        if (!uploadResponse.ok) {
+          throw new Error(uploadPayload?.detail || 'Failed to upload file')
+        }
+
+        resolvedFileUrl = String(uploadPayload?.file_url || '')
+        resolvedFileSize = Number(uploadPayload?.file_size || selectedFile.size)
+        resolvedMaterialType = uploadPayload?.material_type || resolvedMaterialType
+      }
+
+      if (!resolvedFileUrl) {
+        toast.error('Please upload a file or provide a file URL')
+        return
+      }
+
       const payload = {
         ...formData,
+        file_url: resolvedFileUrl,
+        file_size: resolvedFileSize,
+        material_type: resolvedMaterialType,
         tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean)
       }
 
@@ -180,6 +218,7 @@ export default function MaterialManager() {
           shared_with_students: true,
           file_size: 0
         })
+        setSelectedFile(null)
         fetchMaterials()
       } else {
         toast.error('Failed to create material')
@@ -187,6 +226,8 @@ export default function MaterialManager() {
     } catch (error) {
       console.error('Failed to create material:', error)
       toast.error('Failed to create material')
+    } finally {
+      setIsUploadingFile(false)
     }
   }
 
@@ -268,11 +309,14 @@ export default function MaterialManager() {
       ...formData,
       title: file.name,
       material_type: materialType,
-      file_size: file.size
+      file_size: file.size,
+      file_url: ''
     })
+    setSelectedFile(file)
     setIsCreateDialogOpen(true)
-    // TODO: Integrate with UploadThing for actual file upload
-    toast.info('File selected. Please provide a URL or upload to cloud storage.')
+    toast.info('File attached', {
+      description: 'It will upload automatically when you create the material.',
+    })
   }
 
   const handleBrowseClick = () => {
@@ -534,7 +578,16 @@ export default function MaterialManager() {
       )}
 
       {/* Create Material Dialog */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+      <Dialog
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open)
+          if (!open) {
+            setSelectedFile(null)
+            setIsUploadingFile(false)
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add New Material</DialogTitle>
@@ -614,11 +667,13 @@ export default function MaterialManager() {
                 placeholder="https://..."
               />
               <p className="text-xs text-muted-foreground">
-                Provide a file URL or external link
+                Provide a file URL or attach a file using drag-and-drop above
               </p>
-              <p className="text-xs text-blue-600 dark:text-blue-400">
-                💡 Tip: Upload files to cloud storage (Google Drive, Dropbox) and paste the share link here
-              </p>
+              {selectedFile && (
+                <div className="rounded border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  Attached file: <span className="font-medium text-foreground">{selectedFile.name}</span>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -644,9 +699,9 @@ export default function MaterialManager() {
             <Button
               onClick={handleCreateMaterial}
               className="w-full bg-primary hover:bg-primary/90"
-              disabled={!formData.title || !formData.file_url}
+              disabled={!formData.title || (!formData.file_url && !selectedFile) || isUploadingFile}
             >
-              Create Material
+              {isUploadingFile ? 'Uploading file...' : 'Create Material'}
             </Button>
           </div>
         </DialogContent>

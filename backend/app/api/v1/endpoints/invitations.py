@@ -203,17 +203,19 @@ async def resend_invitation(
     Resend the invitation email for a pending invitation.
     """
     try:
-        logger.warning(
-            "Resend invitation endpoint called before implementation",
-            invitation_id=invitation_id,
-            tutor_id=current_user.clerk_id,
+        invitation_service = InvitationService(database)
+        invitation = await invitation_service.resend_invitation(
+            invitation_id, current_user.clerk_id
         )
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Invitation resend is not available yet.",
-        )
-    except HTTPException:
-        raise
+        return {
+            "success": True,
+            "message": "Invitation resent successfully",
+            "invitation": invitation,
+        }
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error("Failed to resend invitation", error=str(e))
         raise HTTPException(

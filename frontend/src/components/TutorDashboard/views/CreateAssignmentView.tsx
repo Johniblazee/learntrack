@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,10 +18,13 @@ import QuestionBankSelector, { QuestionItem } from '@/components/QuestionBankSel
 
 export default function CreateAssignmentView() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [assignmentType, setAssignmentType] = useState<'individual' | 'group' | 'subject'>('individual')
   const [isQuestionSelectorOpen, setIsQuestionSelectorOpen] = useState(false)
   const [selectedQuestionData, setSelectedQuestionData] = useState<QuestionItem[]>([])
+  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(null)
 
   const [formData, setFormData] = useState({
     title: '',
@@ -35,6 +39,65 @@ export default function CreateAssignmentView() {
   })
 
   const client = useApiClient()
+
+  useEffect(() => {
+    const maybeTemplate = (location.state as any)?.template
+    if (!maybeTemplate) return
+
+    const templateId = String(maybeTemplate.id || maybeTemplate._id || '')
+    if (!templateId || appliedTemplateId === templateId) return
+
+    const questionIds: string[] = Array.isArray(maybeTemplate.question_ids)
+      ? maybeTemplate.question_ids.map((questionId: any) => String(questionId))
+      : []
+
+    setFormData((prev) => ({
+      ...prev,
+      title: prev.title || `${maybeTemplate.name || 'Template'} Assignment`,
+      description: maybeTemplate.instructions || maybeTemplate.description || prev.description,
+      selectedSubject: String(maybeTemplate.subject_id || ''),
+      selectedQuestions: questionIds,
+    }))
+
+    const hydrateQuestionDetails = async () => {
+      if (questionIds.length === 0) {
+        setSelectedQuestionData([])
+        return
+      }
+
+      try {
+        const questions = await Promise.all(
+          questionIds.map(async (questionId) => {
+            const response = await client.get(`/questions/${questionId}`)
+            if (response.error || !response.data) return null
+
+            const question = response.data as any
+            return {
+              id: String(question._id || question.id || questionId),
+              _id: question._id,
+              text: question.question_text || question.text || '',
+              subject_id: question.subject_id,
+              subject: typeof question.subject_id === 'object' ? question.subject_id?.name : question.subject_id,
+              topic: question.topic,
+              difficulty: question.difficulty,
+              type: question.question_type || question.type,
+              question_type: question.question_type,
+              options: question.options,
+              correct_answer: question.correct_answer,
+            } as QuestionItem
+          })
+        )
+
+        setSelectedQuestionData(questions.filter(Boolean) as QuestionItem[])
+      } catch (error) {
+        console.error('Failed to load template questions:', error)
+        toast.error('Some template questions could not be loaded')
+      }
+    }
+
+    hydrateQuestionDetails()
+    setAppliedTemplateId(templateId)
+  }, [appliedTemplateId, client, location.state])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -117,6 +180,7 @@ export default function CreateAssignmentView() {
         selectedQuestions: [],
       })
       setSelectedQuestionData([])
+      navigate('/dashboard/assignments')
     } catch (err: any) {
       console.error('Failed to create assignment:', err)
       toast.error('Failed to create assignment', {
@@ -139,7 +203,7 @@ export default function CreateAssignmentView() {
             Create and assign work to your students
           </p>
         </div>
-        <Button variant="outline">
+        <Button variant="outline" type="button" onClick={() => navigate('/dashboard/assignments')}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Assignments
         </Button>
@@ -387,7 +451,7 @@ export default function CreateAssignmentView() {
 
         {/* Actions */}
         <div className="flex justify-end gap-4">
-          <Button type="button" variant="outline">
+          <Button type="button" variant="outline" onClick={() => navigate('/dashboard/assignments')}>
             Cancel
           </Button>
           <Button type="submit" disabled={isSubmitting}>

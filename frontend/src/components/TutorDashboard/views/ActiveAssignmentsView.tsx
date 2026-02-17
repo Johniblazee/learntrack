@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -18,6 +18,7 @@ import { ServerError } from '@/components/ErrorScreen'
 import { useNavigate } from 'react-router-dom'
 import { ViewAssignmentModal } from '@/components/modals/ViewAssignmentModal'
 import { EditAssignmentModal } from '@/components/modals/EditAssignmentModal'
+import { useSubjects } from '@/hooks/useQueries'
 
 interface Assignment {
   id: string
@@ -25,11 +26,16 @@ interface Assignment {
   subject: string
   topic: string
   dueDate: string
-  status: 'draft' | 'published' | 'completed'
+  status: string
   studentCount: number
   completedCount: number
   questionCount: number
   averageScore?: number
+}
+
+interface SubjectOption {
+  id: string
+  name: string
 }
 
 export default function ActiveAssignmentsView() {
@@ -37,7 +43,6 @@ export default function ActiveAssignmentsView() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [subjectFilter, setSubjectFilter] = useState("all")
-  const [assignments, setAssignments] = useState<Assignment[]>([])
   const [rawAssignments, setRawAssignments] = useState<any[]>([]) // Store raw backend data for modals
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -56,6 +61,78 @@ export default function ActiveAssignmentsView() {
   const [selectedAssignment, setSelectedAssignment] = useState<any | null>(null)
 
   const client = useApiClient()
+  const { data: subjectsResponse } = useSubjects()
+
+  const subjects: SubjectOption[] = useMemo(() => {
+    const source = Array.isArray(subjectsResponse)
+      ? subjectsResponse
+      : (subjectsResponse as any)?.items || []
+
+    return source
+      .map((subject: any) => ({
+        id: String(subject.id || subject._id || ''),
+        name: subject.name || 'Unknown',
+      }))
+      .filter((subject: SubjectOption) => subject.id)
+  }, [subjectsResponse])
+
+  const subjectNameById = useMemo(() => {
+    return new Map(subjects.map((subject) => [subject.id, subject.name]))
+  }, [subjects])
+
+  const assignments: Assignment[] = useMemo(() => {
+    const resolveSubjectName = (subjectValue: any): string => {
+      if (subjectValue && typeof subjectValue === 'object') {
+        if (subjectValue.name) return subjectValue.name
+        const subjectId = String(subjectValue.id || subjectValue._id || '')
+        if (subjectId) return subjectNameById.get(subjectId) || 'Unknown'
+      }
+
+      const subjectId = String(subjectValue || '')
+      if (!subjectId) return 'Unknown'
+      return subjectNameById.get(subjectId) || 'Unknown'
+    }
+
+    return rawAssignments.map((assignment: any) => {
+      const studentIds = Array.isArray(assignment.student_ids)
+        ? assignment.student_ids
+        : Array.isArray(assignment.assigned_students)
+        ? assignment.assigned_students
+        : []
+
+      const completionCount = Number(assignment.completion_count || 0)
+
+      return {
+        id: String(assignment._id || assignment.id || ''),
+        title: assignment.title,
+        subject: resolveSubjectName(assignment.subject_id),
+        topic: assignment.topic || 'General',
+        dueDate: assignment.due_date
+          ? new Date(assignment.due_date).toISOString().split('T')[0]
+          : 'N/A',
+        status: String(assignment.status || 'draft'),
+        studentCount: studentIds.length,
+        completedCount: completionCount,
+        questionCount: assignment.questions?.length || 0,
+        averageScore:
+          typeof assignment.average_score === 'number'
+            ? assignment.average_score
+            : undefined,
+      }
+    })
+  }, [rawAssignments, subjectNameById])
+
+  const availableSubjects = useMemo(() => {
+    return Array.from(new Set(assignments.map((assignment) => assignment.subject))).sort(
+      (a, b) => a.localeCompare(b)
+    )
+  }, [assignments])
+
+  const availableStatuses = useMemo(() => {
+    return Array.from(new Set(assignments.map((assignment) => assignment.status))).sort(
+      (a, b) => a.localeCompare(b)
+    )
+  }, [assignments])
 
   const fetchAssignments = async () => {
     try {
@@ -71,24 +148,8 @@ export default function ActiveAssignmentsView() {
       const rawData = (response.data?.items as any[]) || (Array.isArray(response.data) ? response.data : [])
       setRawAssignments(rawData)
 
-      // Map API response to Assignment interface for display
-      const assignmentsData = rawData.map((assignment: any) => ({
-        id: assignment._id,
-        title: assignment.title,
-        subject: assignment.subject_id?.name || "Unknown",
-        topic: assignment.topic || "General",
-        dueDate: assignment.due_date ? new Date(assignment.due_date).toISOString().split('T')[0] : "N/A",
-        status: assignment.status || 'draft',
-        studentCount: assignment.assigned_students?.length || 0,
-        completedCount: 0, // TODO: Calculate from progress
-        questionCount: assignment.questions?.length || 0,
-        averageScore: assignment.average_score || undefined
-      }))
-
-      setAssignments(assignmentsData)
-
-      if (assignmentsData.length > 0) {
-        toast.success(`Loaded ${assignmentsData.length} assignment${assignmentsData.length > 1 ? 's' : ''}`)
+      if (rawData.length > 0) {
+        toast.success(`Loaded ${rawData.length} assignment${rawData.length > 1 ? 's' : ''}`)
       }
     } catch (err: any) {
       console.error('Failed to fetch assignments:', err)
@@ -105,14 +166,35 @@ export default function ActiveAssignmentsView() {
     fetchAssignments()
   }, [])
 
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'active':
+      case 'published':
+      case 'scheduled':
+        return 'In Progress'
+      case 'completed':
+        return 'Completed'
+      case 'draft':
+        return 'Draft'
+      case 'archived':
+        return 'Archived'
+      default:
+        return status
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'active':
+      case 'scheduled':
       case 'published':
         return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-0'
       case 'completed':
         return 'bg-green-500/10 text-green-600 dark:text-green-400 border-0'
       case 'draft':
         return 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-0'
+      case 'archived':
+        return 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-0'
       default:
         return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-0'
     }
@@ -196,7 +278,9 @@ export default function ActiveAssignmentsView() {
       }
 
       // Remove from local state
-      setAssignments(assignments.filter(a => a.id !== assignmentId))
+      setRawAssignments((previous) =>
+        previous.filter((assignment) => String(assignment._id || assignment.id || '') !== assignmentId)
+      )
 
       toast.success('Assignment deleted', {
         description: `"${title}" has been deleted successfully`
@@ -210,7 +294,9 @@ export default function ActiveAssignmentsView() {
   }
 
   const handleView = (assignmentId: string) => {
-    const rawAssignment = rawAssignments.find(a => a._id === assignmentId)
+    const rawAssignment = rawAssignments.find(
+      (assignment) => String(assignment._id || assignment.id || '') === assignmentId
+    )
     if (rawAssignment) {
       setSelectedAssignment(rawAssignment)
       setViewModalOpen(true)
@@ -218,7 +304,9 @@ export default function ActiveAssignmentsView() {
   }
 
   const handleEdit = (assignmentId: string) => {
-    const rawAssignment = rawAssignments.find(a => a._id === assignmentId)
+    const rawAssignment = rawAssignments.find(
+      (assignment) => String(assignment._id || assignment.id || '') === assignmentId
+    )
     if (rawAssignment) {
       setSelectedAssignment(rawAssignment)
       setEditModalOpen(true)
@@ -270,26 +358,29 @@ export default function ActiveAssignmentsView() {
 
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[150px] h-10 border-border bg-background">
-                <SelectValue placeholder="All Courses" />
+                <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Courses</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="published">Published</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="all">All Statuses</SelectItem>
+                {availableStatuses.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {getStatusLabel(status)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
             <Select value={subjectFilter} onValueChange={setSubjectFilter}>
               <SelectTrigger className="w-[180px] h-10 border-border bg-background">
-                <SelectValue placeholder="Sort by: Due Date" />
+                <SelectValue placeholder="All Subjects" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Subjects</SelectItem>
-                <SelectItem value="Mathematics">Mathematics</SelectItem>
-                <SelectItem value="Science">Science</SelectItem>
-                <SelectItem value="English">English</SelectItem>
-                <SelectItem value="History">History</SelectItem>
+                {availableSubjects.map((subject) => (
+                  <SelectItem key={subject} value={subject}>
+                    {subject}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -405,9 +496,7 @@ export default function ActiveAssignmentsView() {
                     </TableCell>
                     <TableCell>
                       <Badge className={getStatusColor(assignment.status)}>
-                        {assignment.status === 'published' ? 'In Progress' :
-                         assignment.status === 'completed' ? 'Completed' :
-                         assignment.status === 'draft' ? 'Grading' : assignment.status}
+                        {getStatusLabel(assignment.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">

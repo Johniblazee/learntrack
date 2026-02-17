@@ -101,6 +101,11 @@ const menuItems = [
         view: "create-new",
       },
       {
+        title: "Templates",
+        icon: FileText,
+        view: "templates",
+      },
+      {
         title: "Grading",
         icon: GraduationCap,
         view: "grading",

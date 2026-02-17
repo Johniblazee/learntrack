@@ -31,6 +31,25 @@ from app.core.utils import to_object_id
 logger = structlog.get_logger()
 
 
+def _normalize_submission_status(status_value: Optional[str]) -> SubmissionStatus:
+    """Normalize legacy/raw status values to SubmissionStatus enum."""
+    normalized = (status_value or "").strip().lower()
+    if normalized in {SubmissionStatus.GRADED.value, "reviewed"}:
+        return SubmissionStatus.GRADED
+    if normalized in {SubmissionStatus.SUBMITTED.value, "completed"}:
+        return SubmissionStatus.SUBMITTED
+    return SubmissionStatus.IN_PROGRESS
+
+
+def _ensure_utc_datetime(value: Any, fallback: Optional[datetime] = None) -> datetime:
+    """Ensure datetime values are timezone-aware (UTC)."""
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    return fallback or datetime.now(timezone.utc)
+
+
 class ProgressService:
     """Progress service for database operations"""
 
@@ -138,42 +157,130 @@ class ProgressService:
             raise DatabaseException(f"Failed to update progress: {str(e)}")
 
     async def get_assignment_progress(
-        self, assignment_id: str
+        self, assignment_id: str, tutor_id: Optional[str] = None
     ) -> List[StudentProgress]:
-        """Get progress for all students in an assignment"""
+        """Get progress for all students in an assignment."""
         try:
-            # This would need to join with students and assignments collections
-            # For now, return empty list as placeholder
-            cursor = self.collection.find({"assignment_id": assignment_id})
-            progress_list = []
+            assignment_oid = to_object_id(assignment_id)
+            assignment_query: Dict[str, Any] = {"_id": assignment_oid}
+            if tutor_id:
+                assignment_query["tutor_id"] = tutor_id
 
-            async for progress in cursor:
-                # In a real implementation, you'd join with student and assignment data
-                student_progress = StudentProgress(
-                    student_id=progress["student_id"],
-                    student_name="Student Name",  # Would come from join
-                    assignment_id=progress["assignment_id"],
-                    assignment_title="Assignment Title",  # Would come from join
-                    subject_name="Subject",  # Would come from join
-                    topic="Topic",  # Would come from join
-                    status=progress["status"],
-                    score=progress.get("score"),
-                    attempts_used=1,
-                    max_attempts=3,
-                    started_at=progress.get("started_at"),
-                    submitted_at=progress.get("submitted_at"),
-                    due_date=datetime.now(timezone.utc)
-                    + timedelta(days=7),  # Would come from assignment
-                    is_overdue=False,
+            assignment = await self.db.assignments.find_one(assignment_query)
+            if not assignment:
+                raise NotFoundError("Assignment", assignment_id)
+
+            progress_query: Dict[str, Any] = {"assignment_id": assignment_id}
+            if tutor_id:
+                progress_query["tutor_id"] = tutor_id
+
+            progress_docs = await self.collection.find(progress_query).to_list(
+                length=1000
+            )
+            progress_by_student: Dict[str, Dict[str, Any]] = {
+                doc.get("student_id"): doc
+                for doc in progress_docs
+                if doc.get("student_id")
+            }
+
+            assignment_student_ids = assignment.get("student_ids", []) or []
+            all_student_ids = list(
+                dict.fromkeys(
+                    [*assignment_student_ids, *list(progress_by_student.keys())]
                 )
-                progress_list.append(student_progress)
+            )
 
+            students = []
+            if all_student_ids:
+                students = await self.db.students.find(
+                    {"clerk_id": {"$in": all_student_ids}}
+                ).to_list(length=len(all_student_ids))
+            students_by_id = {
+                student.get("clerk_id"): student for student in students if student
+            }
+
+            subject_name = "Unknown"
+            subject_id_raw = assignment.get("subject_id")
+            subject_query: Dict[str, Any] = {}
+            if isinstance(subject_id_raw, ObjectId):
+                subject_query = {"_id": subject_id_raw}
+            elif isinstance(subject_id_raw, str):
+                try:
+                    subject_query = {"_id": to_object_id(subject_id_raw)}
+                except Exception:
+                    subject_query = {"id": subject_id_raw}
+
+            if subject_query:
+                subject_doc = await self.db.subjects.find_one(subject_query)
+                if subject_doc:
+                    subject_name = subject_doc.get("name", "Unknown")
+
+            assignment_title = assignment.get("title", "Assignment")
+            topic = assignment.get("topic") or "General"
+            max_attempts = int(assignment.get("max_attempts", 1) or 1)
+            now = datetime.now(timezone.utc)
+            due_date_raw = assignment.get("due_date")
+            due_date = _ensure_utc_datetime(due_date_raw, now) if due_date_raw else now
+
+            progress_list: List[StudentProgress] = []
+            for student_id in all_student_ids:
+                progress_doc = progress_by_student.get(student_id)
+                normalized_status = _normalize_submission_status(
+                    progress_doc.get("status") if progress_doc else None
+                )
+
+                started_at = (
+                    _ensure_utc_datetime(progress_doc.get("started_at"), now)
+                    if progress_doc and progress_doc.get("started_at")
+                    else None
+                )
+                submitted_at = (
+                    _ensure_utc_datetime(progress_doc.get("submitted_at"), now)
+                    if progress_doc and progress_doc.get("submitted_at")
+                    else None
+                )
+
+                attempts_used = (
+                    int(progress_doc.get("attempt_number", 1)) if progress_doc else 0
+                )
+
+                is_overdue = (
+                    bool(due_date_raw)
+                    and due_date < now
+                    and normalized_status == SubmissionStatus.IN_PROGRESS
+                )
+
+                student_doc = students_by_id.get(student_id, {})
+
+                progress_list.append(
+                    StudentProgress(
+                        student_id=student_id,
+                        student_name=student_doc.get("name", "Unknown Student"),
+                        assignment_id=assignment_id,
+                        assignment_title=assignment_title,
+                        subject_name=subject_name,
+                        topic=topic,
+                        status=normalized_status,
+                        score=progress_doc.get("score") if progress_doc else None,
+                        attempts_used=attempts_used,
+                        max_attempts=max_attempts,
+                        started_at=started_at,
+                        submitted_at=submitted_at,
+                        due_date=due_date,
+                        is_overdue=is_overdue,
+                    )
+                )
+
+            progress_list.sort(key=lambda item: item.student_name.lower())
             return progress_list
 
+        except NotFoundError:
+            raise
         except Exception as e:
             logger.error(
                 "Failed to get assignment progress",
                 assignment_id=assignment_id,
+                tutor_id=tutor_id,
                 error=str(e),
             )
             raise DatabaseException(f"Failed to get assignment progress: {str(e)}")
@@ -263,12 +370,12 @@ class ProgressService:
 
             # Calculate basic analytics from fetched records
             total_assignments = len(progress_records)
+            completed_statuses = {
+                SubmissionStatus.SUBMITTED.value,
+                SubmissionStatus.GRADED.value,
+            }
             completed_assignments = len(
-                [
-                    p
-                    for p in progress_records
-                    if p.get("status") == SubmissionStatus.SUBMITTED.value
-                ]
+                [p for p in progress_records if p.get("status") in completed_statuses]
             )
             pending_assignments = total_assignments - completed_assignments
 
@@ -323,9 +430,7 @@ class ProgressService:
 
             # Get recent submissions (last 5 completed) - data already fetched
             completed_records = [
-                p
-                for p in progress_records
-                if p.get("status") == SubmissionStatus.SUBMITTED.value
+                p for p in progress_records if p.get("status") in completed_statuses
             ]
             completed_records.sort(
                 key=lambda x: ensure_tz_aware(x.get("submitted_at"))
@@ -362,11 +467,7 @@ class ProgressService:
                     and week_start <= tz_dt < week_end
                 ]
                 completed_in_week = len(
-                    [
-                        p
-                        for p in week_records
-                        if p.get("status") == SubmissionStatus.SUBMITTED.value
-                    ]
+                    [p for p in week_records if p.get("status") in completed_statuses]
                 )
 
                 weekly_progress.append(
@@ -402,30 +503,201 @@ class ProgressService:
     ) -> List[ParentProgressView]:
         """Get progress view for parent's children"""
         try:
-            # This would need to get children from user relationships
-            # For now, return mock data
-            mock_child_analytics = await self.get_student_analytics("mock_child_id")
+            parent = await self.db.parents.find_one({"clerk_id": parent_id})
+            if not parent:
+                return []
 
-            parent_view = ParentProgressView(
-                child_id="mock_child_id",
-                child_name="Sarah Johnson",
-                analytics=mock_child_analytics,
-                recent_assignments=[],
-                upcoming_assignments=[
-                    {
-                        "title": "Algebra Practice",
-                        "due_date": "2024-12-25",
-                        "subject": "Mathematics",
-                    },
-                    {
-                        "title": "Physics Quiz",
-                        "due_date": "2024-12-28",
-                        "subject": "Physics",
-                    },
-                ],
-            )
+            child_ids = parent.get("parent_children") or parent.get("student_ids") or []
+            if not child_ids:
+                return []
 
-            return [parent_view]
+            students = await self.db.students.find(
+                {"clerk_id": {"$in": child_ids}}
+            ).to_list(length=len(child_ids))
+            students_by_id = {
+                student.get("clerk_id"): student for student in students if student
+            }
+
+            now = datetime.now(timezone.utc)
+            completed_statuses = {
+                SubmissionStatus.SUBMITTED,
+                SubmissionStatus.GRADED,
+            }
+
+            parent_views: List[ParentProgressView] = []
+
+            for child_id in child_ids:
+                child = students_by_id.get(child_id)
+                if not child:
+                    continue
+
+                analytics = await self.get_student_analytics(child_id)
+
+                # Fetch recent progress attempts for this child
+                progress_docs = (
+                    await self.collection.find({"student_id": child_id})
+                    .sort("updated_at", -1)
+                    .limit(20)
+                    .to_list(length=20)
+                )
+
+                assignment_ids = list(
+                    {
+                        str(doc.get("assignment_id"))
+                        for doc in progress_docs
+                        if doc.get("assignment_id")
+                    }
+                )
+
+                assignment_object_ids = []
+                for assignment_id in assignment_ids:
+                    try:
+                        assignment_object_ids.append(to_object_id(assignment_id))
+                    except Exception:
+                        continue
+
+                assignments = []
+                if assignment_object_ids:
+                    assignments = await self.db.assignments.find(
+                        {"_id": {"$in": assignment_object_ids}}
+                    ).to_list(length=len(assignment_object_ids))
+                assignments_by_id = {
+                    str(assignment.get("_id")): assignment
+                    for assignment in assignments
+                    if assignment.get("_id")
+                }
+
+                subject_object_ids: List[ObjectId] = []
+                for assignment in assignments:
+                    subject_raw = assignment.get("subject_id")
+                    if isinstance(subject_raw, ObjectId):
+                        subject_object_ids.append(subject_raw)
+                    elif isinstance(subject_raw, str):
+                        try:
+                            converted_subject_id = to_object_id(subject_raw)
+                            if isinstance(converted_subject_id, ObjectId):
+                                subject_object_ids.append(converted_subject_id)
+                        except Exception:
+                            continue
+
+                subjects = []
+                if subject_object_ids:
+                    subjects = await self.db.subjects.find(
+                        {"_id": {"$in": list(set(subject_object_ids))}}
+                    ).to_list(length=len(subject_object_ids))
+                subject_map = {
+                    str(subject.get("_id")): subject.get("name", "Unknown")
+                    for subject in subjects
+                    if subject.get("_id")
+                }
+
+                recent_assignments: List[StudentProgress] = []
+                for progress_doc in progress_docs:
+                    assignment_id = str(progress_doc.get("assignment_id", ""))
+                    assignment = assignments_by_id.get(assignment_id)
+                    if not assignment:
+                        continue
+
+                    normalized_status = _normalize_submission_status(
+                        progress_doc.get("status")
+                    )
+                    subject_key = str(assignment.get("subject_id", ""))
+                    due_date_raw = assignment.get("due_date")
+                    due_date = (
+                        _ensure_utc_datetime(due_date_raw, now) if due_date_raw else now
+                    )
+
+                    recent_assignments.append(
+                        StudentProgress(
+                            student_id=child_id,
+                            student_name=child.get("name", "Unknown Student"),
+                            assignment_id=assignment_id,
+                            assignment_title=assignment.get("title", "Assignment"),
+                            subject_name=subject_map.get(subject_key, "Unknown"),
+                            topic=assignment.get("topic") or "General",
+                            status=normalized_status,
+                            score=progress_doc.get("score"),
+                            attempts_used=int(progress_doc.get("attempt_number", 1)),
+                            max_attempts=int(assignment.get("max_attempts", 1) or 1),
+                            started_at=progress_doc.get("started_at"),
+                            submitted_at=progress_doc.get("submitted_at"),
+                            due_date=due_date,
+                            is_overdue=bool(due_date_raw)
+                            and due_date < now
+                            and normalized_status == SubmissionStatus.IN_PROGRESS,
+                        )
+                    )
+
+                recent_assignments = recent_assignments[:5]
+
+                # Fetch upcoming assignments for this child
+                upcoming_assignment_docs = (
+                    await self.db.assignments.find(
+                        {
+                            "student_ids": child_id,
+                            "due_date": {"$ne": None, "$gte": now},
+                            "status": {"$nin": ["archived", "completed"]},
+                        }
+                    )
+                    .sort("due_date", 1)
+                    .limit(10)
+                    .to_list(length=10)
+                )
+
+                upcoming_assignment_ids = [
+                    str(assignment.get("_id"))
+                    for assignment in upcoming_assignment_docs
+                    if assignment.get("_id")
+                ]
+                upcoming_progress_docs = []
+                if upcoming_assignment_ids:
+                    upcoming_progress_docs = await self.collection.find(
+                        {
+                            "student_id": child_id,
+                            "assignment_id": {"$in": upcoming_assignment_ids},
+                        }
+                    ).to_list(length=len(upcoming_assignment_ids))
+
+                upcoming_progress_map = {
+                    doc.get("assignment_id"): doc
+                    for doc in upcoming_progress_docs
+                    if doc.get("assignment_id")
+                }
+
+                upcoming_assignments: List[Dict[str, Any]] = []
+                for upcoming in upcoming_assignment_docs:
+                    upcoming_assignment_id = str(upcoming.get("_id"))
+                    progress_doc = upcoming_progress_map.get(upcoming_assignment_id)
+                    progress_status = _normalize_submission_status(
+                        progress_doc.get("status") if progress_doc else None
+                    )
+
+                    # Do not show completed/submitted work in upcoming list
+                    if progress_status in completed_statuses:
+                        continue
+
+                    due_date = _ensure_utc_datetime(upcoming.get("due_date"), now)
+                    upcoming_subject_key = str(upcoming.get("subject_id", ""))
+
+                    upcoming_assignments.append(
+                        {
+                            "title": upcoming.get("title", "Untitled Assignment"),
+                            "due_date": due_date.isoformat(),
+                            "subject": subject_map.get(upcoming_subject_key, "Unknown"),
+                        }
+                    )
+
+                parent_views.append(
+                    ParentProgressView(
+                        child_id=child_id,
+                        child_name=child.get("name", "Unknown Student"),
+                        analytics=analytics,
+                        recent_assignments=recent_assignments,
+                        upcoming_assignments=upcoming_assignments,
+                    )
+                )
+
+            return parent_views
 
         except Exception as e:
             logger.error(

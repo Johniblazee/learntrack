@@ -27,7 +27,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Search, CheckCircle, Clock, AlertCircle, Eye, FileText } from 'lucide-react'
-import { useAuth } from '@clerk/clerk-react'
+import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -59,7 +59,7 @@ interface Submission {
 }
 
 export default function GradingView() {
-  const { getToken } = useAuth()
+  const client = useApiClient()
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -73,12 +73,11 @@ export default function GradingView() {
   const loadSubmissions = async () => {
     try {
       setLoading(true)
-      await getToken()
+      const response = await client.get('/progress/submissions')
 
-      // TODO: Replace with actual API endpoint when available
-      // For now, using mock data
-      const mockSubmissions: Submission[] = []
-      setSubmissions(mockSubmissions)
+      if (response.error) throw new Error(response.error)
+
+      setSubmissions(response.data || [])
     } catch (error) {
       console.error('Failed to load submissions:', error)
       toast.error('Failed to load submissions')
@@ -89,10 +88,6 @@ export default function GradingView() {
 
   useEffect(() => {
     loadSubmissions()
-    // Show info toast once on mount
-    toast.info('Grading center is in development', {
-      description: 'Submission grading functionality will be available soon'
-    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -101,9 +96,14 @@ export default function GradingView() {
 
     try {
       setGrading(true)
-      await getToken()
+      const numericScore = Number(score)
+      const response = await client.put(`/progress/submissions/${selectedSubmission._id}/grade`, {
+        score: numericScore,
+        feedback: feedback.trim() || undefined,
+      })
 
-      // TODO: Implement actual grading API call
+      if (response.error) throw new Error(response.error)
+
       toast.success('Submission graded successfully')
       setGradeModalOpen(false)
       setSelectedSubmission(null)
@@ -265,7 +265,7 @@ export default function GradingView() {
                         {submission.assignment_id.title}
                       </TableCell>
                       <TableCell className="text-foreground">
-                        {submission.assignment_id.subject_id.name}
+                        {submission.assignment_id.subject_id?.name || 'General'}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatDistanceToNow(new Date(submission.submitted_at), { addSuffix: true })}

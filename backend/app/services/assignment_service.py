@@ -201,9 +201,66 @@ class AssignmentService:
                 .skip(skip)
                 .limit(per_page)
             )
-            assignments = []
+            assignment_docs = await cursor.to_list(length=per_page)
 
-            async for assignment in cursor:
+            assignment_ids = [
+                str(assignment.get("_id"))
+                for assignment in assignment_docs
+                if assignment.get("_id")
+            ]
+
+            progress_stats_map: Dict[str, Dict[str, Any]] = {}
+            if assignment_ids:
+                completion_statuses = ["submitted", "graded", "completed"]
+                progress_pipeline = [
+                    {
+                        "$match": {
+                            "tutor_id": tutor_id,
+                            "assignment_id": {"$in": assignment_ids},
+                            "status": {"$in": completion_statuses},
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": "$assignment_id",
+                            "submitted_students": {"$addToSet": "$student_id"},
+                            "average_score": {"$avg": "$score"},
+                        }
+                    },
+                ]
+
+                progress_stats = await self.db.progress.aggregate(
+                    progress_pipeline
+                ).to_list(length=len(assignment_ids))
+
+                for stats in progress_stats:
+                    submitted_students = [
+                        student_id
+                        for student_id in stats.get("submitted_students", [])
+                        if student_id
+                    ]
+                    avg_score = stats.get("average_score")
+                    progress_stats_map[str(stats.get("_id"))] = {
+                        "completion_count": len(submitted_students),
+                        "average_score": round(float(avg_score), 1)
+                        if avg_score is not None
+                        else None,
+                    }
+
+            assignments: List[Assignment] = []
+            for assignment in assignment_docs:
+                assignment_id = str(assignment.get("_id"))
+                assignment_stats = progress_stats_map.get(assignment_id, {})
+
+                assignment["completion_count"] = int(
+                    assignment_stats.get(
+                        "completion_count", assignment.get("completion_count", 0)
+                    )
+                )
+
+                if "average_score" in assignment_stats:
+                    assignment["average_score"] = assignment_stats.get("average_score")
+
                 assignments.append(_convert_doc_to_assignment(assignment))
 
             return {

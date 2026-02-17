@@ -24,11 +24,11 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import StudentAssignmentWorkspace from "@/components/student-assignment-workspace"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { toast } from "@/contexts/ToastContext"
 import { useMyAssignments, useStudentDashboardStats, useStudentProgressAnalytics } from "@/hooks/useQueries"
 import { cn } from "@/lib/utils"
 
@@ -131,6 +131,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
+  const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null)
 
   const { data: rawAssignments = [], isLoading: assignmentsLoading } = useMyAssignments()
   const { data: dashboardStats, isLoading: statsLoading } = useStudentDashboardStats()
@@ -238,9 +239,7 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
   }, [progressAnalytics?.recent_submissions])
 
   const handleStartAssignment = (assignment: AssignmentCardData) => {
-    toast.info("Assignment workspace is being prepared", {
-      description: `Opening ${assignment.title}`,
-    })
+    setActiveAssignmentId(assignment.id)
   }
 
   const handleSignOut = async () => {
@@ -614,6 +613,16 @@ export default function StudentDashboard({ onBack }: StudentDashboardProps) {
           </div>
         </main>
       </div>
+
+      <StudentAssignmentWorkspace
+        assignmentId={activeAssignmentId}
+        open={Boolean(activeAssignmentId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActiveAssignmentId(null)
+          }
+        }}
+      />
     </div>
   )
 }

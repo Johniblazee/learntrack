@@ -2,12 +2,13 @@
 Progress tracking endpoints
 """
 
-from typing import List, Dict, Any
-from datetime import timedelta
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Path, Query, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from dateutil.relativedelta import relativedelta
 import structlog
+from bson import ObjectId
 
 from app.core.database import get_database
 from app.core.enhanced_auth import (
@@ -20,15 +21,22 @@ from app.core.enhanced_auth import (
 from app.models.progress import (
     Progress,
     ProgressUpdate,
+    GradeSubmissionRequest,
+    AnswerSubmissionRequest,
     StudentProgress,
     ProgressAnalytics,
     ParentProgressView,
     ProgressReportsResponse,
     ProgressCreate,
+    AnswerType,
+    QuestionAnswer,
+    SubmissionStatus,
     StudentPerformanceData,
     WeeklyProgressData,
 )
 from app.services.progress_service import ProgressService
+from app.core.utils import to_object_id
+from app.core.exceptions import NotFoundError
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -216,9 +224,10 @@ async def get_progress_reports(
         for student in students:
             student_performance.append(
                 StudentPerformanceData(
-                    student_name=student.name,
-                    subject_scores={"math": 85, "physics": 78, "chemistry": 92},
-                    tutor_id=current_user.tutor_id,
+                    name=student.name,
+                    math=85,
+                    physics=78,
+                    chemistry=92,
                 )
             )
 
@@ -250,7 +259,14 @@ async def get_assignment_progress(
     """Get progress for all students in an assignment (tutor only)"""
     try:
         progress_service = ProgressService(database)
-        return await progress_service.get_assignment_progress(assignment_id)
+        return await progress_service.get_assignment_progress(
+            assignment_id=assignment_id,
+            tutor_id=current_user.clerk_id,
+        )
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
+        )
     except Exception as e:
         logger.error("Failed to get assignment progress", error=str(e))
         raise HTTPException(
@@ -365,20 +381,352 @@ async def update_assignment_progress(
 
 @router.post("/assignment/{assignment_id}/answer")
 async def submit_answer(
+    submission: AnswerSubmissionRequest,
     assignment_id: str = Path(..., description="Assignment ID"),
     current_user: ClerkUserContext = Depends(require_student),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Submit answer for a question in assignment"""
-    logger.warning(
-        "Submit answer endpoint called before implementation",
-        assignment_id=assignment_id,
-        student_id=current_user.clerk_id,
+    """Submit answers for an assignment and optionally finalize submission."""
+    try:
+        assignment_oid = to_object_id(assignment_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid assignment ID"
+        )
+
+    assignment = await database.assignments.find_one({"_id": assignment_oid})
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
+        )
+
+    assigned_students = assignment.get("student_ids", [])
+    if current_user.clerk_id not in assigned_students:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not assigned to this assignment",
+        )
+
+    progress_service = ProgressService(database)
+    progress = await progress_service.get_student_assignment_progress(
+        current_user.clerk_id, assignment_id
     )
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Answer submission is not available yet.",
+    if not progress:
+        progress = await progress_service.create_progress(
+            ProgressCreate(
+                assignment_id=assignment_id,
+                student_id=current_user.clerk_id,
+                tutor_id=current_user.tutor_id,
+            )
+        )
+
+    incoming_answers = submission.answers or progress.answers
+    if not incoming_answers and submission.submit_assignment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot submit assignment without answers",
+        )
+
+    assignment_questions = assignment.get("questions", [])
+    points_by_question = {
+        str(question.get("question_id")): float(question.get("points", 1))
+        for question in assignment_questions
+        if question.get("question_id")
+    }
+
+    question_id_set = {
+        str(answer.question_id) for answer in incoming_answers if answer.question_id
+    }
+    question_docs: Dict[str, Any] = {}
+    question_object_ids = []
+    for question_id in question_id_set:
+        try:
+            question_object_ids.append(to_object_id(question_id))
+        except Exception:
+            continue
+
+    if question_object_ids:
+        docs = await database.questions.find(
+            {"_id": {"$in": question_object_ids}}
+        ).to_list(length=500)
+        for doc in docs:
+            question_docs[str(doc.get("_id"))] = doc
+
+    def normalize_text(value: Optional[str]) -> str:
+        return (value or "").strip().lower()
+
+    scored_answers: List[QuestionAnswer] = []
+    total_points_earned = 0.0
+    total_points_possible = 0.0
+    now = datetime.now(timezone.utc)
+
+    for answer in incoming_answers:
+        question_id = str(answer.question_id)
+        question_doc = question_docs.get(question_id)
+
+        points_possible = float(
+            points_by_question.get(
+                question_id, question_doc.get("points", 1) if question_doc else 1
+            )
+        )
+        answer_type = AnswerType.UNANSWERED
+        points_earned = 0.0
+
+        selected_options = answer.selected_options or []
+        answer_text = (answer.answer or "").strip()
+        has_response = bool(answer_text or selected_options)
+
+        if question_doc:
+            question_type = str(question_doc.get("question_type", "")).lower()
+            correct_answer = question_doc.get("correct_answer")
+
+            if question_type == "multiple-choice":
+                correct_options = [
+                    normalize_text(option.get("text"))
+                    for option in question_doc.get("options", [])
+                    if option.get("is_correct")
+                ]
+                submitted_options = [normalize_text(opt) for opt in selected_options]
+
+                if (
+                    submitted_options
+                    and correct_options
+                    and set(submitted_options) == set(correct_options)
+                ):
+                    answer_type = AnswerType.CORRECT
+                    points_earned = points_possible
+                elif submitted_options:
+                    answer_type = AnswerType.INCORRECT
+                else:
+                    answer_type = AnswerType.UNANSWERED
+
+            elif question_type == "true-false":
+                submitted_value = answer_text or (
+                    selected_options[0] if selected_options else ""
+                )
+                if not submitted_value:
+                    answer_type = AnswerType.UNANSWERED
+                elif normalize_text(submitted_value) == normalize_text(
+                    str(correct_answer or "")
+                ):
+                    answer_type = AnswerType.CORRECT
+                    points_earned = points_possible
+                else:
+                    answer_type = AnswerType.INCORRECT
+
+            elif question_type == "short-answer":
+                if not answer_text:
+                    answer_type = AnswerType.UNANSWERED
+                elif normalize_text(answer_text) == normalize_text(
+                    str(correct_answer or "")
+                ):
+                    answer_type = AnswerType.CORRECT
+                    points_earned = points_possible
+                else:
+                    answer_type = AnswerType.INCORRECT
+
+            else:
+                answer_type = (
+                    AnswerType.PARTIAL if has_response else AnswerType.UNANSWERED
+                )
+        else:
+            answer_type = AnswerType.PARTIAL if has_response else AnswerType.UNANSWERED
+
+        total_points_possible += points_possible
+        total_points_earned += points_earned
+
+        scored_answers.append(
+            QuestionAnswer(
+                question_id=question_id,
+                answer=answer.answer,
+                selected_options=selected_options,
+                answer_type=answer_type,
+                points_earned=round(points_earned, 2),
+                points_possible=round(points_possible, 2),
+                time_spent=answer.time_spent,
+                answered_at=answer.answered_at or (now if has_response else None),
+            )
+        )
+
+    score = (
+        round((total_points_earned / total_points_possible) * 100, 2)
+        if total_points_possible > 0 and submission.submit_assignment
+        else None
     )
+
+    progress_update = ProgressUpdate(
+        answers=scored_answers,
+        status=SubmissionStatus.SUBMITTED
+        if submission.submit_assignment
+        else SubmissionStatus.IN_PROGRESS,
+        submitted_at=now if submission.submit_assignment else None,
+        score=score,
+        points_earned=round(total_points_earned, 2),
+        points_possible=round(total_points_possible, 2),
+        time_spent=sum(answer.time_spent or 0 for answer in scored_answers),
+    )
+
+    updated_progress = await progress_service.update_progress(
+        str(progress.id), progress_update
+    )
+    return updated_progress
+
+
+@router.get("/submissions", response_model=List[Dict[str, Any]])
+async def list_submissions_for_grading(
+    status_filter: Optional[str] = Query(
+        None, description="Filter by status (pending, graded)"
+    ),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """List assignment submissions for grading center (tutor only)."""
+    normalized_filter = (status_filter or "").strip().lower()
+    allowed_filters = {"", "all", "pending", "graded", "reviewed"}
+    if normalized_filter not in allowed_filters:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid status filter. Allowed: pending, graded, reviewed, all",
+        )
+
+    status_query_map = {
+        "pending": [SubmissionStatus.SUBMITTED.value],
+        "graded": [SubmissionStatus.GRADED.value],
+        "reviewed": [SubmissionStatus.GRADED.value],
+        "all": [SubmissionStatus.SUBMITTED.value, SubmissionStatus.GRADED.value],
+        "": [SubmissionStatus.SUBMITTED.value, SubmissionStatus.GRADED.value],
+    }
+    statuses = status_query_map.get(normalized_filter, status_query_map[""])
+
+    query = {
+        "tutor_id": current_user.clerk_id,
+        "status": {"$in": statuses},
+    }
+    progress_docs = (
+        await database.progress.find(query).sort("submitted_at", -1).to_list(length=300)
+    )
+
+    assignment_ids = []
+    for doc in progress_docs:
+        assignment_id = doc.get("assignment_id")
+        if assignment_id:
+            assignment_ids.append(str(assignment_id))
+
+    assignment_object_ids = []
+    for assignment_id in assignment_ids:
+        try:
+            assignment_object_ids.append(to_object_id(assignment_id))
+        except Exception:
+            continue
+
+    assignments = []
+    if assignment_object_ids:
+        assignments = await database.assignments.find(
+            {"_id": {"$in": assignment_object_ids}}
+        ).to_list(length=len(assignment_object_ids))
+    assignments_by_id = {str(item.get("_id")): item for item in assignments}
+
+    student_ids = list(
+        {doc.get("student_id") for doc in progress_docs if doc.get("student_id")}
+    )
+    students = []
+    if student_ids:
+        students = await database.students.find(
+            {"clerk_id": {"$in": student_ids}}
+        ).to_list(length=len(student_ids))
+    students_by_id = {student.get("clerk_id"): student for student in students}
+
+    subject_ids: List[Any] = []
+    for assignment in assignments:
+        subject_id = assignment.get("subject_id")
+        if isinstance(subject_id, ObjectId):
+            subject_ids.append(subject_id)
+        elif isinstance(subject_id, str):
+            try:
+                converted_subject_id = to_object_id(subject_id)
+                if isinstance(converted_subject_id, ObjectId):
+                    subject_ids.append(converted_subject_id)
+            except Exception:
+                continue
+
+    subjects = []
+    if subject_ids:
+        subjects = await database.subjects.find({"_id": {"$in": subject_ids}}).to_list(
+            length=len(subject_ids)
+        )
+    subjects_by_id = {str(subject.get("_id")): subject for subject in subjects}
+
+    response_items: List[Dict[str, Any]] = []
+    for doc in progress_docs:
+        assignment_id = str(doc.get("assignment_id", ""))
+        assignment = assignments_by_id.get(assignment_id, {})
+        subject_raw = assignment.get("subject_id")
+        subject_key = str(subject_raw) if subject_raw is not None else ""
+        subject = subjects_by_id.get(subject_key, {})
+        student = students_by_id.get(doc.get("student_id"), {})
+
+        response_items.append(
+            {
+                "_id": str(doc.get("_id")),
+                "assignment_id": {
+                    "_id": assignment_id,
+                    "title": assignment.get("title", "Untitled Assignment"),
+                    "subject_id": {
+                        "name": subject.get("name", "General"),
+                    },
+                },
+                "student_id": {
+                    "_id": student.get("clerk_id", doc.get("student_id")),
+                    "clerk_id": student.get("clerk_id", doc.get("student_id")),
+                    "name": student.get("name", "Unknown Student"),
+                    "email": student.get("email", ""),
+                },
+                "answers": doc.get("answers", []),
+                "score": doc.get("score"),
+                "status": "pending"
+                if doc.get("status") == SubmissionStatus.SUBMITTED.value
+                else "graded",
+                "submitted_at": doc.get("submitted_at") or doc.get("updated_at"),
+                "graded_at": doc.get("graded_at"),
+                "feedback": doc.get("feedback"),
+            }
+        )
+
+    return response_items
+
+
+@router.put("/submissions/{progress_id}/grade", response_model=Progress)
+async def grade_submission(
+    grade_data: GradeSubmissionRequest,
+    progress_id: str = Path(..., description="Progress submission ID"),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Grade a student submission (tutor only)."""
+    progress_service = ProgressService(database)
+    try:
+        progress_oid = to_object_id(progress_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid submission ID"
+        )
+
+    existing = await database.progress.find_one(
+        {"_id": progress_oid, "tutor_id": current_user.clerk_id}
+    )
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
+
+    update = ProgressUpdate(
+        status=SubmissionStatus.GRADED,
+        score=grade_data.score,
+        feedback=grade_data.feedback,
+        graded_at=datetime.now(timezone.utc),
+        graded_by=current_user.clerk_id,
+    )
+    return await progress_service.update_progress(progress_id, update)
 
 
 @router.get("/subject/{subject_id}/analytics", response_model=Dict[str, Any])
@@ -388,12 +736,110 @@ async def get_subject_analytics(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get analytics for a subject"""
-    logger.warning(
-        "Subject analytics endpoint called before implementation",
-        subject_id=subject_id,
-        tutor_id=current_user.clerk_id,
-    )
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Subject analytics is not available yet.",
-    )
+    try:
+        subject_object_id = None
+        try:
+            converted_subject_id = to_object_id(subject_id)
+            if isinstance(converted_subject_id, ObjectId):
+                subject_object_id = converted_subject_id
+        except Exception:
+            subject_object_id = None
+
+        subject_query: Dict[str, Any] = {"tutor_id": current_user.clerk_id}
+        if subject_object_id:
+            subject_query["_id"] = subject_object_id
+        else:
+            # Fallback for non-ObjectId legacy subject ids
+            subject_query["id"] = subject_id
+
+        subject_doc = await database.subjects.find_one(subject_query)
+        if not subject_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found"
+            )
+
+        assignment_subject_filters: List[Dict[str, Any]] = [{"subject_id": subject_id}]
+        if subject_object_id:
+            assignment_subject_filters.append({"subject_id": subject_object_id})
+
+        assignments = await database.assignments.find(
+            {
+                "tutor_id": current_user.clerk_id,
+                "$or": assignment_subject_filters,
+            }
+        ).to_list(length=1000)
+
+        assignment_ids = [
+            str(assignment.get("_id"))
+            for assignment in assignments
+            if assignment.get("_id")
+        ]
+
+        expected_submissions = sum(
+            len(assignment.get("student_ids", []) or []) for assignment in assignments
+        )
+
+        progress_docs = []
+        if assignment_ids:
+            progress_docs = await database.progress.find(
+                {
+                    "tutor_id": current_user.clerk_id,
+                    "assignment_id": {"$in": assignment_ids},
+                }
+            ).to_list(length=5000)
+
+        completed_statuses = {
+            SubmissionStatus.SUBMITTED.value,
+            SubmissionStatus.GRADED.value,
+            "completed",  # legacy compatibility
+        }
+
+        completed_progress = [
+            progress
+            for progress in progress_docs
+            if progress.get("status") in completed_statuses
+        ]
+        graded_progress = [
+            progress
+            for progress in progress_docs
+            if progress.get("status") == SubmissionStatus.GRADED.value
+        ]
+
+        scores = [
+            float(progress.get("score"))
+            for progress in completed_progress
+            if progress.get("score") is not None
+        ]
+
+        submissions_received = len(completed_progress)
+        pending_submissions = max(expected_submissions - submissions_received, 0)
+        completion_rate = (
+            round((submissions_received / expected_submissions) * 100, 1)
+            if expected_submissions > 0
+            else 0.0
+        )
+
+        return {
+            "subject_id": str(subject_doc.get("_id", subject_id)),
+            "subject_name": subject_doc.get("name", "Unknown"),
+            "total_assignments": len(assignments),
+            "students_assigned": expected_submissions,
+            "submissions_received": submissions_received,
+            "pending_submissions": pending_submissions,
+            "graded_submissions": len(graded_progress),
+            "completion_rate": completion_rate,
+            "average_score": round(sum(scores) / len(scores), 1) if scores else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "Failed to get subject analytics",
+            subject_id=subject_id,
+            tutor_id=current_user.clerk_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve subject analytics",
+        )

@@ -407,6 +407,84 @@ class InvitationService:
             logger.error("Failed to revoke invitation", error=str(e))
             raise DatabaseException(f"Failed to revoke invitation: {str(e)}")
 
+    async def resend_invitation(self, invitation_id: str, tutor_id: str) -> Invitation:
+        """Resend a pending invitation and extend its expiration window."""
+        try:
+            oid = to_object_id(invitation_id)
+            invitation = await self.collection.find_one({"_id": oid})
+            if not invitation:
+                raise NotFoundError("Invitation", invitation_id)
+
+            if invitation.get("tutor_id") != tutor_id:
+                raise ValidationError("Not authorized to resend this invitation")
+
+            if invitation.get("status") != InvitationStatus.PENDING.value:
+                raise ValidationError("Only pending invitations can be resent")
+
+            now = datetime.now(timezone.utc)
+            expires_at = invitation.get("expires_at")
+            if expires_at and expires_at < now:
+                await self.collection.update_one(
+                    {"_id": oid}, {"$set": {"status": InvitationStatus.EXPIRED.value}}
+                )
+                raise ValidationError(
+                    "Invitation has expired. Create a new invitation instead."
+                )
+
+            refreshed_token = self._generate_token()
+            refreshed_expiry = now + timedelta(days=14)
+
+            await self.collection.update_one(
+                {"_id": oid},
+                {
+                    "$set": {
+                        "token": refreshed_token,
+                        "expires_at": refreshed_expiry,
+                        "updated_at": now,
+                    }
+                },
+            )
+
+            updated = await self.collection.find_one({"_id": oid})
+            if not updated:
+                raise NotFoundError("Invitation", invitation_id)
+
+            try:
+                tutor = await self.user_service.get_user_by_clerk_id(tutor_id)
+                tutor_name = tutor.name if tutor else "Your Teacher"
+
+                invitation_link = f"{FRONTEND_URL}/accept-invitation/{refreshed_token}"
+                role_value = updated.get("role")
+
+                email_service.send_invitation_email(
+                    to_email=updated.get("invitee_email"),
+                    to_name=updated.get("invitee_name") or "there",
+                    from_name=tutor_name,
+                    role=role_value,
+                    invitation_link=invitation_link,
+                )
+            except Exception as email_error:
+                logger.warning(
+                    "Failed to send resent invitation email",
+                    error=str(email_error),
+                    invitation_id=invitation_id,
+                )
+
+            logger.info(
+                "Invitation resent",
+                invitation_id=invitation_id,
+                tutor_id=tutor_id,
+                invitee_email=updated.get("invitee_email"),
+            )
+
+            return self._to_invitation_model(updated)
+
+        except (NotFoundError, ValidationError):
+            raise
+        except Exception as e:
+            logger.error("Failed to resend invitation", error=str(e))
+            raise DatabaseException(f"Failed to resend invitation: {str(e)}")
+
     def _to_invitation_model(self, invitation_dict: dict) -> Invitation:
         """Convert database document to Invitation model"""
         invitation_dict["id"] = str(invitation_dict.pop("_id"))
