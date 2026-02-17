@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
@@ -16,7 +17,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { MessageCircle, Edit, CheckCircle2, Clock, Users, FileText, Calendar, X, UserPlus, Mail, Loader2, TrendingUp, Target, BookOpen, Award, BarChart3, Activity as ActivityIcon, GraduationCap, User } from 'lucide-react'
+import { MessageCircle, Edit, CheckCircle2, Clock, Users, FileText, Calendar, X, UserPlus, Mail, Phone, Loader2, TrendingUp, Target, BookOpen, Award, BarChart3, Activity as ActivityIcon, GraduationCap, User } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
@@ -29,12 +30,14 @@ interface StudentDetails {
   dbId?: string
   name: string
   email: string
+  phone?: string
   avatar?: string
   joinedDate: string
   studentId: string
   grade: string
   parentEmail?: string
   parentName?: string
+  notes?: string
   averageScore: number
   completionRate: number
   totalAssignments: number
@@ -158,6 +161,11 @@ export default function StudentDetailsPage() {
   const [editProfileModalOpen, setEditProfileModalOpen] = useState(false)
   const [editProfileName, setEditProfileName] = useState('')
   const [editProfileEmail, setEditProfileEmail] = useState('')
+  const [editProfileGrade, setEditProfileGrade] = useState('')
+  const [editProfilePhone, setEditProfilePhone] = useState('')
+  const [editProfileParentName, setEditProfileParentName] = useState('')
+  const [editProfileParentEmail, setEditProfileParentEmail] = useState('')
+  const [editProfileNotes, setEditProfileNotes] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
 
   // Parent management state
@@ -247,12 +255,14 @@ export default function StudentDetailsPage() {
         dbId: studentDbId || undefined,
         name: userData.name,
         email: userData.email,
+        phone: userData.student_profile?.phone,
         avatar: userData.avatar_url,
         joinedDate: userData.created_at,
         studentId: userData._id?.slice(-6).toUpperCase() || 'ST84321',
         grade: userData.student_profile?.grade || '10th Grade',
         parentEmail: userData.student_profile?.parentEmail,
         parentName: userData.student_profile?.parentName || 'Sarah Reed',
+        notes: userData.student_profile?.notes,
         averageScore: userData.student_profile?.averageScore || 0,
         completionRate: userData.student_profile?.completionRate || 0,
         totalAssignments: userData.student_profile?.totalAssignments || 0,
@@ -663,6 +673,11 @@ export default function StudentDetailsPage() {
 
     setEditProfileName(student.name)
     setEditProfileEmail(student.email)
+    setEditProfileGrade(student.grade || '')
+    setEditProfilePhone(student.phone || '')
+    setEditProfileParentName(student.parentName || '')
+    setEditProfileParentEmail(student.parentEmail || '')
+    setEditProfileNotes(student.notes || '')
     setEditProfileModalOpen(true)
   }
 
@@ -674,6 +689,11 @@ export default function StudentDetailsPage() {
 
     const name = editProfileName.trim()
     const email = editProfileEmail.trim().toLowerCase()
+    const grade = editProfileGrade.trim()
+    const phone = editProfilePhone.trim()
+    const parentName = editProfileParentName.trim()
+    const parentEmail = editProfileParentEmail.trim().toLowerCase()
+    const notes = editProfileNotes.trim()
 
     if (!name || !email) {
       toast.error('Name and email are required')
@@ -686,6 +706,13 @@ export default function StudentDetailsPage() {
       const response = await client.put(`/students/${student.id}`, {
         name,
         email,
+        student_profile: {
+          grade: grade || null,
+          phone: phone || null,
+          parentName: parentName || null,
+          parentEmail: parentEmail || null,
+          notes: notes || null,
+        },
       })
 
       if (response.error) {
@@ -699,11 +726,17 @@ export default function StudentDetailsPage() {
           return previous
         }
 
+        const updatedProfile = updatedStudent?.student_profile || {}
+
         return {
           ...previous,
           name: updatedStudent?.name || name,
           email: updatedStudent?.email || email,
-          grade: updatedStudent?.student_profile?.grade || previous.grade,
+          grade: updatedProfile.grade || grade || previous.grade,
+          phone: updatedProfile.phone || phone || undefined,
+          parentName: updatedProfile.parentName || parentName || undefined,
+          parentEmail: updatedProfile.parentEmail || parentEmail || undefined,
+          notes: updatedProfile.notes || notes || undefined,
         }
       })
 
@@ -819,6 +852,12 @@ export default function StudentDetailsPage() {
                         <Mail className="h-3 w-3" />
                         {student.email}
                       </p>
+                      {student.phone && (
+                        <p className="text-muted-foreground text-sm flex items-center gap-2 mt-1">
+                          <Phone className="h-3 w-3" />
+                          {student.phone}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-3">
@@ -1239,7 +1278,7 @@ export default function StudentDetailsPage() {
 
       {/* Edit Profile Modal */}
       <Dialog open={editProfileModalOpen} onOpenChange={setEditProfileModalOpen}>
-        <DialogContent className="sm:max-w-[440px]">
+        <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Edit className="h-5 w-5 text-primary" />
@@ -1268,6 +1307,62 @@ export default function StudentDetailsPage() {
                 onChange={(e) => setEditProfileEmail(e.target.value)}
                 placeholder="student@example.com"
                 required
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="edit-student-grade">Grade</Label>
+                <Input
+                  id="edit-student-grade"
+                  value={editProfileGrade}
+                  onChange={(e) => setEditProfileGrade(e.target.value)}
+                  placeholder="e.g. 10th Grade"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-student-phone">Phone</Label>
+                <Input
+                  id="edit-student-phone"
+                  value={editProfilePhone}
+                  onChange={(e) => setEditProfilePhone(e.target.value)}
+                  placeholder="+1 555 0100"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="edit-parent-name">Parent Name</Label>
+                <Input
+                  id="edit-parent-name"
+                  value={editProfileParentName}
+                  onChange={(e) => setEditProfileParentName(e.target.value)}
+                  placeholder="Parent or guardian"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-parent-email">Parent Email</Label>
+                <Input
+                  id="edit-parent-email"
+                  type="email"
+                  value={editProfileParentEmail}
+                  onChange={(e) => setEditProfileParentEmail(e.target.value)}
+                  placeholder="parent@example.com"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-student-notes">Notes</Label>
+              <Textarea
+                id="edit-student-notes"
+                value={editProfileNotes}
+                onChange={(e) => setEditProfileNotes(e.target.value)}
+                placeholder="Notes about learning preferences or support"
+                rows={4}
               />
             </div>
 

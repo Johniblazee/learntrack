@@ -40,16 +40,18 @@ class MaterialBase(BaseModel):
     file_size: Optional[int] = None  # in bytes
     subject_id: Optional[str] = None
     topic: Optional[str] = None
-    tags: List[str] = []
-    tutor_id: str = Field(
-        ..., description="Tutor ID - references the tutor's Clerk user ID"
+    tags: List[str] = Field(default_factory=list)
+    folder_id: Optional[str] = None
+    folder_path: str = "/"
+    tutor_id: Optional[str] = Field(
+        default=None,
+        description="Tutor ID - references the tutor's Clerk user ID",
     )
 
 
 class MaterialCreate(MaterialBase):
     """Material creation model"""
 
-    tutor_id: Optional[str] = None
     shared_with_students: bool = True
 
 
@@ -64,6 +66,7 @@ class MaterialUpdate(BaseModel):
     subject_id: Optional[str] = None
     topic: Optional[str] = None
     tags: Optional[List[str]] = None
+    folder_id: Optional[str] = None
     status: Optional[MaterialStatus] = None
     shared_with_students: Optional[bool] = None
 
@@ -107,3 +110,46 @@ class MaterialWithStats(Material):
     total_downloads: int = 0
     linked_questions_count: int = 0
     linked_assignments_count: int = 0
+
+
+class MaterialFolderBase(BaseModel):
+    """Base model for material folders."""
+
+    name: str
+    parent_id: Optional[str] = None
+
+
+class MaterialFolderCreate(MaterialFolderBase):
+    """Material folder creation model."""
+
+    pass
+
+
+class MaterialFolderUpdate(BaseModel):
+    """Material folder update model."""
+
+    name: Optional[str] = None
+    parent_id: Optional[str] = None
+
+
+class MaterialFolderInDB(MaterialFolderBase):
+    """Material folder model as stored in database."""
+
+    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    tutor_id: str
+    path: str
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={ObjectId: str},
+    )
+
+
+class MaterialFolder(MaterialFolderInDB):
+    """Material folder response model."""
+
+    pass

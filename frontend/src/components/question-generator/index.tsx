@@ -30,6 +30,7 @@ interface ChatApiResponse {
   response: string
   ready_to_generate?: boolean
   missing_fields?: string[]
+  session_id?: string
 }
 
 export function OpenCanvasGenerator() {
@@ -56,6 +57,7 @@ export function OpenCanvasGenerator() {
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([])
   const [streamingContent, setStreamingContent] = useState('')
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
+  const [generationProgressCurrent, setGenerationProgressCurrent] = useState(0)
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -123,27 +125,46 @@ export function OpenCanvasGenerator() {
     return fallback
   }
 
-  const buildGenerationPrompt = useCallback((explicitPrompt?: string): string | null => {
-    const directPrompt = explicitPrompt?.trim()
-    if (directPrompt) {
-      return directPrompt
+  const buildGenerationPrompt = useCallback((instruction?: string): string | null => {
+    const trimmedInstruction = instruction?.trim() || ''
+    if (!trimmedInstruction && !settings.subject && !settings.topic) {
+      return null
     }
 
-    const recentUserMessages = chatMessages
-      .filter(message => message.role === 'user')
-      .map(message => message.content.trim())
-      .filter(Boolean)
+    const lines = [
+      `Generate ${settings.questionCount} question(s).`,
+      `Difficulty: ${settings.difficulty}.`,
+      `Question types: ${settings.questionTypes.join(', ')}.`,
+      `Subject: ${settings.subject || 'not specified'}.`,
+      `Topic: ${settings.topic || 'not specified'}.`,
+    ]
 
-    if (recentUserMessages.length > 0) {
-      return recentUserMessages.slice(-3).join('\n')
+    if (settings.bloomsLevels.length > 0) {
+      lines.push(`Bloom levels: ${settings.bloomsLevels.join(', ')}.`)
     }
 
-    if (settings.subject || settings.topic) {
-      return `Generate ${settings.questionCount} question(s) for ${settings.subject || 'this subject'} on ${settings.topic || 'this topic'}.`
+    if (settings.materialIds.length > 0) {
+      lines.push(`Use attached material IDs: ${settings.materialIds.join(', ')}.`)
     }
 
-    return null
-  }, [chatMessages, settings.questionCount, settings.subject, settings.topic])
+    if (trimmedInstruction) {
+      lines.push(`Tutor instruction: ${trimmedInstruction}`)
+    }
+
+    return lines.join('\n')
+  }, [
+    settings.questionCount,
+    settings.difficulty,
+    settings.questionTypes,
+    settings.subject,
+    settings.topic,
+    settings.bloomsLevels,
+    settings.materialIds,
+  ])
+
+  const hasGenerateIntent = useCallback((message: string) => {
+    return /\b(generate|create|make|draft|produce|build|start)\b/i.test(message)
+  }, [])
 
   const runGeneration = useCallback(async (explicitPrompt?: string) => {
     if (isGenerating || isChatResponding) return
@@ -156,6 +177,7 @@ export function OpenCanvasGenerator() {
 
     setIsGenerating(true)
     setStreamingContent('')
+    setGenerationProgressCurrent(0)
 
     try {
       const token = await getToken()
@@ -180,6 +202,7 @@ export function OpenCanvasGenerator() {
           material_ids: settings.materialIds,
           ai_provider: settings.aiProvider,
           model_name: settings.modelName,
+          session_id: currentSessionId,
         }),
       })
 
@@ -229,6 +252,7 @@ export function OpenCanvasGenerator() {
               status: 'pending' as const,
             }
             appendedCount += 1
+            setGenerationProgressCurrent(appendedCount)
             setQuestions(prev => [...prev, question])
             setStreamingContent('')
           }
@@ -269,6 +293,7 @@ export function OpenCanvasGenerator() {
     } finally {
       setIsGenerating(false)
       setStreamingContent('')
+      setGenerationProgressCurrent(0)
     }
   }, [
     isGenerating,
@@ -278,6 +303,7 @@ export function OpenCanvasGenerator() {
     settings,
     currentSessionId,
     fetchSessions,
+    setGenerationProgressCurrent,
   ])
 
   // Handle chat message (for refining/updating questions)
@@ -301,12 +327,6 @@ export function OpenCanvasGenerator() {
 
     try {
       const token = await getToken()
-      const isGenerateCommand = /^\/generate(?:\s|$)/i.test(message)
-      if (isGenerateCommand) {
-        const commandPrompt = message.replace(/^\/generate\s*/i, '').trim()
-        await runGeneration(commandPrompt || undefined)
-        return
-      }
 
       if (referencedQuestionId) {
         const targetQuestion = questions.find(question => question.question_id === referencedQuestionId)
@@ -451,10 +471,12 @@ export function OpenCanvasGenerator() {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
+            session_id: currentSessionId,
             message,
             history: historyPayload,
             question_count: settings.questionCount,
             question_types: settings.questionTypes,
+            difficulty: settings.difficulty,
             subject: settings.subject,
             topic: settings.topic,
             ai_provider: settings.aiProvider,
@@ -467,6 +489,10 @@ export function OpenCanvasGenerator() {
         }
 
         const data = await response.json() as ChatApiResponse
+        if (data.session_id) {
+          setCurrentSessionId(data.session_id)
+        }
+
         setChatMessages(prev => prev.map(chatMessage => {
           if (chatMessage.id !== pendingAssistantId) {
             return chatMessage
@@ -479,6 +505,11 @@ export function OpenCanvasGenerator() {
             timestamp: new Date(),
           }
         }))
+
+        const shouldAutoGenerate = Boolean(data.ready_to_generate) && hasGenerateIntent(message)
+        if (shouldAutoGenerate) {
+          await runGeneration(message)
+        }
       }
 
     } catch (error) {
@@ -512,13 +543,10 @@ export function OpenCanvasGenerator() {
     currentSessionId,
     questions,
     runGeneration,
+    hasGenerateIntent,
     settings,
     fetchSessions,
   ])
-
-  const handleGenerateFromChat = useCallback(async () => {
-    await runGeneration()
-  }, [runGeneration])
 
   // Handle question actions
   const handleApprove = useCallback(async (questionId: string) => {
@@ -656,6 +684,7 @@ export function OpenCanvasGenerator() {
     setCurrentSessionId(null)
     setQuestions([])
     setStreamingContent('')
+    setGenerationProgressCurrent(0)
     setSelectedQuestionId(null)
     toast.success('Started new conversation')
   }, [])
@@ -678,6 +707,7 @@ export function OpenCanvasGenerator() {
         setCurrentSessionId(null)
         setQuestions([])
         setStreamingContent('')
+        setGenerationProgressCurrent(0)
         setChatMessages([])
         toast.success('Conversation deleted')
       } else {
@@ -703,9 +733,12 @@ export function OpenCanvasGenerator() {
         if (data.questions) {
           setQuestions(data.questions)
         }
-        if (Array.isArray(data.messages)) {
-          setChatMessages(data.messages.map((message: any) => ({
-            ...message,
+        if (Array.isArray(data.chat_messages)) {
+          setChatMessages(data.chat_messages.map((message: any) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            referencedQuestionId: message.referenced_question_id,
             timestamp: message.timestamp ? new Date(message.timestamp) : new Date(),
           })))
         } else {
@@ -833,16 +866,6 @@ export function OpenCanvasGenerator() {
         <div className="flex items-center gap-2">
 
           <Button
-            size="sm"
-            onClick={handleGenerateFromChat}
-            disabled={isGenerating || isChatResponding}
-            className="bg-[#5c4a38] hover:bg-[#4a3c2e] gap-2"
-          >
-            <Sparkles className="h-4 w-4" />
-            {isGenerating ? 'Generating...' : isChatResponding ? 'Waiting...' : 'Generate Questions'}
-          </Button>
-
-          <Button
             variant="outline"
             size="sm"
             onClick={() => setIsSettingsOpen(true)}
@@ -898,7 +921,10 @@ export function OpenCanvasGenerator() {
               isGenerating={isGenerating}
               currentAction={isGenerating ? 'Generating questions...' : null}
               thinkingSteps={[]}
-              progress={{ current: questions.length, total: settings.questionCount }}
+              progress={{
+                current: isGenerating ? generationProgressCurrent : questions.length,
+                total: settings.questionCount,
+              }}
               foundSources={[]}
               questions={questions}
               streamingContent={streamingContent}

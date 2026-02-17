@@ -6,6 +6,7 @@ LangGraph ReAct agent architecture.
 """
 
 from typing import Any, Dict, List, Optional
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -33,6 +34,7 @@ from app.services.generation_session_service import GenerationSessionService
 from app.services.web_search_service import WebSearchService
 from app.services.question_service import QuestionService
 from app.models.generation_session import SessionStatus, QuestionStatus, StoredQuestion
+from app.models.generation_session import SessionChatMessage
 from app.models.question import (
     QuestionCreate,
     QuestionType as BankQuestionType,
@@ -131,6 +133,9 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Bloom's taxonomy levels to target (REMEMBER, UNDERSTAND, APPLY, ANALYZE, EVALUATE, CREATE)",
     )
+    session_id: Optional[str] = Field(
+        default=None, description="Existing session ID to continue"
+    )
 
 
 class ChatTurn(BaseModel):
@@ -140,6 +145,9 @@ class ChatTurn(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User's chat message")
+    session_id: Optional[str] = Field(
+        default=None, description="Existing generation session ID"
+    )
     history: Optional[List[ChatTurn]] = Field(
         default=None, description="Recent conversation turns"
     )
@@ -155,6 +163,7 @@ class ChatResponse(BaseModel):
     response: str
     ready_to_generate: bool
     missing_fields: List[str] = Field(default_factory=list)
+    session_id: Optional[str] = None
 
 
 class EditQuestionRequest(BaseModel):
@@ -187,6 +196,31 @@ def _get_missing_generation_fields(request: ChatRequest) -> List[str]:
     if not request.question_count:
         missing_fields.append("question_count")
     return missing_fields
+
+
+def _chat_config_to_session_config(request: ChatRequest) -> Dict[str, Any]:
+    """Map chat planning parameters to persisted session config."""
+    return {
+        "question_count": request.question_count or 3,
+        "question_types": request.question_types or ["multiple-choice"],
+        "difficulty": "medium",
+        "subject": request.subject,
+        "topic": request.topic,
+        "ai_provider": request.ai_provider,
+        "model_name": request.model_name,
+    }
+
+
+def _build_session_chat_message(
+    role: str, content: str, referenced_question_id: Optional[str] = None
+) -> SessionChatMessage:
+    """Create a normalized persisted chat message object."""
+    return SessionChatMessage(
+        id=str(uuid.uuid4()),
+        role=role,  # type: ignore[arg-type]
+        content=content,
+        referenced_question_id=referenced_question_id,
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -250,6 +284,39 @@ async def chat_about_question_generation(
 
         missing_fields = _get_missing_generation_fields(request)
         ready_to_generate = len(missing_fields) == 0
+        planning_message = request.message.strip()
+        if not planning_message:
+            raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+        session_service = GenerationSessionService(database)
+        session = None
+        if request.session_id:
+            session = await session_service.get_session(
+                request.session_id, current_user.clerk_id
+            )
+
+        session_config = _chat_config_to_session_config(request)
+        if not session:
+            session = await session_service.create_session(
+                user_id=current_user.clerk_id,
+                tenant_id=current_user.tutor_id,
+                prompt=planning_message,
+                config=session_config,
+                material_ids=[],
+            )
+        else:
+            await session_service.update_session(
+                session.session_id,
+                current_user.clerk_id,
+                config=session_config,
+                original_prompt=session.original_prompt or planning_message,
+            )
+
+        await session_service.append_chat_message(
+            session.session_id,
+            current_user.clerk_id,
+            _build_session_chat_message("user", planning_message),
+        )
 
         system_prompt = (
             "You are an AI teaching assistant helping a tutor plan question generation. "
@@ -283,7 +350,7 @@ async def chat_about_question_generation(
                 messages.append(AIMessage(content=content))
             else:
                 messages.append(HumanMessage(content=content))
-        messages.append(HumanMessage(content=request.message.strip()))
+        messages.append(HumanMessage(content=planning_message))
 
         llm = getattr(provider, "llm", None)
         if llm is None:
@@ -302,10 +369,23 @@ async def chat_about_question_generation(
             str(response_content).strip() or "Can you share a bit more detail?"
         )
 
+        await session_service.append_chat_message(
+            session.session_id,
+            current_user.clerk_id,
+            _build_session_chat_message("assistant", response_text),
+        )
+
+        await session_service.update_session(
+            session.session_id,
+            current_user.clerk_id,
+            config=session_config,
+        )
+
         return ChatResponse(
             response=response_text,
             ready_to_generate=ready_to_generate,
             missing_fields=missing_fields,
+            session_id=session.session_id,
         )
     except HTTPException:
         raise
@@ -351,15 +431,42 @@ async def generate_questions(
             grade_level=request.grade_level,
         )
 
-        # Create session for persistence
-        session = await session_service.create_session(
-            user_id=current_user.clerk_id,
-            tenant_id=current_user.tutor_id,
-            prompt=request.prompt,
-            config=config.model_dump()
-            if hasattr(config, "model_dump")
-            else dict(config),
-            material_ids=request.material_ids,
+        session_config = (
+            config.model_dump() if hasattr(config, "model_dump") else dict(config)
+        )
+
+        # Reuse existing planning session when provided, otherwise create new.
+        session = None
+        if request.session_id:
+            session = await session_service.get_session(
+                request.session_id, current_user.clerk_id
+            )
+
+        if session:
+            session = await session_service.update_session(
+                session.session_id,
+                current_user.clerk_id,
+                status=SessionStatus.PENDING.value,
+                original_prompt=request.prompt,
+                config=session_config,
+                material_ids=request.material_ids or [],
+                error_message=None,
+            )
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+        else:
+            session = await session_service.create_session(
+                user_id=current_user.clerk_id,
+                tenant_id=current_user.tutor_id,
+                prompt=request.prompt,
+                config=session_config,
+                material_ids=request.material_ids,
+            )
+
+        await session_service.append_chat_message(
+            session.session_id,
+            current_user.clerk_id,
+            _build_session_chat_message("user", request.prompt),
         )
 
         # Get LLM with tenant-aware configuration
@@ -549,6 +656,15 @@ async def generate_questions(
                     status=SessionStatus.COMPLETED.value,
                 )
 
+                await session_service.append_chat_message(
+                    session.session_id,
+                    current_user.clerk_id,
+                    _build_session_chat_message(
+                        "assistant",
+                        f"Generated {saved_questions_count} question(s).",
+                    ),
+                )
+
                 # Note: send_done is already called in agent.generate()
                 # But ensure it's called if agent didn't call it
                 if not sse_handler._is_closed:
@@ -561,6 +677,14 @@ async def generate_questions(
                     current_user.clerk_id,
                     status=SessionStatus.FAILED.value,
                     error_message=str(e),
+                )
+                await session_service.append_chat_message(
+                    session.session_id,
+                    current_user.clerk_id,
+                    _build_session_chat_message(
+                        "assistant",
+                        f"Generation failed: {str(e)}",
+                    ),
                 )
                 await sse_handler.send_error(str(e))
 
@@ -670,6 +794,16 @@ async def edit_question(
 
         sse_handler = SSEHandler(session_id=session_id)
 
+        await session_service.append_chat_message(
+            session_id,
+            current_user.clerk_id,
+            _build_session_chat_message(
+                "user",
+                request.edit_instruction,
+                referenced_question_id=request.question_id,
+            ),
+        )
+
         async def run_edit():
             try:
                 result = await agent.generate(
@@ -723,11 +857,30 @@ async def edit_question(
                 if not success:
                     raise ValueError("Failed to persist edited question")
 
+                await session_service.append_chat_message(
+                    session_id,
+                    current_user.clerk_id,
+                    _build_session_chat_message(
+                        "assistant",
+                        "Updated the selected question.",
+                        referenced_question_id=request.question_id,
+                    ),
+                )
+
                 if not sse_handler._is_closed:
                     await sse_handler.send_done(len(result.questions))
 
             except Exception as e:
                 logger.error("LangGraph edit failed", error=str(e))
+                await session_service.append_chat_message(
+                    session_id,
+                    current_user.clerk_id,
+                    _build_session_chat_message(
+                        "assistant",
+                        f"Edit failed: {str(e)}",
+                        referenced_question_id=request.question_id,
+                    ),
+                )
                 await sse_handler.send_error(str(e))
 
         async def stream_events():

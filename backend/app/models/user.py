@@ -1,6 +1,7 @@
 """
 User models and schemas
 """
+
 from datetime import datetime, timezone
 from typing import Optional, List, Any
 from enum import Enum
@@ -10,6 +11,7 @@ from bson import ObjectId
 
 class UserRole(str, Enum):
     """User roles in the system"""
+
     TUTOR = "tutor"
     STUDENT = "student"
     PARENT = "parent"
@@ -18,6 +20,7 @@ class UserRole(str, Enum):
 
 class AdminPermission(str, Enum):
     """Granular permissions for super admin users"""
+
     # Tenant management
     VIEW_ALL_TENANTS = "view_all_tenants"
     MANAGE_TENANTS = "manage_tenants"
@@ -46,12 +49,43 @@ class AdminPermission(str, Enum):
     FULL_ACCESS = "full_access"
 
 
+class StudentProfileData(BaseModel):
+    """Student-specific profile fields stored on student users."""
+
+    phone: Optional[str] = None
+    grade: Optional[str] = None
+    parentName: Optional[str] = None
+    parentEmail: Optional[EmailStr] = None
+    averageScore: float = 0.0
+    completionRate: float = 0.0
+    totalAssignments: int = 0
+    completedAssignments: int = 0
+    notes: Optional[str] = None
+    interests: List[str] = Field(default_factory=list)
+
+
+class StudentProfileUpdate(BaseModel):
+    """Partial student profile update payload."""
+
+    phone: Optional[str] = None
+    grade: Optional[str] = None
+    parentName: Optional[str] = None
+    parentEmail: Optional[EmailStr] = None
+    averageScore: Optional[float] = None
+    completionRate: Optional[float] = None
+    totalAssignments: Optional[int] = None
+    completedAssignments: Optional[int] = None
+    notes: Optional[str] = None
+    interests: Optional[List[str]] = None
+
+
 # Use string type for ObjectId to avoid Pydantic v2 compatibility issues
 PyObjectId = str
 
 
 class UserBase(BaseModel):
     """Base user model"""
+
     email: EmailStr
     name: str
     role: UserRole
@@ -61,6 +95,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     """User creation model"""
+
     clerk_id: str  # Clerk ID field - required for new users
     tutor_id: Optional[str] = None  # Will be set automatically for tutors
     tenant_id: Optional[str] = None  # Tenant ID for multi-tenancy
@@ -68,18 +103,30 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     """User update model"""
+
     email: Optional[EmailStr] = None
     name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    student_profile: Optional[StudentProfileUpdate] = None
+    # Convenience aliases used by onboarding/profile forms
+    phone: Optional[str] = None
+    grade: Optional[str] = None
+    parentName: Optional[str] = None
+    parentEmail: Optional[EmailStr] = None
+    notes: Optional[str] = None
+    interests: Optional[List[str]] = None
     updated_at: Optional[datetime] = None
 
 
 class UserInDB(UserBase):
     """User model as stored in database"""
+
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     clerk_id: str  # Clerk ID field - required
-    tutor_id: Optional[str] = None  # Tutor ID - for tutors: their own clerk_id, for others: their tutor's clerk_id
+    tutor_id: Optional[str] = (
+        None  # Tutor ID - for tutors: their own clerk_id, for others: their tutor's clerk_id
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_login: Optional[datetime] = None
@@ -93,8 +140,9 @@ class UserInDB(UserBase):
     student_tutors: Optional[List[str]] = []  # Tutor IDs for students
     parent_children: Optional[List[str]] = []  # Student IDs for parents
     student_ids: List[str] = []  # For parents: linked student IDs
+    student_profile: Optional[StudentProfileData] = None
 
-    @field_validator('id', mode='before')
+    @field_validator("id", mode="before")
     @classmethod
     def validate_object_id(cls, v):
         """Convert ObjectId to string for Pydantic validation"""
@@ -102,36 +150,38 @@ class UserInDB(UserBase):
             return str(v)
         return v
 
-    @field_validator('tutor_id', mode='before')
+    @field_validator("tutor_id", mode="before")
     @classmethod
     def migrate_tutor_id(cls, v, info):
         """Migrate tutor_id for existing users - set to clerk_id for tutors, None for others"""
-        if v is None and info.data.get('role') == UserRole.TUTOR:
+        if v is None and info.data.get("role") == UserRole.TUTOR:
             # For tutors without tutor_id, use their clerk_id
-            return info.data.get('clerk_id')
+            return info.data.get("clerk_id")
         return v
 
     model_config = ConfigDict(
         populate_by_name=True,
         arbitrary_types_allowed=True,
-        json_encoders={ObjectId: str}
+        json_encoders={ObjectId: str},
     )
 
 
 class User(UserInDB):
     """User response model"""
+
     pass
 
 
 class UserProfile(BaseModel):
     """User profile for frontend"""
+
     id: str
     email: str
     name: str
     role: UserRole
     is_active: bool
     created_at: datetime
-    
+
     # Role-specific data
     subjects_count: Optional[int] = 0
     students_count: Optional[int] = 0
@@ -140,6 +190,7 @@ class UserProfile(BaseModel):
 
 class StudentAssignment(BaseModel):
     """Student assignment relationship"""
+
     student_id: str
     tutor_id: str
     assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -148,6 +199,7 @@ class StudentAssignment(BaseModel):
 
 class ParentChildRelation(BaseModel):
     """Parent-child relationship"""
+
     parent_id: str
     child_id: str
     relation_type: str = "parent"  # parent, guardian, etc.

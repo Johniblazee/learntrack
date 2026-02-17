@@ -100,9 +100,11 @@ export default function QuestionReviewer() {
   const [subjectFilter, setSubjectFilter] = useState("all")
   const [questions, setQuestions] = useState<Question[]>([])
   const [approvedQuestions, setApprovedQuestions] = useState<Question[]>([])
+  const [rejectedQuestions, setRejectedQuestions] = useState<Question[]>([])
   const [analyticsQuestions, setAnalyticsQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(false)
   const [approvedLoading, setApprovedLoading] = useState(false)
+  const [rejectedLoading, setRejectedLoading] = useState(false)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [selectedQuestions, setSelectedQuestions] = useState<Set<string>>(new Set())
   const [generationStats, setGenerationStats] = useState<GenerationStats | null>(null)
@@ -127,8 +129,8 @@ export default function QuestionReviewer() {
       fetchApprovedQuestions()
     }
 
-    if (activeTab === 'analytics' && analyticsQuestions.length === 0) {
-      fetchAnalyticsData()
+    if (activeTab === 'rejected' && rejectedQuestions.length === 0) {
+      fetchRejectedQuestions()
     }
   }, [activeTab])
 
@@ -186,6 +188,35 @@ export default function QuestionReviewer() {
       toast.error('Error loading approved questions')
     } finally {
       setApprovedLoading(false)
+    }
+  }
+
+  const fetchRejectedQuestions = async () => {
+    try {
+      setRejectedLoading(true)
+      const token = await getToken()
+      const response = await fetch(
+        `${API_BASE_URL}/question-generator/all-questions?status=rejected&per_page=100`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        const items = data?.items || (Array.isArray(data) ? data : [])
+        setRejectedQuestions(items.map(mapQuestionFromApi))
+      } else {
+        toast.error('Failed to load rejected questions')
+      }
+    } catch (error) {
+      console.error('Error fetching rejected questions:', error)
+      toast.error('Error loading rejected questions')
+    } finally {
+      setRejectedLoading(false)
     }
   }
 
@@ -317,6 +348,16 @@ export default function QuestionReviewer() {
         toast.success('Question rejected', {
           description: 'The question has been rejected'
         })
+        if (question) {
+          const rejectedQuestion = {
+            ...question,
+            status: 'rejected' as const,
+          }
+          setRejectedQuestions((previous) => [
+            rejectedQuestion,
+            ...previous.filter((q) => q.id !== rejectedQuestion.id),
+          ])
+        }
         setQuestions((previous) => previous.filter((q) => q.id !== questionId))
         setSelectedQuestions((previous) => {
           const next = new Set(previous)
@@ -594,6 +635,15 @@ export default function QuestionReviewer() {
     return matchesSearch && matchesSubject
   })
 
+  const filteredRejectedQuestions = rejectedQuestions.filter((question) => {
+    const matchesSearch =
+      question.text.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      question.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      question.topic.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesSubject = subjectFilter === 'all' || question.subject === subjectFilter
+    return matchesSearch && matchesSubject
+  })
+
   const statusBreakdown = analyticsQuestions.reduce<Record<string, number>>((acc, question) => {
     const normalizedStatus = question.status?.toLowerCase() || 'pending'
     acc[normalizedStatus] = (acc[normalizedStatus] || 0) + 1
@@ -754,10 +804,10 @@ export default function QuestionReviewer() {
             Approved
           </TabsTrigger>
           <TabsTrigger
-            value="analytics"
+            value="rejected"
             className="px-4 py-2.5 text-xs sm:text-sm font-medium rounded-md transition-all data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground data-[state=inactive]:hover:bg-muted/50"
           >
-            Analytics
+            Rejected
           </TabsTrigger>
         </TabsList>
 
@@ -1157,8 +1207,84 @@ export default function QuestionReviewer() {
           </Card>
         </TabsContent>
 
-        {/* Analytics Tab */}
-        <TabsContent value="analytics" className="space-y-6">
+        {/* Rejected Questions Tab */}
+        <TabsContent value="rejected" className="space-y-6">
+          <Card className="border-border shadow-sm bg-card">
+            <CardHeader className="border-b border-border">
+              <CardTitle className="flex items-center text-foreground">
+                <XCircle className="w-5 h-5 mr-2 text-red-600 dark:text-red-500" />
+                Rejected Questions ({filteredRejectedQuestions.length})
+              </CardTitle>
+              <CardDescription className="text-muted-foreground">
+                Questions marked as rejected during review.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-8">
+              {rejectedLoading ? (
+                <div className="space-y-4">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="rounded-lg border border-border p-4 space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-5 w-full" />
+                      <Skeleton className="h-4 w-3/4" />
+                    </div>
+                  ))}
+                </div>
+              ) : filteredRejectedQuestions.length === 0 ? (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-950/30 flex items-center justify-center mx-auto mb-4">
+                    <XCircle className="w-8 h-8 text-red-600 dark:text-red-500" />
+                  </div>
+                  <p className="text-muted-foreground">No rejected questions found.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredRejectedQuestions.map((question) => (
+                    <div key={question.id} className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge className="bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 border-0">
+                            Rejected
+                          </Badge>
+                          <Badge variant="outline" className="border-border">
+                            {question.subject}
+                          </Badge>
+                          <Badge variant="outline" className="border-border capitalize">
+                            {question.difficulty}
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(question.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="text-foreground font-medium leading-relaxed">
+                        <MathText>{question.text}</MathText>
+                      </div>
+                      {question.reviewComments && (
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          {question.reviewComments}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Card className="border-border shadow-sm bg-card">
+        <CardHeader className="border-b border-border">
+          <CardTitle className="flex items-center text-foreground">
+            <BarChart3 className="w-5 h-5 mr-2 text-primary" />
+            Analytics Snapshot
+          </CardTitle>
+          <CardDescription className="text-muted-foreground">
+            Performance overview for generated question reviews.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <Card className="border-border shadow-sm bg-card">
               <CardContent className="p-5">
@@ -1257,8 +1383,8 @@ export default function QuestionReviewer() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
-      </Tabs>
+        </CardContent>
+      </Card>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-3xl">

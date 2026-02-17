@@ -16,6 +16,7 @@ from app.models.generation_session import (
     StoredQuestion,
     QuestionStatus,
     SessionSummary,
+    SessionChatMessage,
 )
 
 logger = structlog.get_logger()
@@ -37,6 +38,7 @@ class GenerationSessionService:
         prompt: str,
         config: Dict[str, Any],
         material_ids: Optional[List[str]] = None,
+        initial_chat_messages: Optional[List[SessionChatMessage]] = None,
     ) -> GenerationSessionModel:
         """Create a new generation session"""
         session_id = str(uuid.uuid4())
@@ -48,6 +50,7 @@ class GenerationSessionService:
             original_prompt=prompt,
             config=config,
             material_ids=material_ids or [],
+            chat_messages=initial_chat_messages or [],
             total_questions=config.get("question_count", 5),
             status=SessionStatus.PENDING,
         )
@@ -137,6 +140,19 @@ class GenerationSessionService:
             modified_count=result.modified_count,
         )
 
+        return result.modified_count > 0
+
+    async def append_chat_message(
+        self, session_id: str, user_id: str, message: SessionChatMessage
+    ) -> bool:
+        """Append a chat message to a persisted session transcript."""
+        result = await self.collection.update_one(
+            {"_id": session_id, "user_id": user_id},
+            {
+                "$push": {"chat_messages": message.model_dump()},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
+            },
+        )
         return result.modified_count > 0
 
     async def update_question_status(

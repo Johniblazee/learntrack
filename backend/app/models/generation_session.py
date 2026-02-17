@@ -5,7 +5,7 @@ Stores question generation sessions for persistence and resume capability.
 """
 
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -47,6 +47,16 @@ class StoredQuestion(BaseModel):
     edit_history: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class SessionChatMessage(BaseModel):
+    """Chat message persisted with a generation session."""
+
+    id: str
+    role: Literal["user", "assistant", "system"]
+    content: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    referenced_question_id: Optional[str] = None
+
+
 class GenerationSessionModel(BaseModel):
     """
     MongoDB model for generation sessions.
@@ -70,6 +80,9 @@ class GenerationSessionModel(BaseModel):
 
     # Generated questions
     questions: List[StoredQuestion] = Field(default_factory=list)
+
+    # Session planning/generation chat transcript
+    chat_messages: List[SessionChatMessage] = Field(default_factory=list)
 
     # Status tracking
     status: SessionStatus = SessionStatus.PENDING
