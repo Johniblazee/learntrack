@@ -3,7 +3,9 @@ Student management endpoints, operating on the role-specific "students" collecti
 A "student" is a user with the role "student".
 """
 
-from typing import List
+from datetime import datetime, timezone
+import uuid
+from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -17,6 +19,72 @@ from app.utils.pagination import PaginationParams, PaginatedResponse, paginate
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+async def _resolve_student_for_tutor(
+    student_identifier: str,
+    current_user: ClerkUserContext,
+    user_service: UserService,
+    db: AsyncIOMotorDatabase,
+) -> User:
+    """Resolve a student by Clerk ID or ObjectId and enforce tutor ownership."""
+    student = await user_service.get_user_by_clerk_id(student_identifier)
+
+    if not student:
+        try:
+            object_id = ObjectId(student_identifier)
+            student_doc = await db.students.find_one({"_id": object_id})
+            if student_doc:
+                student = User(**student_doc)
+        except Exception:
+            student = None
+
+    if not student or student.role != UserRole.STUDENT:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    if student.tutor_id != current_user.clerk_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access forbidden: Student does not belong to this tutor.",
+        )
+
+    return student
+
+
+def _expand_student_identifier_values(student_identifiers: List[str]) -> List[Any]:
+    """Expand student identifiers to include both string and ObjectId variants."""
+    values: List[Any] = []
+    seen: set[str] = set()
+
+    for identifier in student_identifiers:
+        normalized = str(identifier or "").strip()
+        if not normalized:
+            continue
+
+        string_key = f"str:{normalized}"
+        if string_key not in seen:
+            values.append(normalized)
+            seen.add(string_key)
+
+        try:
+            object_id = ObjectId(normalized)
+            object_key = f"oid:{str(object_id)}"
+            if object_key not in seen:
+                values.append(object_id)
+                seen.add(object_key)
+        except Exception:
+            continue
+
+    return values
+
+
+def _build_parent_link_criteria(student_identifiers: List[str]) -> List[Dict[str, Any]]:
+    """Build robust parent lookup criteria for legacy and current schemas."""
+    criteria: List[Dict[str, Any]] = []
+    for identifier in _expand_student_identifier_values(student_identifiers):
+        criteria.append({"student_ids": identifier})
+        criteria.append({"parent_children": identifier})
+    return criteria
 
 
 @router.get("/")
@@ -49,13 +117,19 @@ async def list_students_for_tutor(
         for student in students:
             student_dict = student.model_dump()
 
-            # Find parents linked to this student
-            student_identifier = student.clerk_id or str(student.id)
+            # Find parents linked to this student (supports legacy + current relation fields)
+            student_identifiers = list(
+                {
+                    str(student.clerk_id or ""),
+                    str(student.id or ""),
+                }
+            )
+            parent_link_criteria = _build_parent_link_criteria(student_identifiers)
             parent_cursor = db.parents.find(
                 {
-                    "student_ids": student_identifier,
+                    "$or": parent_link_criteria,
                     "tutor_id": current_user.clerk_id,
-                    "is_active": True,
+                    "is_active": {"$ne": False},
                 }
             )
             parents = await parent_cursor.to_list(length=10)
@@ -145,18 +219,12 @@ async def get_student(
     """
     try:
         user_service = UserService(db)
-        student = await user_service.get_user_by_clerk_id(student_clerk_id)
-
-        if not student or student.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
-
-        # Security Check: Ensure the student belongs to the requesting tutor
-        if student.tutor_id != current_user.clerk_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Access forbidden: Student does not belong to this tutor.",
-            )
-
+        student = await _resolve_student_for_tutor(
+            student_clerk_id,
+            current_user,
+            user_service,
+            db,
+        )
         return student
     except HTTPException:
         raise
@@ -180,15 +248,12 @@ async def update_student(
     try:
         user_service = UserService(db)
         # First, verify the student exists and belongs to the tutor
-        student_to_update = await user_service.get_user_by_clerk_id(student_clerk_id)
-        if not student_to_update or student_to_update.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
-
-        if student_to_update.tutor_id != current_user.clerk_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Access forbidden: Student does not belong to this tutor.",
-            )
+        student_to_update = await _resolve_student_for_tutor(
+            student_clerk_id,
+            current_user,
+            user_service,
+            db,
+        )
 
         # Prevent role changes via this endpoint
         if (
@@ -224,15 +289,12 @@ async def delete_student(
         user_service = UserService(db)
 
         # First, verify the student exists and belongs to the tutor
-        student = await user_service.get_user_by_clerk_id(student_clerk_id)
-        if not student or student.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
-
-        if student.tutor_id != current_user.clerk_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Access forbidden: Student does not belong to this tutor.",
-            )
+        student = await _resolve_student_for_tutor(
+            student_clerk_id,
+            current_user,
+            user_service,
+            db,
+        )
 
         # Delete the student
         await user_service.delete_user(student.id)
@@ -262,39 +324,42 @@ async def get_student_parents(
         user_service = UserService(db)
 
         # Verify the student exists and belongs to the tutor
-        student = await user_service.get_user_by_clerk_id(student_clerk_id)
-        if not student or student.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
+        student = await _resolve_student_for_tutor(
+            student_clerk_id,
+            current_user,
+            user_service,
+            db,
+        )
 
-        if student.tutor_id != current_user.clerk_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Access forbidden: Student does not belong to this tutor.",
-            )
-
-        # Use the student's actual clerk_id from the database (in case the URL param differs)
-        actual_student_clerk_id = student.clerk_id
+        # Use a stable identifier from the actual student record (fallback to ObjectId string for legacy docs)
+        actual_student_identifier = str(student.clerk_id or student.id)
 
         logger.info(
             "Fetching parents for student",
             url_student_id=student_clerk_id,
-            actual_clerk_id=actual_student_clerk_id,
+            actual_student_id=actual_student_identifier,
             tutor_id=current_user.clerk_id,
         )
 
-        # Build $or criteria dynamically, only including non-null student IDs
-        student_id_criteria = [{"student_ids": student_clerk_id}]
-        if actual_student_clerk_id:
-            student_id_criteria.append({"student_ids": actual_student_clerk_id})
-        student_id_criteria.append({"student_ids": str(student.id)})
+        student_identifiers = list(
+            {
+                str(student_clerk_id or ""),
+                str(actual_student_identifier or ""),
+                str(student.id or ""),
+            }
+        )
+        parent_link_criteria = _build_parent_link_criteria(student_identifiers)
+
+        if not parent_link_criteria:
+            return []
 
         # Find parents linked to this student - search for both the URL param and actual clerk_id
         # This handles cases where the student_ids might have been stored with a different ID format
         parent_cursor = db.parents.find(
             {
-                "$or": student_id_criteria,
+                "$or": parent_link_criteria,
                 "tutor_id": current_user.clerk_id,
-                "is_active": True,
+                "is_active": {"$ne": False},
             }
         )
         parents = await parent_cursor.to_list(length=50)
@@ -302,7 +367,7 @@ async def get_student_parents(
         logger.info(
             "Found parents for student",
             count=len(parents),
-            student_id=actual_student_clerk_id,
+            student_id=actual_student_identifier,
         )
 
         # Convert to Pydantic models for proper ObjectId serialization
@@ -340,18 +405,15 @@ async def link_parent_to_student(
         user_service = UserService(db)
 
         # Verify the student exists and belongs to the tutor
-        student = await user_service.get_user_by_clerk_id(student_clerk_id)
-        if not student or student.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
+        student = await _resolve_student_for_tutor(
+            student_clerk_id,
+            current_user,
+            user_service,
+            db,
+        )
 
-        if student.tutor_id != current_user.clerk_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Access forbidden: Student does not belong to this tutor.",
-            )
-
-        # Use the student's actual clerk_id from the database for consistency
-        actual_student_id = student.clerk_id
+        # Use a stable student identifier from the student record (fallback to ObjectId string for legacy docs)
+        actual_student_id = str(student.clerk_id or student.id)
 
         logger.info(
             "Linking parent to student",
@@ -367,19 +429,40 @@ async def link_parent_to_student(
 
         if existing_parent:
             # Check if already linked (check both URL param and actual ID for robustness)
-            existing_student_ids = existing_parent.get("student_ids", [])
+            existing_student_ids = {
+                str(student_id)
+                for student_id in [
+                    *existing_parent.get("student_ids", []),
+                    *existing_parent.get("parent_children", []),
+                ]
+                if student_id
+            }
+
+            candidate_student_ids = {
+                str(candidate)
+                for candidate in [actual_student_id, student_clerk_id, str(student.id)]
+                if candidate
+            }
+
             if (
-                actual_student_id in existing_student_ids
-                or student_clerk_id in existing_student_ids
+                existing_student_ids
+                and candidate_student_ids
+                and existing_student_ids.intersection(candidate_student_ids)
             ):
                 raise HTTPException(
                     status_code=400, detail="Parent is already linked to this student"
                 )
 
-            # Add student to existing parent's student_ids using the actual clerk_id
+            # Add student to existing parent's relation fields
             await db.parents.update_one(
                 {"_id": existing_parent["_id"]},
-                {"$addToSet": {"student_ids": actual_student_id}},
+                {
+                    "$addToSet": {
+                        "student_ids": actual_student_id,
+                        "parent_children": actual_student_id,
+                    },
+                    "$set": {"updated_at": datetime.now(timezone.utc)},
+                },
             )
 
             return {
@@ -388,9 +471,6 @@ async def link_parent_to_student(
             }
         else:
             # Create new parent record
-            from datetime import datetime, timezone
-            import uuid
-
             new_parent = {
                 "clerk_id": f"parent_{uuid.uuid4().hex[:12]}",  # Temporary ID until they sign up
                 "name": payload.parent_name,
@@ -400,6 +480,7 @@ async def link_parent_to_student(
                 "student_ids": [
                     actual_student_id
                 ],  # Use actual clerk_id for consistency
+                "parent_children": [actual_student_id],
                 "is_active": True,
                 "created_at": datetime.now(timezone.utc),
                 "updated_at": datetime.now(timezone.utc),
@@ -438,29 +519,28 @@ async def unlink_parent_from_student(
         user_service = UserService(db)
 
         # Verify the student exists and belongs to the tutor
-        student = await user_service.get_user_by_clerk_id(student_clerk_id)
-        if not student or student.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
+        student = await _resolve_student_for_tutor(
+            student_clerk_id,
+            current_user,
+            user_service,
+            db,
+        )
 
-        if student.tutor_id != current_user.clerk_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Access forbidden: Student does not belong to this tutor.",
-            )
-
-        # Use the student's actual clerk_id from the database
-        actual_student_id = student.clerk_id
+        # Use a stable student identifier from the student record (fallback to ObjectId string for legacy docs)
+        actual_student_id = str(student.clerk_id or student.id)
 
         # Find the parent by clerk_id or _id (convert to ObjectId if valid)
-        parent_query = {"$or": [{"clerk_id": parent_id}]}
+        parent_id_criteria: List[Dict[str, Any]] = [{"clerk_id": parent_id}]
 
         # Try to convert parent_id to ObjectId for _id match
         try:
             object_id = ObjectId(parent_id)
-            parent_query["$or"].append({"_id": object_id})
+            parent_id_criteria.append({"_id": object_id})
         except Exception:
             # parent_id is not a valid ObjectId, skip _id match
             pass
+
+        parent_query: Dict[str, Any] = {"$or": parent_id_criteria}
 
         parent = await db.parents.find_one(
             {
@@ -472,15 +552,19 @@ async def unlink_parent_from_student(
         if not parent:
             raise HTTPException(status_code=404, detail="Parent not found")
 
-        # Remove student from parent's student_ids (remove both URL param and actual ID for robustness)
+        # Remove student from parent's relation fields (supports string/ObjectId legacy values)
+        student_identifier_values = _expand_student_identifier_values(
+            [student_clerk_id, actual_student_id, str(student.id)]
+        )
+
         await db.parents.update_one(
             {"_id": parent["_id"]},
             {
                 "$pull": {
-                    "student_ids": {
-                        "$in": [student_clerk_id, actual_student_id, str(student.id)]
-                    }
-                }
+                    "student_ids": {"$in": student_identifier_values},
+                    "parent_children": {"$in": student_identifier_values},
+                },
+                "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )
 

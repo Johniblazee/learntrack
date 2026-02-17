@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,8 @@ import { SendMessageModal } from '@/components/modals/SendMessageModal'
 
 interface StudentDetails {
   id: string
+  clerkId?: string
+  dbId?: string
   name: string
   email: string
   avatar?: string
@@ -72,6 +74,76 @@ interface LinkedParent {
   email: string
 }
 
+interface GroupOption {
+  id: string
+  name: string
+  color: string
+  studentIds: string[]
+}
+
+const toUniqueStrings = (values: Array<unknown>): string[] => {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? '').trim())
+        .filter((value) => value.length > 0)
+    )
+  )
+}
+
+const asCollection = (payload: any): any[] => {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+
+  if (Array.isArray(payload?.items)) {
+    return payload.items
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data
+  }
+
+  return []
+}
+
+const asParentsCollection = (payload: any): any[] => {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+
+  if (Array.isArray(payload?.parents)) {
+    return payload.parents
+  }
+
+  if (Array.isArray(payload?.items)) {
+    return payload.items
+  }
+
+  return []
+}
+
+const mapLinkedParents = (payload: any): LinkedParent[] => {
+  return asParentsCollection(payload)
+    .map((parent: any) => ({
+      id: String(parent.clerk_id || parent._id || parent.id || ''),
+      name: String(parent.name || 'Unknown Parent'),
+      email: String(parent.email || ''),
+    }))
+    .filter((parent: LinkedParent) => parent.id)
+}
+
+const mapGroupOptions = (payload: any): GroupOption[] => {
+  return asCollection(payload)
+    .map((group: any, index: number) => ({
+      id: String(group._id || group.id || group.name || `group-${index}`),
+      name: String(group.name || 'Untitled Group'),
+      color: String(group.color || 'blue'),
+      studentIds: toUniqueStrings(Array.isArray(group.studentIds) ? group.studentIds : []),
+    }))
+    .filter((group: GroupOption) => group.id)
+}
+
 export default function StudentDetailsPage() {
   const { studentSlug } = useParams<{ studentSlug: string }>()
   const navigate = useNavigate()
@@ -79,6 +151,7 @@ export default function StudentDetailsPage() {
   const [student, setStudent] = useState<StudentDetails | null>(null)
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [groups, setGroups] = useState<Group[]>([])
+  const [allGroups, setAllGroups] = useState<GroupOption[]>([])
   const [activities, setActivities] = useState<Activity[]>([])
   const [progressData, setProgressData] = useState<ProgressData[]>([])
   const [sendMessageModalOpen, setSendMessageModalOpen] = useState(false)
@@ -94,9 +167,18 @@ export default function StudentDetailsPage() {
   const [parentName, setParentName] = useState('')
   const [availableParents, setAvailableParents] = useState<LinkedParent[]>([])
   const [loadingParents, setLoadingParents] = useState(false)
+  const [loadingLinkedParents, setLoadingLinkedParents] = useState(false)
   const [parentSelection, setParentSelection] = useState('new')
   const [linkingParent, setLinkingParent] = useState(false)
   const [unlinkingParentId, setUnlinkingParentId] = useState<string | null>(null)
+  const [assignGroupModalOpen, setAssignGroupModalOpen] = useState(false)
+  const [selectedGroupId, setSelectedGroupId] = useState('')
+  const [loadingAllGroups, setLoadingAllGroups] = useState(false)
+  const [assigningGroup, setAssigningGroup] = useState(false)
+
+  const isMountedRef = useRef(false)
+  const activeFetchIdRef = useRef(0)
+  const lastLoadErrorToastAtRef = useRef(0)
 
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -105,21 +187,64 @@ export default function StudentDetailsPage() {
     (parent) => !linkedParents.some((linked) => linked.id === parent.id)
   )
 
+  const studentGroupIdentifierCandidates = useMemo(() => {
+    if (!student) {
+      return []
+    }
+
+    return toUniqueStrings([student.dbId, student.clerkId, student.id])
+  }, [student])
+
+  const assignableGroups = useMemo(() => {
+    if (!studentGroupIdentifierCandidates.length) {
+      return allGroups
+    }
+
+    return allGroups.filter((group) => {
+      const memberIds = toUniqueStrings(group.studentIds)
+      return !memberIds.some((memberId) => studentGroupIdentifierCandidates.includes(memberId))
+    })
+  }, [allGroups, studentGroupIdentifierCandidates])
+
   const fetchStudentDetails = async () => {
     if (!studentSlug) return
 
+    const fetchId = activeFetchIdRef.current + 1
+    activeFetchIdRef.current = fetchId
+    let coreStudentLoaded = false
+
     try {
       setLoading(true)
+      setLoadingLinkedParents(true)
+      setAssignments([])
+      setGroups([])
+      setActivities([])
+      setProgressData([])
+      setLinkedParents([])
 
       // Fetch student details by slug
       const studentRes = await client.get(`/students/by-slug/${studentSlug}`)
-      if (studentRes.error) throw new Error(studentRes.error)
+      if (fetchId !== activeFetchIdRef.current || !isMountedRef.current) return
+
+      if (studentRes.error || !studentRes.data) {
+        throw new Error(studentRes.error || 'Student not found')
+      }
 
       const userData = studentRes.data as any
-      const studentClerkId = userData.clerk_id || userData._id
+      const studentDbId = String(userData._id || '')
+      const studentClerkId = String(userData.clerk_id || '')
+      const studentApiId = studentClerkId || studentDbId
+      const progressLookupId = studentClerkId || studentApiId
+      const groupLookupId = studentDbId || studentApiId
+
+      if (!studentApiId) {
+        throw new Error('Student identifier is missing')
+      }
 
       setStudent({
-        id: studentClerkId,
+        id: studentApiId,
+        clerkId: studentClerkId || undefined,
+        dbId: studentDbId || undefined,
         name: userData.name,
         email: userData.email,
         avatar: userData.avatar_url,
@@ -133,93 +258,138 @@ export default function StudentDetailsPage() {
         totalAssignments: userData.student_profile?.totalAssignments || 0,
         completedAssignments: userData.student_profile?.completedAssignments || 0
       })
+      coreStudentLoaded = true
 
-      // Fetch all additional data in parallel for better performance
+      // Render the page as soon as core student profile is loaded.
+      setLoading(false)
+
+      // Fetch additional sections in parallel, without blocking the full page render.
       const [progressResult, assignmentsResult, groupsResult, activityResult, parentsResult] = await Promise.allSettled([
-        client.get(`/progress/student/${studentClerkId}/analytics`),
-        client.get(`/assignments/student/${studentClerkId}?status=pending`),
-        client.get(`/groups/student/${studentClerkId}`),
-        client.get(`/activity/student/${studentClerkId}`),
-        client.get(`/students/${studentClerkId}/parents`)
+        client.get(`/progress/student/${progressLookupId}/analytics`),
+        client.get(`/assignments/student/${progressLookupId}?status=pending`),
+        client.get(`/groups/student/${groupLookupId}`),
+        client.get(`/activity/student/${progressLookupId}`),
+        client.get(`/students/${studentApiId}/parents`)
       ])
 
+      if (fetchId !== activeFetchIdRef.current || !isMountedRef.current) return
+
       // Process progress data
-      if (progressResult.status === 'fulfilled' && progressResult.value.data?.monthly_scores) {
-        setProgressData(progressResult.value.data.monthly_scores)
+      if (progressResult.status === 'fulfilled' && !progressResult.value.error) {
+        const monthlyScores = asCollection(progressResult.value.data?.monthly_scores)
+        const mappedProgress = monthlyScores
+          .map((entry: any) => ({
+            month: String(entry.month || ''),
+            score: Number(entry.score ?? 0),
+          }))
+          .filter((entry: ProgressData) => entry.month)
+
+        setProgressData(mappedProgress)
       } else {
         if (progressResult.status === 'rejected') {
           console.error('Failed to fetch progress data:', progressResult.reason)
+        } else if (progressResult.status === 'fulfilled' && progressResult.value.error) {
+          console.error('Failed to fetch progress data:', progressResult.value.error)
         }
         setProgressData([])
       }
 
       // Process assignments data
-      if (assignmentsResult.status === 'fulfilled' && assignmentsResult.value.data) {
-        const mappedAssignments = assignmentsResult.value.data.map((a: any) => ({
-          id: a._id,
-          title: a.title,
-          subject: a.subject_id?.name || 'Unknown',
-          dueDate: a.due_date,
-          status: a.status
-        }))
+      if (assignmentsResult.status === 'fulfilled' && !assignmentsResult.value.error) {
+        const assignmentRows = asCollection(assignmentsResult.value.data)
+        const mappedAssignments = assignmentRows.map((assignment: any, index: number) => {
+          const status = assignment.status === 'completed' || assignment.status === 'overdue'
+            ? assignment.status
+            : 'pending'
+
+          return {
+            id: String(assignment._id || assignment.id || assignment.title || `assignment-${index}`),
+            title: assignment.title || 'Untitled assignment',
+            subject: assignment.subject_id?.name || assignment.subject?.name || assignment.subject || 'Unknown',
+            dueDate: assignment.due_date || assignment.dueDate || '',
+            status,
+          }
+        })
+
         setAssignments(mappedAssignments)
       } else {
         if (assignmentsResult.status === 'rejected') {
           console.error('Failed to fetch assignments:', assignmentsResult.reason)
+        } else if (assignmentsResult.status === 'fulfilled' && assignmentsResult.value.error) {
+          console.error('Failed to fetch assignments:', assignmentsResult.value.error)
         }
         setAssignments([])
       }
 
       // Process groups data
-      if (groupsResult.status === 'fulfilled' && groupsResult.value.data) {
-        const mappedGroups = groupsResult.value.data.map((g: any) => ({
-          id: g._id,
-          name: g.name,
-          color: g.color || 'blue'
+      if (groupsResult.status === 'fulfilled' && !groupsResult.value.error) {
+        const mappedGroups = mapGroupOptions(groupsResult.value.data).map((group) => ({
+          id: group.id,
+          name: group.name,
+          color: group.color,
         }))
+
         setGroups(mappedGroups)
       } else {
         if (groupsResult.status === 'rejected') {
           console.error('Failed to fetch groups:', groupsResult.reason)
+        } else if (groupsResult.status === 'fulfilled' && groupsResult.value.error) {
+          console.error('Failed to fetch groups:', groupsResult.value.error)
         }
         setGroups([])
       }
 
       // Process activity data
-      if (activityResult.status === 'fulfilled' && activityResult.value.data) {
-        const mappedActivities = activityResult.value.data.map((a: any) => ({
-          id: a._id,
-          type: a.type,
-          title: a.title,
-          timestamp: a.timestamp,
-          score: a.score
-        }))
+      if (activityResult.status === 'fulfilled' && !activityResult.value.error) {
+        const activityRows = asCollection(activityResult.value.data)
+        const mappedActivities = activityRows.map((activity: any, index: number) => {
+          const rawType = String(activity.type || activity.activity_type || '').toLowerCase()
+          const normalizedType: Activity['type'] = rawType.includes('completed') ? 'completed' : 'submitted'
+
+          return {
+            id: String(activity._id || activity.id || `${rawType || 'activity'}-${index}`),
+            type: normalizedType,
+            title: activity.title || activity.description || 'Activity',
+            timestamp: activity.timestamp || activity.created_at || new Date().toISOString(),
+            score: activity.score ? String(activity.score) : undefined,
+          }
+        })
+
         setActivities(mappedActivities)
       } else {
         if (activityResult.status === 'rejected') {
           console.error('Failed to fetch activity:', activityResult.reason)
+        } else if (activityResult.status === 'fulfilled' && activityResult.value.error) {
+          console.error('Failed to fetch activity:', activityResult.value.error)
         }
         setActivities([])
       }
 
       // Process parents data
-      if (parentsResult.status === 'fulfilled' && parentsResult.value.data) {
-        const mappedParents = parentsResult.value.data.map((p: any) => ({
-          id: String(p.clerk_id || p._id),
-          name: p.name,
-          email: p.email
-        }))
-        setLinkedParents(mappedParents)
+      if (parentsResult.status === 'fulfilled' && !parentsResult.value.error) {
+        setLinkedParents(mapLinkedParents(parentsResult.value.data))
       } else {
         if (parentsResult.status === 'rejected') {
           console.error('Failed to fetch linked parents:', parentsResult.reason)
+        } else if (parentsResult.status === 'fulfilled' && parentsResult.value.error) {
+          console.error('Failed to fetch linked parents:', parentsResult.value.error)
         }
         setLinkedParents([])
       }
+      setLoadingLinkedParents(false)
     } catch (err: any) {
+      if (fetchId !== activeFetchIdRef.current || !isMountedRef.current) return
+
       console.error('Failed to fetch student details:', err)
-      toast.error('Failed to load student details')
-    } finally {
+      const now = Date.now()
+      if (now - lastLoadErrorToastAtRef.current > 2500) {
+        toast.error('Failed to load student details')
+        lastLoadErrorToastAtRef.current = now
+      }
+      if (!coreStudentLoaded) {
+        setStudent(null)
+      }
+      setLoadingLinkedParents(false)
       setLoading(false)
     }
   }
@@ -230,18 +400,113 @@ export default function StudentDetailsPage() {
       const res = await client.get('/parents')
       if (res.error) throw new Error(res.error)
 
-      const parents = res.data?.parents || res.data || []
-      const mappedParents = parents.map((p: any) => ({
-        id: String(p.clerk_id || p._id),
-        name: p.name,
-        email: p.email
-      }))
-      setAvailableParents(mappedParents)
+      setAvailableParents(mapLinkedParents(res.data))
     } catch (error) {
       console.error('Failed to load parents list:', error)
       setAvailableParents([])
     } finally {
       setLoadingParents(false)
+    }
+  }
+
+  const fetchAllGroups = async () => {
+    try {
+      setLoadingAllGroups(true)
+      const response = await client.get('/groups?limit=200')
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      setAllGroups(mapGroupOptions(response.data))
+    } catch (error: any) {
+      console.error('Failed to load groups list:', error)
+      setAllGroups([])
+      toast.error('Failed to load groups', {
+        description: error.message || 'Please try again.',
+      })
+    } finally {
+      setLoadingAllGroups(false)
+    }
+  }
+
+  const handleAssignToGroup = async (event: React.FormEvent) => {
+    event.preventDefault()
+
+    if (!student || !selectedGroupId) {
+      return
+    }
+
+    const targetGroup = allGroups.find((group) => group.id === selectedGroupId)
+    if (!targetGroup) {
+      toast.error('Selected group not found')
+      return
+    }
+
+    const studentMembershipId = student.dbId || student.id
+    if (!studentMembershipId) {
+      toast.error('Unable to assign group', {
+        description: 'Student ID is missing. Refresh and try again.',
+      })
+      return
+    }
+
+    try {
+      setAssigningGroup(true)
+
+      const updatedStudentIds = toUniqueStrings([
+        ...targetGroup.studentIds,
+        studentMembershipId,
+      ])
+
+      const response = await client.put(`/groups/${targetGroup.id}`, {
+        studentIds: updatedStudentIds,
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      setAllGroups((previous) =>
+        previous.map((group) =>
+          group.id === targetGroup.id
+            ? {
+                ...group,
+                studentIds: updatedStudentIds,
+              }
+            : group
+        )
+      )
+
+      setGroups((previous) => {
+        if (previous.some((group) => group.id === targetGroup.id)) {
+          return previous
+        }
+
+        return [
+          ...previous,
+          {
+            id: targetGroup.id,
+            name: targetGroup.name,
+            color: targetGroup.color,
+          },
+        ]
+      })
+
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+
+      toast.success('Student assigned to group', {
+        description: `${student.name} was added to ${targetGroup.name}.`,
+      })
+
+      setAssignGroupModalOpen(false)
+      setSelectedGroupId('')
+    } catch (error: any) {
+      console.error('Failed to assign student to group:', error)
+      toast.error('Failed to assign group', {
+        description: error.message || 'Please try again.',
+      })
+    } finally {
+      setAssigningGroup(false)
     }
   }
 
@@ -289,13 +554,11 @@ export default function StudentDetailsPage() {
 
       // Refresh parents list
       const parentsRes = await client.get(`/students/${student.id}/parents`)
+      if (parentsRes.error) {
+        throw new Error(parentsRes.error)
+      }
       if (parentsRes.data) {
-        const mappedParents = parentsRes.data.map((p: any) => ({
-          id: String(p.clerk_id || p._id),
-          name: p.name,
-          email: p.email
-        }))
-        setLinkedParents(mappedParents)
+        setLinkedParents(mapLinkedParents(parentsRes.data))
       }
 
       queryClient.invalidateQueries({ queryKey: ['students'] })
@@ -348,9 +611,17 @@ export default function StudentDetailsPage() {
   }
 
   useEffect(() => {
+    isMountedRef.current = true
+
+    return () => {
+      isMountedRef.current = false
+      activeFetchIdRef.current += 1
+    }
+  }, [])
+
+  useEffect(() => {
     if (studentSlug) {
-      console.log('StudentDetailsPage loaded with studentSlug:', studentSlug)
-      fetchStudentDetails()
+      void fetchStudentDetails()
     }
   }, [studentSlug])
 
@@ -363,6 +634,14 @@ export default function StudentDetailsPage() {
       setParentEmail('')
     }
   }, [linkParentModalOpen])
+
+  useEffect(() => {
+    if (assignGroupModalOpen) {
+      void fetchAllGroups()
+    } else {
+      setSelectedGroupId('')
+    }
+  }, [assignGroupModalOpen])
 
   const getInitials = (name: string) => {
     return name
@@ -781,7 +1060,12 @@ export default function StudentDetailsPage() {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {linkedParents.length > 0 ? (
+                  {loadingLinkedParents ? (
+                    <div className="flex items-center justify-center py-6 text-muted-foreground text-sm gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading linked parents...
+                    </div>
+                  ) : linkedParents.length > 0 ? (
                     linkedParents.map((parent) => (
                       <div
                         key={parent.id}
@@ -906,16 +1190,25 @@ export default function StudentDetailsPage() {
 
               {/* Active Groups */}
               <Card className="border-border bg-card">
-                <CardHeader className="pb-3">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                   <CardTitle className="text-foreground flex items-center gap-2 text-base">
                     <Users className="h-5 w-5 text-purple-500" />
                     Study Groups
                     {groups.length > 0 && (
-                      <Badge variant="secondary" className="ml-auto text-xs">
+                      <Badge variant="secondary" className="text-xs">
                         {groups.length}
                       </Badge>
                     )}
                   </CardTitle>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setAssignGroupModalOpen(true)}
+                    className="h-8"
+                  >
+                    <UserPlus className="h-4 w-4 mr-1" />
+                    Assign
+                  </Button>
                 </CardHeader>
                 <CardContent>
                   {groups.length > 0 ? (
@@ -1119,6 +1412,78 @@ export default function StudentDetailsPage() {
                   </>
                 ) : (
                   'Link Parent'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Group Modal */}
+      <Dialog open={assignGroupModalOpen} onOpenChange={setAssignGroupModalOpen}>
+        <DialogContent className="sm:max-w-[460px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Assign {student?.name} to Group
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleAssignToGroup} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="assign-student-group">Available Groups</Label>
+              <Select
+                value={selectedGroupId}
+                onValueChange={setSelectedGroupId}
+                disabled={loadingAllGroups || assigningGroup}
+              >
+                <SelectTrigger id="assign-student-group">
+                  <SelectValue
+                    placeholder={loadingAllGroups ? 'Loading groups...' : 'Select a group'}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignableGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.id}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {!loadingAllGroups && assignableGroups.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No assignable groups available. Create a group or manage memberships from the Groups page.
+                </p>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAssignGroupModalOpen(false)}
+                disabled={assigningGroup}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  assigningGroup ||
+                  loadingAllGroups ||
+                  assignableGroups.length === 0 ||
+                  !selectedGroupId
+                }
+                className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] border-0 dark:bg-[#C8A882] dark:hover:bg-[#B89872]"
+              >
+                {assigningGroup ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Assigning...
+                  </>
+                ) : (
+                  'Assign to Group'
                 )}
               </Button>
             </DialogFooter>
