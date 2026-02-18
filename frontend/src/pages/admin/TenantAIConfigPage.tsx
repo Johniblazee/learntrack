@@ -284,7 +284,7 @@ export function TenantAIConfigPage() {
   }
 
   if (isLoading) {
-    return <LoadingState message="Loading AI configuration..." />
+    return <LoadingState message="Loading AI configuration..." size="lg" className="h-64" />
   }
 
   const defaultProvider = configData?.providers.find(p => p.provider_id === formData.default_provider)
@@ -335,7 +335,7 @@ export function TenantAIConfigPage() {
             disabled={isSaving}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
           >
-            {isSaving ? <LoadingSpinner size="sm" tone="inherit" /> : <Save className="w-4 h-4" />}
+            {isSaving ? <LoadingSpinner size="sm" className="text-primary-foreground" /> : <Save className="w-4 h-4" />}
             Save Changes
           </button>
         </div>

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 
 interface SystemMetrics {
   total_tutors: number
@@ -214,7 +215,11 @@ export function AdminDashboardPage() {
           disabled={isRefreshing}
           className="flex items-center gap-2"
         >
-          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? (
+            <LoadingSpinner size="sm" className="text-primary-foreground" />
+          ) : (
+            <RefreshCw className="w-4 h-4" />
+          )}
           Refresh
         </Button>
       </div>

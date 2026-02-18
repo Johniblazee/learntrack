@@ -8,10 +8,10 @@ import { motion, AnimatePresence } from 'motion/react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import { AgentStatusBar } from './AgentStatusBar'
 import { QuestionCard } from './QuestionCard'
 import { FileQuestion, Download, CheckCircle } from 'lucide-react'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -173,7 +173,7 @@ export function QuestionCanvas({
                       {/* Header with spinner */}
                       <div className="flex items-center gap-3 mb-4">
                         <div className="flex items-center justify-center h-8 w-8 rounded-full bg-primary/10">
-                          <LoadingSpinner size="sm" />
+                          <LoadingSpinner size="sm" className="text-primary" />
                         </div>
                         <div>
                           <p className="text-sm font-medium">

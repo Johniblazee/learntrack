@@ -4,8 +4,8 @@
  */
 import { motion, AnimatePresence } from 'motion/react'
 import { FileSearch, CheckCircle2 } from 'lucide-react'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import { cn } from '@/lib/utils'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 
 interface AgentStatusBarProps {
   isGenerating: boolean
@@ -55,7 +55,7 @@ export function AgentStatusBar({
             )}
           >
             {isGenerating ? (
-              <LoadingSpinner size="sm" tone="inherit" />
+              <LoadingSpinner size="sm" className="text-primary" />
             ) : (
               <CheckCircle2 className="w-4 h-4" />
             )}

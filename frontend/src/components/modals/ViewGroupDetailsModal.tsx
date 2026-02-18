@@ -12,11 +12,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import { Users, Calendar, UserPlus, Search, X } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import { getStudentInitials, useGroupMembers } from './group-members-shared'
 
 interface Group {
@@ -136,7 +136,7 @@ export function ViewGroupDetailsModal({
           <DialogTitle className="flex items-center gap-2">
             <Users className="h-5 w-5 text-primary" />
             {group.name}
-            {saving && <LoadingSpinner size="sm" tone="muted" />}
+            {saving && <LoadingSpinner size="sm" className="text-muted-foreground" />}
           </DialogTitle>
         </DialogHeader>
 

@@ -8,7 +8,7 @@ import { Label } from '../components/ui/label'
 import { Switch } from '../components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
-import { LoadingButtonContent, LoadingState } from '@/components/ui/loading-state'
+import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
 import { useApiClient } from '../lib/api-client'
 import { toast } from '../contexts/ToastContext'
@@ -111,13 +111,7 @@ export default function SettingsPage() {
   }
 
   if (isLoading) {
-    return (
-      <LoadingState
-        fullScreen
-        className="bg-gray-50 dark:bg-gray-900"
-        message="Loading settings..."
-      />
-    )
+    return <LoadingState fullScreen message="Loading settings..." size="lg" />
   }
 
   return (
@@ -145,7 +139,17 @@ export default function SettingsPage() {
               </div>
             </div>
             <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? <LoadingButtonContent label="Saving..." /> : <><Save className="h-4 w-4 mr-2" />Save Changes</>}
+              {isSaving ? (
+                <>
+                  <LoadingSpinner size="sm" className="mr-2" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Changes
+                </>
+              )}
             </Button>
           </div>
         </div>

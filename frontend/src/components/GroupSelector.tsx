@@ -85,7 +85,7 @@ export default function GroupSelector({ selectedGroups, onChange, onStudentCount
   }
 
   if (loading) {
-    return <LoadingState message="Loading groups..." minHeightClassName="py-4" />
+    return <LoadingState message="Loading groups..." size="lg" className="py-4" />
   }
 
   if (groups.length === 0) {

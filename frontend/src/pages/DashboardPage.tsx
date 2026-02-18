@@ -60,7 +60,7 @@ export default function DashboardPage() {
 
   // Loading state while Clerk loads
   if (!isLoaded) {
-    return <LoadingState fullScreen className="bg-background text-foreground" size="xl" message="Loading dashboard..." />
+    return <LoadingState fullScreen message="Loading dashboard..." size="xl" />
   }
 
   const renderDashboard = () => {
@@ -77,7 +77,7 @@ export default function DashboardPage() {
 
   // Show loading while redirecting to role-setup
   if (!userRole) {
-    return <LoadingState fullScreen className="bg-background text-foreground" size="xl" message="Redirecting to role setup..." />
+    return <LoadingState fullScreen message="Redirecting to role setup..." size="xl" />
   }
 
   return (

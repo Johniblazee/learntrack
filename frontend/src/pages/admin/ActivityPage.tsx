@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { Activity, RefreshCw, ChevronLeft, ChevronRight, Calendar, Filter, Clock, FileText, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
 import { API_BASE_URL } from '@/lib/config'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -10,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar as CalendarComponent } from '@/components/ui/calendar'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import { format, subDays } from 'date-fns'
 
 interface ActivityLog {
@@ -158,7 +158,11 @@ export function ActivityPage() {
             disabled={isLoading}
             className="flex items-center gap-2"
           >
-            {isLoading ? <LoadingSpinner size="sm" tone="inherit" /> : <RefreshCw className="w-4 h-4" />}
+            {isLoading ? (
+              <LoadingSpinner size="sm" className="text-foreground" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
             Refresh
           </Button>
         </div>

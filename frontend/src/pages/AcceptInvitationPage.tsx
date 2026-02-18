@@ -128,12 +128,8 @@ export default function AcceptInvitationPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Card className="w-full max-w-md shadow-xl">
-          <CardContent className="py-12">
-            <LoadingState
-              message="Verifying invitation..."
-              minHeightClassName="h-auto"
-              size="xl"
-            />
+          <CardContent>
+            <LoadingState message="Verifying invitation..." size="xl" className="py-12" />
           </CardContent>
         </Card>
       </div>
@@ -219,12 +215,8 @@ export default function AcceptInvitationPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Card className="w-full max-w-md shadow-xl">
-          <CardContent className="py-12">
-            <LoadingState
-              message="Creating your account..."
-              minHeightClassName="h-auto"
-              size="xl"
-            />
+          <CardContent>
+            <LoadingState message="Creating your account..." size="xl" className="py-12" />
           </CardContent>
         </Card>
       </div>

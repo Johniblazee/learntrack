@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import { Search, Plus, Pencil, Trash2, Users, BookOpen, RefreshCw, X } from 'lucide-react'
 import { useAuth } from '@clerk/clerk-react'
 import { toast } from '@/contexts/ToastContext'
@@ -12,6 +11,7 @@ import { ViewGroupDetailsModal } from '@/components/modals/ViewGroupDetailsModal
 import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal'
 import { Badge } from '@/components/ui/badge'
 import { useApiClient } from '@/lib/api-client'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 
 interface StudentGroup {
   _id: string
@@ -285,7 +285,7 @@ export default function GroupsManagementView() {
                         className="bg-white/90 hover:bg-white"
                       >
                         {regeneratingImage === group._id ? (
-                          <LoadingSpinner size="sm" tone="inherit" />
+                          <LoadingSpinner size="sm" className="text-foreground" />
                         ) : (
                           <RefreshCw className="h-4 w-4" />
                         )}
@@ -299,7 +299,7 @@ export default function GroupsManagementView() {
                         className="bg-red-600/90 hover:bg-red-600"
                       >
                         {removingImage === group._id ? (
-                          <LoadingSpinner size="sm" tone="inherit" />
+                          <LoadingSpinner size="sm" className="text-white" />
                         ) : (
                           <X className="h-4 w-4" />
                         )}

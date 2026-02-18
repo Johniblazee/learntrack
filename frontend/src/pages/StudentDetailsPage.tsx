@@ -17,12 +17,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { MessageCircle, Edit, CheckCircle2, Clock, Users, FileText, Calendar, X, UserPlus, Mail, Phone, Loader2, TrendingUp, Target, BookOpen, Award, BarChart3, Activity as ActivityIcon, GraduationCap, User } from 'lucide-react'
+import { MessageCircle, Edit, CheckCircle2, Clock, Users, FileText, Calendar, X, UserPlus, Mail, Phone, TrendingUp, Target, BookOpen, Award, BarChart3, Activity as ActivityIcon, GraduationCap, User } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
 import { format, isValid } from 'date-fns'
 import { SendMessageModal } from '@/components/modals/SendMessageModal'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 
 interface StudentDetails {
   id: string
@@ -1101,7 +1102,7 @@ export default function StudentDetailsPage() {
                 <CardContent className="space-y-3">
                   {loadingLinkedParents ? (
                     <div className="flex items-center justify-center py-6 text-muted-foreground text-sm gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <LoadingSpinner size="sm" className="text-muted-foreground" />
                       Loading linked parents...
                     </div>
                   ) : linkedParents.length > 0 ? (
@@ -1127,7 +1128,7 @@ export default function StudentDetailsPage() {
                           className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8 p-0"
                         >
                           {unlinkingParentId === parent.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <LoadingSpinner size="sm" className="text-destructive" />
                           ) : (
                             <X className="h-4 w-4" />
                           )}
@@ -1382,7 +1383,7 @@ export default function StudentDetailsPage() {
               >
                 {savingProfile ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <LoadingSpinner size="sm" className="mr-2 text-white" />
                     Saving...
                   </>
                 ) : (
@@ -1443,7 +1444,7 @@ export default function StudentDetailsPage() {
               </Select>
               {loadingParents && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <LoadingSpinner size="sm" className="text-muted-foreground" />
                   Loading parents...
                 </div>
               )}
@@ -1502,7 +1503,7 @@ export default function StudentDetailsPage() {
               >
                 {linkingParent ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <LoadingSpinner size="sm" className="mr-2 text-white" />
                     Linking...
                   </>
                 ) : (
@@ -1574,7 +1575,7 @@ export default function StudentDetailsPage() {
               >
                 {assigningGroup ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <LoadingSpinner size="sm" className="mr-2 text-white" />
                     Assigning...
                   </>
                 ) : (

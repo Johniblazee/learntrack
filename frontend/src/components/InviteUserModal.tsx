@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { LoadingButtonContent, LoadingSpinner } from '@/components/ui/loading-state'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import { toast } from '@/contexts/ToastContext'
 import { UserPlus, Mail, MessageSquare, Users } from 'lucide-react'
 import { useAuth } from '@clerk/clerk-react'
@@ -323,7 +323,10 @@ export default function InviteUserModal({ open, onOpenChange, onSuccess, editMod
               className="bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-6"
             >
               {loading ? (
-                <LoadingButtonContent label={editMode ? 'Updating...' : 'Sending...'} />
+                <>
+                  <LoadingSpinner size="sm" className="mr-2 text-primary-foreground" />
+                  {editMode ? 'Updating...' : 'Sending...'}
+                </>
               ) : (
                 <>
                   <Mail className="w-4 h-4 mr-2" />

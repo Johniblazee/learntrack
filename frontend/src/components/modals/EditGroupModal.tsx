@@ -15,10 +15,10 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import { Edit, Search, X, Users, UserPlus, RefreshCw } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
 import { useApiClient } from '@/lib/api-client'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import { getStudentInitials, useGroupMembers } from './group-members-shared'
 
 interface Group {
@@ -179,7 +179,7 @@ export function EditGroupModal({
                       className="bg-white/90 hover:bg-white text-foreground shadow-lg"
                     >
                       {regeneratingImage ? (
-                        <LoadingSpinner size="sm" tone="inherit" />
+                        <LoadingSpinner size="sm" className="text-foreground" />
                       ) : (
                         <RefreshCw className="h-4 w-4" />
                       )}
@@ -198,7 +198,7 @@ export function EditGroupModal({
                     disabled={regeneratingImage}
                   >
                     {regeneratingImage ? (
-                      <LoadingSpinner size="sm" tone="inherit" className="mr-1" />
+                      <LoadingSpinner size="sm" className="mr-1 text-foreground" />
                     ) : (
                       <RefreshCw className="h-4 w-4 mr-1" />
                     )}
@@ -374,7 +374,14 @@ export function EditGroupModal({
               Cancel
             </Button>
             <Button type="submit" disabled={loading || !name.trim()}>
-              {loading ? 'Saving...' : 'Save Changes'}
+              {loading ? (
+                <>
+                  <LoadingSpinner size="sm" className="mr-2 text-primary-foreground" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
             </Button>
           </DialogFooter>
         </form>

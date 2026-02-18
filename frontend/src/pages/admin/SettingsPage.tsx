@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
-import { Settings, Save, ToggleLeft, ToggleRight } from 'lucide-react'
-import { LoadingButtonContent, LoadingState } from '@/components/ui/loading-state'
+import { Settings, Save, ToggleLeft, ToggleRight, RefreshCw } from 'lucide-react'
+import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
 
@@ -105,7 +105,7 @@ export function AdminSettingsPage() {
   }
 
   if (isLoading) {
-    return <LoadingState message="Loading settings..." />
+    return <LoadingState message="Loading system settings..." size="lg" className="h-64" />
   }
 
   return (
@@ -119,7 +119,8 @@ export function AdminSettingsPage() {
           </div>
         </div>
         <button onClick={handleSaveSettings} disabled={isSaving} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50">
-          {isSaving ? <LoadingButtonContent label="Saving..." /> : <><Save className="w-4 h-4" />Save Changes</>}
+          {isSaving ? <LoadingSpinner size="sm" className="text-white" /> : <Save className="w-4 h-4" />}
+          {isSaving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
 

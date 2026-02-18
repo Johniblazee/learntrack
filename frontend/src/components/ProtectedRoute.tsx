@@ -24,7 +24,7 @@ export default function ProtectedRoute({
 
   // Loading state
   if (!isLoaded || (isSignedIn && !isBackendLoaded)) {
-    return <LoadingState fullScreen className="bg-background" message="Loading..." size="xl" />
+    return <LoadingState fullScreen message="Loading..." size="xl" />
   }
 
   // Not signed in - redirect to sign-in

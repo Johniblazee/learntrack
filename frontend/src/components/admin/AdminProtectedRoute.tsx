@@ -16,14 +16,7 @@ export function AdminProtectedRoute({ children, requiredPermission }: AdminProte
 
   // Show loading while checking auth
   if (!isLoaded || !isBackendLoaded) {
-    return (
-      <LoadingState
-        fullScreen
-        className="bg-background"
-        size="xl"
-        message="Verifying admin access..."
-      />
-    )
+    return <LoadingState fullScreen message="Verifying admin access..." size="xl" />
   }
 
   // Redirect to sign-in if not authenticated

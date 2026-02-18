@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import {
   Table,
   TableBody,
@@ -18,6 +17,7 @@ import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 
 interface Invitation {
   id: string
@@ -259,7 +259,11 @@ export default function InvitationsView() {
               disabled={refreshing}
               className="h-8 w-8"
             >
-              {refreshing ? <LoadingSpinner size="sm" tone="inherit" /> : <RefreshCw className="h-4 w-4" />}
+              {refreshing ? (
+                <LoadingSpinner size="sm" className="text-foreground" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
             </Button>
           </div>
           <p className="text-sm text-muted-foreground mt-2 ml-12">
@@ -436,7 +440,7 @@ export default function InvitationsView() {
                                   className="h-8 text-[#5c4a38] border-[#5c4a38]/20 hover:bg-[#5c4a38]/10"
                                 >
                                   {resendingId === invitation.id ? (
-                                    <LoadingSpinner size="xs" tone="inherit" className="mr-1.5" />
+                                    <LoadingSpinner size="sm" className="mr-1.5 text-current" />
                                   ) : (
                                     <Send className="w-3.5 h-3.5 mr-1.5" />
                                   )}
@@ -450,7 +454,7 @@ export default function InvitationsView() {
                                   className="h-8 text-red-600 border-red-200 hover:bg-red-50"
                                 >
                                   {revokingId === invitation.id ? (
-                                    <LoadingSpinner size="xs" tone="inherit" className="mr-1.5" />
+                                    <LoadingSpinner size="sm" className="mr-1.5 text-current" />
                                   ) : (
                                     <XCircle className="w-3.5 h-3.5 mr-1.5" />
                                   )}

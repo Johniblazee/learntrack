@@ -9,7 +9,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { LoadingSpinner } from '@/components/ui/loading-state'
 import { 
   Bot, 
   User, 
@@ -26,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { AIInput } from '@/components/ui/animated-ai-input'
 import { MessageLoading } from '@/components/ui/message-loading'
 import { AgentPlan } from '@/components/ui/agent-plan'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 
 import {
   DropdownMenu,
@@ -136,7 +136,7 @@ export function ChatPanel({
           <span className="font-semibold text-sm">AI Assistant</span>
           {isStreaming && (
             <Badge variant="secondary" className="text-xs animate-pulse">
-              <LoadingSpinner size="xs" tone="inherit" className="mr-1" />
+              <LoadingSpinner size="sm" className="mr-1 text-current" />
               Thinking...
             </Badge>
           )}

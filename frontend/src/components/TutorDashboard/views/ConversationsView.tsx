@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingSpinner } from "@/components/ui/loading-state"
 import { socketClient } from "@/lib/socket"
 import { useVisibility } from "@/hooks/useVisibility"
 import { useApiClient } from "@/lib/api-client"
@@ -698,7 +699,12 @@ export default function ConversationsView() {
                     }
                     className="h-10 px-6 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground"
                   >
-                    {sendingMessage ? 'Sending...' : deliveryMethod === 'email' ? 'Send Email' : 'Send'}
+                    {sendingMessage ? (
+                      <>
+                        <LoadingSpinner size="sm" className="mr-2 text-accent-foreground" />
+                        Sending...
+                      </>
+                    ) : deliveryMethod === 'email' ? 'Send Email' : 'Send'}
                   </Button>
                 </div>
               </div>
