@@ -1,482 +1,566 @@
-import { useState, useMemo } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Plus, BookOpen, Users, FileText, Target, Search, Edit, Trash2, Eye, Tag, TrendingUp } from "lucide-react"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useSubjects, useTopics } from "@/hooks/useQueries"
+import { useMemo, useState } from 'react'
+import { useAuth } from '@clerk/clerk-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
+import { toast } from '@/contexts/ToastContext'
+import { useSubjects } from '@/hooks/useQueries'
+import { BookOpen, Edit, Plus, Search, Tag, Trash2 } from 'lucide-react'
 
-interface Subject {
-  id: string
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+
+interface SubjectRecord {
+  _id: string
   name: string
-  description: string
-  color: string
+  description?: string
   topics: string[]
-  studentCount: number
-  questionCount: number
-  assignmentCount: number
-  averageScore: number
-  isActive: boolean
-  createdDate: string
-  lastUpdated: string
+  is_active?: boolean
+  question_count?: number
 }
 
-interface Topic {
-  id: string
-  name: string
+type TopicEditState = {
   subjectId: string
-  questionCount: number
-  assignmentCount: number
-  difficulty: 'beginner' | 'intermediate' | 'advanced'
-  completionRate: number
+  originalName?: string
+  topicName: string
 }
-
-// Color palette for subjects
-const subjectColors = [
-  'bg-blue-500',
-  'bg-green-500',
-  'bg-purple-500',
-  'bg-orange-500',
-  'bg-red-500',
-  'bg-pink-500',
-  'bg-indigo-500',
-  'bg-teal-500',
-]
 
 export default function IntegratedSubjectsManager() {
-  const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [activeTab, setActiveTab] = useState("subjects")
+  const { getToken } = useAuth()
+  const queryClient = useQueryClient()
 
-  // Fetch subjects from API
-  const { data: subjectsData, isLoading: subjectsLoading } = useSubjects()
-  const { data: topicsData, isLoading: topicsLoading } = useTopics()
+  const { data: subjectsData, isLoading } = useSubjects()
 
-  // Transform API data to component format
-  const subjects: Subject[] = useMemo(() => {
-    if (!subjectsData || !Array.isArray(subjectsData)) return []
+  const subjects = useMemo<SubjectRecord[]>(() => {
+    if (!Array.isArray(subjectsData)) {
+      return []
+    }
 
-    return subjectsData.map((subject: any, index: number) => ({
-      id: subject.id || subject._id,
-      name: subject.name || 'Unnamed Subject',
+    return subjectsData.map((subject: any) => ({
+      _id: subject._id || subject.id,
+      name: subject.name || 'Untitled Subject',
       description: subject.description || '',
-      color: subjectColors[index % subjectColors.length],
-      topics: subject.topics || [],
-      studentCount: subject.student_count || 0,
-      questionCount: subject.question_count || 0,
-      assignmentCount: subject.assignment_count || 0,
-      averageScore: subject.average_score || 0,
-      isActive: subject.is_active !== false,
-      createdDate: subject.created_at ? new Date(subject.created_at).toISOString().split('T')[0] : '',
-      lastUpdated: subject.updated_at ? new Date(subject.updated_at).toISOString().split('T')[0] : ''
+      topics: Array.isArray(subject.topics) ? subject.topics : [],
+      is_active: subject.is_active !== false,
+      question_count: Number(subject.question_count || 0),
     }))
   }, [subjectsData])
 
-  // Transform topics data
-  const topics: Topic[] = useMemo(() => {
-    if (!topicsData || !Array.isArray(topicsData)) return []
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('')
 
-    return topicsData.map((topic: any) => ({
-      id: topic.id || topic._id,
-      name: topic.name || 'Unnamed Topic',
-      subjectId: topic.subject_id || '',
-      questionCount: topic.question_count || 0,
-      assignmentCount: topic.assignment_count || 0,
-      difficulty: topic.difficulty || 'intermediate',
-      completionRate: topic.completion_rate || 0
-    }))
-  }, [topicsData])
+  const [subjectDialogOpen, setSubjectDialogOpen] = useState(false)
+  const [topicDialogOpen, setTopicDialogOpen] = useState(false)
 
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty) {
-      case 'beginner':
-        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-      case 'intermediate':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
-      case 'advanced':
-        return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
-      default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400'
+  const [editingSubject, setEditingSubject] = useState<SubjectRecord | null>(null)
+  const [editingTopic, setEditingTopic] = useState<TopicEditState | null>(null)
+
+  const [subjectForm, setSubjectForm] = useState({
+    name: '',
+    description: '',
+  })
+  const [topicForm, setTopicForm] = useState<TopicEditState>({
+    subjectId: '',
+    topicName: '',
+  })
+
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const selectedSubject = subjects.find((subject) => subject._id === selectedSubjectId)
+
+  const filteredSubjects = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase()
+    if (!query) {
+      return subjects
+    }
+
+    return subjects.filter((subject) => {
+      const matchesName = subject.name.toLowerCase().includes(query)
+      const matchesDescription = (subject.description || '').toLowerCase().includes(query)
+      const matchesTopic = subject.topics.some((topic) => topic.toLowerCase().includes(query))
+      return matchesName || matchesDescription || matchesTopic
+    })
+  }, [searchTerm, subjects])
+
+  const totalTopics = useMemo(
+    () => subjects.reduce((count, subject) => count + subject.topics.length, 0),
+    [subjects],
+  )
+
+  const refreshSubjects = () => {
+    queryClient.invalidateQueries({ queryKey: ['subjects'] })
+  }
+
+  const request = async (path: string, init?: RequestInit) => {
+    const token = await getToken()
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null)
+      const detail = payload?.detail || payload?.message || 'Request failed'
+      throw new Error(String(detail))
+    }
+
+    if (response.status === 204) {
+      return null
+    }
+
+    return response.json().catch(() => null)
+  }
+
+  const openCreateSubject = () => {
+    setEditingSubject(null)
+    setSubjectForm({ name: '', description: '' })
+    setSubjectDialogOpen(true)
+  }
+
+  const openEditSubject = (subject: SubjectRecord) => {
+    setEditingSubject(subject)
+    setSubjectForm({
+      name: subject.name,
+      description: subject.description || '',
+    })
+    setSubjectDialogOpen(true)
+  }
+
+  const saveSubject = async () => {
+    const name = subjectForm.name.trim()
+    if (!name) {
+      toast.error('Subject name is required')
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      const payload = {
+        name,
+        description: subjectForm.description.trim() || null,
+      }
+
+      if (editingSubject) {
+        await request(`/subjects/${editingSubject._id}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        })
+        toast.success('Subject updated')
+      } else {
+        await request('/subjects/', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+        toast.success('Subject created')
+      }
+
+      setSubjectDialogOpen(false)
+      refreshSubjects()
+    } catch (error) {
+      console.error('Failed to save subject:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to save subject')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  const filteredSubjects = subjects.filter(subject => {
-    const matchesSearch = subject.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         subject.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         subject.topics.some(topic => topic.toLowerCase().includes(searchTerm.toLowerCase()))
-    const matchesStatus = statusFilter === "all" ||
-                         (statusFilter === "active" && subject.isActive) ||
-                         (statusFilter === "inactive" && !subject.isActive)
+  const deleteSubject = async (subject: SubjectRecord) => {
+    const confirmed = window.confirm(
+      `Delete subject "${subject.name}"? This cannot be undone.`,
+    )
+    if (!confirmed) {
+      return
+    }
 
-    return matchesSearch && matchesStatus
-  })
+    try {
+      await request(`/subjects/${subject._id}`, { method: 'DELETE' })
+      toast.success('Subject deleted')
+      if (selectedSubjectId === subject._id) {
+        setSelectedSubjectId('')
+      }
+      refreshSubjects()
+    } catch (error) {
+      console.error('Failed to delete subject:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to delete subject')
+    }
+  }
 
-  const filteredTopics = topics.filter(topic => {
-    const subject = subjects.find(s => s.id === topic.subjectId)
-    const matchesSearch = topic.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (subject && subject.name.toLowerCase().includes(searchTerm.toLowerCase()))
-    return matchesSearch
-  })
+  const openCreateTopic = () => {
+    const defaultSubjectId = selectedSubjectId || subjects[0]?._id || ''
+    setEditingTopic(null)
+    setTopicForm({
+      subjectId: defaultSubjectId,
+      topicName: '',
+    })
+    setTopicDialogOpen(true)
+  }
+
+  const openEditTopic = (subjectId: string, topicName: string) => {
+    setEditingTopic({
+      subjectId,
+      originalName: topicName,
+      topicName,
+    })
+    setTopicForm({
+      subjectId,
+      originalName: topicName,
+      topicName,
+    })
+    setTopicDialogOpen(true)
+  }
+
+  const saveTopic = async () => {
+    const subjectId = topicForm.subjectId
+    const topicName = topicForm.topicName.trim()
+
+    if (!subjectId) {
+      toast.error('Please select a subject')
+      return
+    }
+
+    if (!topicName) {
+      toast.error('Topic name is required')
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+
+      if (editingTopic?.originalName) {
+        const originalName = editingTopic.originalName
+        if (originalName !== topicName || editingTopic.subjectId !== subjectId) {
+          await request(
+            `/subjects/${editingTopic.subjectId}/topics/${encodeURIComponent(originalName)}`,
+            { method: 'DELETE' },
+          )
+          await request(`/subjects/${subjectId}/topics/${encodeURIComponent(topicName)}`, {
+            method: 'POST',
+          })
+        }
+        toast.success('Topic updated')
+      } else {
+        await request(`/subjects/${subjectId}/topics/${encodeURIComponent(topicName)}`, {
+          method: 'POST',
+        })
+        toast.success('Topic created')
+      }
+
+      setTopicDialogOpen(false)
+      if (!selectedSubjectId) {
+        setSelectedSubjectId(subjectId)
+      }
+      refreshSubjects()
+    } catch (error) {
+      console.error('Failed to save topic:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to save topic')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const deleteTopic = async (subjectId: string, topicName: string) => {
+    const confirmed = window.confirm(`Delete topic "${topicName}"?`)
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      await request(`/subjects/${subjectId}/topics/${encodeURIComponent(topicName)}`, {
+        method: 'DELETE',
+      })
+      toast.success('Topic deleted')
+      refreshSubjects()
+    } catch (error) {
+      console.error('Failed to delete topic:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to delete topic')
+    }
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Subjects Manager</h1>
-          <p className="text-muted-foreground mt-1">Organize subjects, topics, and educational content</p>
+          <p className="text-muted-foreground mt-1">
+            Manage subjects and topics used in assignment and question workflows.
+          </p>
         </div>
-        <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-          <Plus className="w-4 h-4 mr-2" />
-          Add Subject
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={openCreateTopic} disabled={subjects.length === 0}>
+            <Tag className="w-4 h-4 mr-2" />
+            Add Topic
+          </Button>
+          <Button onClick={openCreateSubject}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Subject
+          </Button>
+        </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="bg-card border border-border shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Total Subjects</p>
-                <p className="text-3xl font-bold text-foreground">{subjects.length}</p>
-              </div>
-              <div className="p-3 bg-primary/10 rounded-lg">
-                <BookOpen className="w-6 h-6 text-primary" />
-              </div>
-            </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-sm text-muted-foreground">Total Subjects</p>
+            <p className="text-2xl font-semibold text-foreground mt-1">{subjects.length}</p>
           </CardContent>
         </Card>
-
-        <Card className="bg-card border border-border shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Active Subjects</p>
-                <p className="text-3xl font-bold text-foreground">{subjects.filter(s => s.isActive).length}</p>
-              </div>
-              <div className="p-3 bg-green-500/10 rounded-lg">
-                <Target className="w-6 h-6 text-green-600 dark:text-green-400" />
-              </div>
-            </div>
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-sm text-muted-foreground">Total Topics</p>
+            <p className="text-2xl font-semibold text-foreground mt-1">{totalTopics}</p>
           </CardContent>
         </Card>
-
-        <Card className="bg-card border border-border shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Total Topics</p>
-                <p className="text-3xl font-bold text-foreground">{topics.length}</p>
-              </div>
-              <div className="p-3 bg-accent/30 rounded-lg">
-                <Tag className="w-6 h-6 text-accent-foreground" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border border-border shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Total Questions</p>
-                <p className="text-3xl font-bold text-foreground">{subjects.reduce((acc, s) => acc + s.questionCount, 0)}</p>
-              </div>
-              <div className="p-3 bg-primary/10 rounded-lg">
-                <FileText className="w-6 h-6 text-primary" />
-              </div>
-            </div>
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-sm text-muted-foreground">Active Subjects</p>
+            <p className="text-2xl font-semibold text-foreground mt-1">
+              {subjects.filter((subject) => subject.is_active !== false).length}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs for Subjects and Topics */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="subjects">Subjects</TabsTrigger>
-          <TabsTrigger value="topics">Topics</TabsTrigger>
-        </TabsList>
+      <Card>
+        <CardContent className="p-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search subjects or topics..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* Subjects Tab */}
-        <TabsContent value="subjects" className="space-y-6">
-          {/* Filters and Search */}
-          <Card className="shadow-sm border border-border bg-card">
-            <CardContent className="p-6">
-              <div className="flex flex-col md:flex-row gap-4">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                    <Input
-                      placeholder="Search subjects..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5" />
+              Subjects
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {isLoading ? (
+              Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="rounded-lg border border-border p-4 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              ))
+            ) : filteredSubjects.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                No subjects found
+              </div>
+            ) : (
+              filteredSubjects.map((subject) => (
+                <div
+                  key={subject._id}
+                  className={`rounded-lg border p-4 transition-colors ${
+                    selectedSubjectId === subject._id
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-card'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSubjectId(subject._id)}
+                      className="text-left flex-1"
+                    >
+                      <p className="font-medium text-foreground">{subject.name}</p>
+                      <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                        {subject.description || 'No description'}
+                      </p>
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <Button size="icon" variant="ghost" onClick={() => openEditSubject(subject)}>
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => deleteSubject(subject)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-3">
+                    <Badge variant="secondary">{subject.topics.length} topics</Badge>
+                    <Badge variant="outline">{subject.question_count || 0} questions</Badge>
                   </div>
                 </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full md:w-[180px]">
-                    <SelectValue placeholder="Filter by status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2">
+                <Tag className="w-5 h-5" />
+                Topics
+              </span>
+              <Button size="sm" onClick={openCreateTopic} disabled={subjects.length === 0}>
+                <Plus className="w-4 h-4 mr-1" />
+                Add Topic
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!selectedSubject ? (
+              <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                Select a subject to manage its topics
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Subjects List */}
-          <Card className="shadow-sm border border-border bg-card">
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <BookOpen className="w-5 h-5 mr-2 text-primary" />
-                Subjects ({subjectsLoading ? '...' : filteredSubjects.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {subjectsLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {Array.from({ length: 6 }).map((_, index) => (
-                    <Card key={index} className="border border-border bg-muted/30">
-                      <CardContent className="p-6">
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex items-center gap-3">
-                            <Skeleton className="w-4 h-4 rounded-full" />
-                            <Skeleton className="h-5 w-24" />
-                          </div>
-                          <Skeleton className="h-5 w-16" />
-                        </div>
-                        <Skeleton className="h-4 w-full mb-2" />
-                        <Skeleton className="h-4 w-3/4 mb-4" />
-                        <div className="space-y-3">
-                          <Skeleton className="h-4 w-full" />
-                          <Skeleton className="h-4 w-full" />
-                          <Skeleton className="h-4 w-full" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : filteredSubjects.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p className="text-lg font-medium">No subjects found</p>
-                  <p className="text-sm mt-1">Create your first subject to get started</p>
-                </div>
-              ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredSubjects.map((subject) => (
-                  <Card key={subject.id} className="hover:shadow-lg transition-all duration-200 border border-border bg-muted/30">
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-4 h-4 rounded-full ${subject.color}`}></div>
-                          <h3 className="font-semibold text-foreground">{subject.name}</h3>
-                        </div>
-                        <Badge className={subject.isActive ? 'bg-green-500/10 text-green-600 dark:text-green-400 border-0' : 'bg-red-500/10 text-red-600 dark:text-red-400 border-0'}>
-                          {subject.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </div>
-
-                      <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-                        {subject.description}
-                      </p>
-
-                      <div className="space-y-3 mb-4">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="flex items-center gap-2 text-muted-foreground">
-                            <Users className="w-4 h-4" />
-                            Students
-                          </span>
-                          <span className="font-semibold text-foreground">{subject.studentCount}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="flex items-center gap-2 text-muted-foreground">
-                            <FileText className="w-4 h-4" />
-                            Questions
-                          </span>
-                          <span className="font-semibold text-foreground">{subject.questionCount}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="flex items-center gap-2 text-muted-foreground">
-                            <Target className="w-4 h-4" />
-                            Avg. Score
-                          </span>
-                          <span className="font-semibold text-green-600 dark:text-green-400">{subject.averageScore}%</span>
-                        </div>
-                      </div>
-
-                      <div className="mb-4">
-                        <p className="text-xs text-muted-foreground mb-2">Topics ({subject.topics.length})</p>
-                        <div className="flex flex-wrap gap-1">
-                          {subject.topics.slice(0, 3).map((topic, index) => (
-                            <Badge key={index} variant="outline" className="text-xs">
-                              {topic}
-                            </Badge>
-                          ))}
-                          {subject.topics.length > 3 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{subject.topics.length - 3} more
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="flex-1 hover:bg-accent/50">
-                          <Eye className="w-4 h-4 mr-1" />
-                          View
-                        </Button>
-                        <Button variant="outline" size="sm" className="hover:bg-accent/50">
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button variant="outline" size="sm" className="hover:bg-destructive/10 text-destructive">
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+            ) : selectedSubject.topics.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                No topics yet for {selectedSubject.name}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedSubject.topics.map((topic) => (
+                  <div
+                    key={topic}
+                    className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
+                  >
+                    <span className="text-sm font-medium text-foreground">{topic}</span>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openEditTopic(selectedSubject._id, topic)}
+                      >
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => deleteTopic(selectedSubject._id, topic)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-        {/* Topics Tab */}
-        <TabsContent value="topics" className="space-y-6">
-          {/* Topics Search */}
-          <Card className="shadow-sm border border-border bg-card">
-            <CardContent className="p-6">
-              <div className="flex flex-col md:flex-row gap-4">
-                <div className="flex-1">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                    <Input
-                      placeholder="Search topics..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Topic
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+      <Dialog open={subjectDialogOpen} onOpenChange={setSubjectDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingSubject ? 'Edit Subject' : 'Create Subject'}</DialogTitle>
+            <DialogDescription>
+              {editingSubject
+                ? 'Update the subject details.'
+                : 'Create a new subject for assignments and questions.'}
+            </DialogDescription>
+          </DialogHeader>
 
-          {/* Topics List */}
-          <Card className="shadow-sm border border-border bg-card">
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Tag className="w-5 h-5 mr-2 text-primary" />
-                Topics ({topicsLoading ? '...' : filteredTopics.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {topicsLoading ? (
-                <div className="space-y-4">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <div key={index} className="p-4 bg-muted/30 rounded-lg border border-border">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <Skeleton className="h-5 w-32" />
-                            <Skeleton className="h-5 w-20" />
-                          </div>
-                          <div className="grid grid-cols-3 gap-4 mb-3">
-                            <Skeleton className="h-4 w-24" />
-                            <Skeleton className="h-4 w-24" />
-                            <Skeleton className="h-4 w-24" />
-                          </div>
-                          <Skeleton className="h-2 w-full" />
-                        </div>
-                      </div>
-                    </div>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="subject-name">Subject Name</Label>
+              <Input
+                id="subject-name"
+                value={subjectForm.name}
+                onChange={(event) =>
+                  setSubjectForm((previous) => ({ ...previous, name: event.target.value }))
+                }
+                placeholder="e.g., Mathematics"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="subject-description">Description</Label>
+              <Textarea
+                id="subject-description"
+                value={subjectForm.description}
+                onChange={(event) =>
+                  setSubjectForm((previous) => ({ ...previous, description: event.target.value }))
+                }
+                rows={4}
+                placeholder="Optional description"
+              />
+            </div>
+
+            <Button className="w-full" onClick={saveSubject} disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : editingSubject ? 'Save Subject' : 'Create Subject'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={topicDialogOpen} onOpenChange={setTopicDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingTopic ? 'Edit Topic' : 'Create Topic'}</DialogTitle>
+            <DialogDescription>
+              {editingTopic
+                ? 'Rename this topic or move it to another subject.'
+                : 'Add a topic under one subject.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="topic-subject">Subject</Label>
+              <Select
+                value={topicForm.subjectId}
+                onValueChange={(value) =>
+                  setTopicForm((previous) => ({ ...previous, subjectId: value }))
+                }
+              >
+                <SelectTrigger id="topic-subject">
+                  <SelectValue placeholder="Select subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjects.map((subject) => (
+                    <SelectItem key={subject._id} value={subject._id}>
+                      {subject.name}
+                    </SelectItem>
                   ))}
-                </div>
-              ) : filteredTopics.length === 0 ? (
-                <div className="text-center py-8">
-                  <Tag className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
-                  <p className="text-muted-foreground">No topics found</p>
-                  <p className="text-sm text-muted-foreground mt-1">Create topics within your subjects</p>
-                </div>
-              ) : (
-              <div className="space-y-4">
-                {filteredTopics.map((topic) => {
-                  const subject = subjects.find(s => s.id === topic.subjectId)
-                  return (
-                    <div key={topic.id} className="p-4 bg-muted/30 rounded-lg border border-border hover:shadow-md transition-all duration-200">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-foreground">{topic.name}</h3>
-                            <Badge className={getDifficultyColor(topic.difficulty)}>
-                              {topic.difficulty}
-                            </Badge>
-                            {subject && (
-                              <Badge variant="outline" className="text-xs">
-                                {subject.name}
-                              </Badge>
-                            )}
-                          </div>
+                </SelectContent>
+              </Select>
+            </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-muted-foreground mb-3">
-                            <div className="flex items-center gap-2">
-                              <FileText className="w-4 h-4" />
-                              {topic.questionCount} questions
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <BookOpen className="w-4 h-4" />
-                              {topic.assignmentCount} assignments
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <TrendingUp className="w-4 h-4" />
-                              {topic.completionRate}% completion rate
-                            </div>
-                          </div>
+            <div className="space-y-2">
+              <Label htmlFor="topic-name">Topic Name</Label>
+              <Input
+                id="topic-name"
+                value={topicForm.topicName}
+                onChange={(event) =>
+                  setTopicForm((previous) => ({ ...previous, topicName: event.target.value }))
+                }
+                placeholder="e.g., Linear Equations"
+              />
+            </div>
 
-                          <div className="mb-3">
-                            <div className="flex items-center justify-between text-sm mb-1">
-                              <span className="text-muted-foreground">Completion Progress</span>
-                              <span className="text-muted-foreground">{topic.completionRate}%</span>
-                            </div>
-                            <Progress value={topic.completionRate} className="h-2" />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 ml-4">
-                          <Button variant="outline" size="sm" className="hover:bg-accent/50">
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          <Button variant="outline" size="sm" className="hover:bg-accent/50">
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button variant="outline" size="sm" className="hover:bg-destructive/10 text-destructive">
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            <Button className="w-full" onClick={saveTopic} disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : editingTopic ? 'Save Topic' : 'Create Topic'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

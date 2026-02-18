@@ -1,32 +1,33 @@
 """
-Reference Material management endpoints
+Reference material management endpoints.
 """
 
-from typing import List, Optional
-from pathlib import Path as FilePath
-from uuid import uuid4
 import mimetypes
+from pathlib import Path as FilePath
+from typing import List, Optional
+from uuid import uuid4
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    Path,
-    Query,
-    HTTPException,
-    UploadFile,
-    File,
-)
+import structlog
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
-import structlog
+from pydantic import BaseModel
 
 from app.core.database import get_database
 from app.core.enhanced_auth import (
-    require_tutor,
-    require_authenticated_user,
     ClerkUserContext,
+    require_authenticated_user,
+    require_tutor,
 )
-from app.models.material import Material, MaterialCreate, MaterialUpdate
+from app.core.exceptions import NotFoundError, ValidationError
+from app.models.material import (
+    Material,
+    MaterialCreate,
+    MaterialFolder,
+    MaterialFolderCreate,
+    MaterialFolderUpdate,
+    MaterialUpdate,
+)
 from app.services.material_service import MaterialService
 from app.utils.pagination import PaginatedResponse, paginate
 
@@ -36,6 +37,10 @@ router = APIRouter()
 BACKEND_ROOT = FilePath(__file__).resolve().parents[4]
 MATERIAL_UPLOAD_DIR = BACKEND_ROOT / "uploads" / "materials"
 MATERIAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class MoveMaterialRequest(BaseModel):
+    folder_id: Optional[str] = None
 
 
 def _material_type_from_file(file_name: str, content_type: Optional[str]) -> str:
@@ -64,13 +69,16 @@ async def create_material(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Create a new reference material (tutor only)"""
+    """Create a new reference material (tutor only)."""
     try:
         material_service = MaterialService(database)
-        material = await material_service.create_material(
+        return await material_service.create_material(
             material_data, current_user.clerk_id
         )
-        return material
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to create material", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to create material")
@@ -81,12 +89,17 @@ async def get_materials(
     subject_id: Optional[str] = Query(None, description="Filter by subject ID"),
     material_type: Optional[str] = Query(None, description="Filter by material type"),
     status: Optional[str] = Query(None, description="Filter by status"),
+    folder_id: Optional[str] = Query(None, description="Filter by folder ID"),
+    include_subfolders: bool = Query(
+        False,
+        description="When folder_id is provided, include materials from subfolders",
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Get paginated materials for current tutor"""
+    """Get paginated materials for current tutor."""
     try:
         material_service = MaterialService(database)
         result = await material_service.get_materials_for_tutor(
@@ -96,13 +109,116 @@ async def get_materials(
             status=status,
             page=page,
             per_page=per_page,
+            folder_id=folder_id,
+            include_subfolders=include_subfolders,
         )
         return paginate(
             items=result["items"], page=page, per_page=per_page, total=result["total"]
         )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to get materials", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to get materials")
+
+
+@router.get("/folders", response_model=List[MaterialFolder])
+async def list_material_folders(
+    parent_id: Optional[str] = Query(None, description="Parent folder ID"),
+    include_all: bool = Query(
+        False,
+        description="Include full folder tree instead of only one folder level",
+    ),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """List material folders for current tutor."""
+    try:
+        material_service = MaterialService(database)
+        return await material_service.list_folders(
+            tutor_id=current_user.clerk_id,
+            parent_id=parent_id,
+            include_all=include_all,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to list material folders", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list folders")
+
+
+@router.post("/folders", response_model=MaterialFolder, status_code=201)
+async def create_material_folder(
+    folder_data: MaterialFolderCreate,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Create a material folder for current tutor."""
+    try:
+        material_service = MaterialService(database)
+        return await material_service.create_folder(folder_data, current_user.clerk_id)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to create material folder", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create folder")
+
+
+@router.put("/folders/{folder_id}", response_model=MaterialFolder)
+async def update_material_folder(
+    folder_id: str,
+    update_data: MaterialFolderUpdate,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Rename and/or move an existing material folder."""
+    try:
+        material_service = MaterialService(database)
+        return await material_service.update_folder(
+            folder_id=folder_id,
+            update_data=update_data,
+            tutor_id=current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to update material folder", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update folder")
+
+
+@router.delete("/folders/{folder_id}")
+async def delete_material_folder(
+    folder_id: str,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Delete a material folder and move descendants/materials to parent/root."""
+    try:
+        material_service = MaterialService(database)
+        deleted = await material_service.delete_folder(
+            folder_id=folder_id,
+            tutor_id=current_user.clerk_id,
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        return {"message": "Folder deleted successfully"}
+    except HTTPException:
+        raise
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to delete material folder", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete folder")
 
 
 @router.get("/student", response_model=List[Material])
@@ -111,19 +227,19 @@ async def get_materials_for_student(
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Get materials accessible to students"""
+    """Get materials accessible to students."""
     try:
-        # Get student's tutor_id
         if not current_user.tutor_id:
             raise HTTPException(
-                status_code=400, detail="Student not assigned to a tutor"
+                status_code=400,
+                detail="Student not assigned to a tutor",
             )
 
         material_service = MaterialService(database)
-        materials = await material_service.get_materials_for_student(
-            tutor_id=current_user.tutor_id, subject_id=subject_id
+        return await material_service.get_materials_for_student(
+            tutor_id=current_user.tutor_id,
+            subject_id=subject_id,
         )
-        return materials
     except HTTPException:
         raise
     except Exception as e:
@@ -136,7 +252,7 @@ async def upload_material_file(
     file: UploadFile = File(...),
     current_user: ClerkUserContext = Depends(require_tutor),
 ):
-    """Upload a material file and return a URL that can be saved in material records."""
+    """Upload a material file and return a URL for material records."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required")
 
@@ -187,26 +303,57 @@ async def get_uploaded_material_file(
     return FileResponse(path=file_path, media_type=media_type, filename=file_path.name)
 
 
+@router.put("/{material_id}/move", response_model=Material)
+async def move_material(
+    move_data: MoveMaterialRequest,
+    material_id: str = Path(..., description="Material ID"),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Move a material to another folder or back to root."""
+    try:
+        material_service = MaterialService(database)
+        return await material_service.move_material(
+            material_id=material_id,
+            tutor_id=current_user.clerk_id,
+            folder_id=move_data.folder_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to move material", material_id=material_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to move material")
+
+
 @router.get("/{material_id}", response_model=Material)
 async def get_material(
     material_id: str = Path(..., description="Material ID"),
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Get a specific material"""
+    """Get a specific material."""
     try:
+        tenant_tutor_id = current_user.tutor_id or current_user.clerk_id
         material_service = MaterialService(database)
-        material = await material_service.get_material_by_id(material_id)
+        material = await material_service.get_material_by_id(
+            material_id=material_id,
+            tutor_id=tenant_tutor_id,
+        )
 
-        # Increment view count
+        if current_user.role.value != "tutor" and not material.shared_with_students:
+            raise HTTPException(status_code=403, detail="Material is private")
+
         await material_service.increment_view_count(material_id)
-
         return material
     except HTTPException:
         raise
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to get material", material_id=material_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get material")
 
 
 @router.put("/{material_id}", response_model=Material)
@@ -216,16 +363,21 @@ async def update_material(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Update a material (tutor only)"""
+    """Update a material (tutor only)."""
     try:
         material_service = MaterialService(database)
-        material = await material_service.update_material(material_id, update_data)
-        return material
-    except HTTPException:
-        raise
+        return await material_service.update_material(
+            material_id=material_id,
+            update_data=update_data,
+            tutor_id=current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to update material", material_id=material_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update material")
 
 
 @router.delete("/{material_id}")
@@ -234,16 +386,19 @@ async def delete_material(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Delete a material (tutor only)"""
+    """Delete (archive) a material (tutor only)."""
     try:
         material_service = MaterialService(database)
-        await material_service.delete_material(material_id)
+        await material_service.delete_material(
+            material_id=material_id,
+            tutor_id=current_user.clerk_id,
+        )
         return {"message": "Material deleted successfully"}
-    except HTTPException:
-        raise
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to delete material", material_id=material_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete material")
 
 
 @router.post("/{material_id}/link-question/{question_id}", response_model=Material)
@@ -253,16 +408,19 @@ async def link_material_to_question(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Link material to a question (tutor only)"""
+    """Link material to a question (tutor only)."""
     try:
         material_service = MaterialService(database)
-        material = await material_service.link_to_question(material_id, question_id)
-        return material
-    except HTTPException:
-        raise
+        return await material_service.link_to_question(
+            material_id=material_id,
+            question_id=question_id,
+            tutor_id=current_user.clerk_id,
+        )
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to link material to question", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to link material")
 
 
 @router.post("/{material_id}/link-assignment/{assignment_id}", response_model=Material)
@@ -272,16 +430,19 @@ async def link_material_to_assignment(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Link material to an assignment (tutor only)"""
+    """Link material to an assignment (tutor only)."""
     try:
         material_service = MaterialService(database)
-        material = await material_service.link_to_assignment(material_id, assignment_id)
-        return material
-    except HTTPException:
-        raise
+        return await material_service.link_to_assignment(
+            material_id=material_id,
+            assignment_id=assignment_id,
+            tutor_id=current_user.clerk_id,
+        )
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error("Failed to link material to assignment", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to link material")
 
 
 @router.post("/{material_id}/download")
@@ -290,11 +451,12 @@ async def track_download(
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Track material download"""
+    """Track material download."""
+    del current_user
     try:
         material_service = MaterialService(database)
         await material_service.increment_download_count(material_id)
         return {"message": "Download tracked"}
     except Exception as e:
         logger.error("Failed to track download", material_id=material_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to track download")

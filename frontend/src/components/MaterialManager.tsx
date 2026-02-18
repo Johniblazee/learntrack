@@ -21,6 +21,7 @@ import {
   Trash2,
   Edit,
   Share2,
+  Folder,
   FileText,
   FileImage,
   FileVideo,
@@ -41,6 +42,8 @@ interface Material {
   file_size?: number
   subject_id?: string
   topic?: string
+  folder_id?: string | null
+  folder_path?: string | null
   tags: string[]
   status: 'active' | 'archived' | 'draft'
   view_count: number
@@ -52,6 +55,13 @@ interface Material {
 interface Subject {
   _id: string
   name: string
+}
+
+interface MaterialFolder {
+  _id: string
+  name: string
+  parent_id?: string | null
+  path: string
 }
 
 // Helper function to get file icon based on type
@@ -85,10 +95,12 @@ export default function MaterialManager() {
   const { getToken } = useAuth()
   const [materials, setMaterials] = useState<Material[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [folders, setFolders] = useState<MaterialFolder[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [subjectFilter, setSubjectFilter] = useState('all')
+  const [folderFilter, setFolderFilter] = useState('all')
   const [sortBy, setSortBy] = useState<'date' | 'name'>('date')
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -107,6 +119,7 @@ export default function MaterialManager() {
     material_type: 'pdf' as Material['material_type'],
     file_url: '',
     subject_id: '',
+    folder_id: '',
     topic: '',
     tags: '',
     shared_with_students: true,
@@ -119,6 +132,7 @@ export default function MaterialManager() {
     material_type: 'pdf' as Material['material_type'],
     file_url: '',
     subject_id: '',
+    folder_id: '',
     topic: '',
     tags: '',
     shared_with_students: true,
@@ -128,6 +142,7 @@ export default function MaterialManager() {
   useEffect(() => {
     fetchMaterials()
     fetchSubjects()
+    fetchFolders()
   }, [])
 
   const fetchMaterials = async () => {
@@ -208,6 +223,7 @@ export default function MaterialManager() {
         file_url: resolvedFileUrl,
         file_size: resolvedFileSize,
         material_type: resolvedMaterialType,
+        folder_id: formData.folder_id || null,
         tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean)
       }
 
@@ -229,12 +245,14 @@ export default function MaterialManager() {
           material_type: 'pdf',
           file_url: '',
           subject_id: '',
+          folder_id: '',
           topic: '',
           tags: '',
           shared_with_students: true,
           file_size: 0
         })
         setSelectedFile(null)
+        fetchFolders()
         fetchMaterials()
       } else {
         toast.error('Failed to create material')
@@ -244,6 +262,139 @@ export default function MaterialManager() {
       toast.error('Failed to create material')
     } finally {
       setIsUploadingFile(false)
+    }
+  }
+
+  const fetchFolders = async () => {
+    try {
+      const token = await getToken()
+      const response = await fetch(`${API_BASE_URL}/materials/folders?include_all=true`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setFolders(Array.isArray(data) ? data : [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch folders:', error)
+    }
+  }
+
+  const handleCreateFolder = async () => {
+    const folderName = window.prompt('Enter folder name')?.trim()
+    if (!folderName) {
+      return
+    }
+
+    try {
+      const token = await getToken()
+      const parentId = folderFilter !== 'all' && folderFilter !== 'root' ? folderFilter : null
+      const response = await fetch(`${API_BASE_URL}/materials/folders`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: folderName,
+          parent_id: parentId,
+        }),
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to create folder')
+      }
+
+      toast.success('Folder created')
+      fetchFolders()
+    } catch (error) {
+      console.error('Failed to create folder:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to create folder')
+    }
+  }
+
+  const handleRenameFolder = async () => {
+    if (folderFilter === 'all' || folderFilter === 'root') {
+      toast.info('Select a folder first')
+      return
+    }
+
+    const selected = folders.find((folder) => folder._id === folderFilter)
+    if (!selected) {
+      toast.error('Folder not found')
+      return
+    }
+
+    const updatedName = window.prompt('Rename folder', selected.name)?.trim()
+    if (!updatedName || updatedName === selected.name) {
+      return
+    }
+
+    try {
+      const token = await getToken()
+      const response = await fetch(`${API_BASE_URL}/materials/folders/${selected._id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: updatedName }),
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to rename folder')
+      }
+
+      toast.success('Folder renamed')
+      fetchFolders()
+      fetchMaterials()
+    } catch (error) {
+      console.error('Failed to rename folder:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to rename folder')
+    }
+  }
+
+  const handleDeleteFolder = async () => {
+    if (folderFilter === 'all' || folderFilter === 'root') {
+      toast.info('Select a folder first')
+      return
+    }
+
+    const selected = folders.find((folder) => folder._id === folderFilter)
+    if (!selected) {
+      toast.error('Folder not found')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Delete folder "${selected.name}"? Materials move to parent/root automatically.`
+    )
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      const token = await getToken()
+      const response = await fetch(`${API_BASE_URL}/materials/folders/${selected._id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to delete folder')
+      }
+
+      toast.success('Folder deleted')
+      setFolderFilter('all')
+      fetchFolders()
+      fetchMaterials()
+    } catch (error) {
+      console.error('Failed to delete folder:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to delete folder')
     }
   }
 
@@ -269,12 +420,29 @@ export default function MaterialManager() {
     }
   }
 
+  const selectedFolder = folders.find((folder) => folder._id === folderFilter)
+
   const filteredMaterials = materials.filter(material => {
     const matchesSearch = material.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (material.description?.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesType = typeFilter === 'all' || material.material_type === typeFilter
     const matchesSubject = subjectFilter === 'all' || material.subject_id === subjectFilter
-    return matchesSearch && matchesType && matchesSubject && material.status === 'active'
+    const matchesFolder =
+      folderFilter === 'all'
+        ? true
+        : folderFilter === 'root'
+          ? !material.folder_id
+          : material.folder_id === folderFilter ||
+            (selectedFolder?.path
+              ? material.folder_path?.startsWith(`${selectedFolder.path}/`)
+              : false)
+    return (
+      matchesSearch &&
+      matchesType &&
+      matchesSubject &&
+      matchesFolder &&
+      material.status === 'active'
+    )
   })
 
   // Sort materials
@@ -343,6 +511,7 @@ export default function MaterialManager() {
       material_type: material.material_type,
       file_url: material.file_url || '',
       subject_id: material.subject_id || '',
+      folder_id: material.folder_id || '',
       topic: material.topic || '',
       tags: material.tags.join(', '),
       shared_with_students: material.shared_with_students,
@@ -366,6 +535,7 @@ export default function MaterialManager() {
         file_url: editFormData.file_url.trim() || null,
         file_size: editFormData.file_size || null,
         subject_id: editFormData.subject_id || null,
+        folder_id: editFormData.folder_id || null,
         topic: editFormData.topic.trim() || null,
         tags: editFormData.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         shared_with_students: editFormData.shared_with_students,
@@ -460,14 +630,44 @@ export default function MaterialManager() {
             Upload, organize, and share learning resources with your students.
           </p>
         </div>
-        <Button
-          onClick={() => setIsCreateDialogOpen(true)}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Upload className="w-4 h-4 mr-2" />
-          Upload New
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleCreateFolder}>
+            <Folder className="w-4 h-4 mr-2" />
+            New Folder
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleRenameFolder}
+            disabled={folderFilter === 'all' || folderFilter === 'root'}
+          >
+            <Edit className="w-4 h-4 mr-2" />
+            Rename Folder
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleDeleteFolder}
+            disabled={folderFilter === 'all' || folderFilter === 'root'}
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete Folder
+          </Button>
+          <Button
+            onClick={() => setIsCreateDialogOpen(true)}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Upload className="w-4 h-4 mr-2" />
+            Upload New
+          </Button>
+        </div>
       </div>
+
+      {folderFilter !== 'all' && (
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+          Viewing folder: <span className="font-medium text-foreground">
+            {folderFilter === 'root' ? 'Root materials' : (selectedFolder?.path || 'Selected folder')}
+          </span>
+        </div>
+      )}
 
       {/* Drag & Drop Zone */}
       <div
@@ -534,6 +734,22 @@ export default function MaterialManager() {
             </SelectContent>
           </Select>
 
+          {/* Filter by Folder */}
+          <Select value={folderFilter} onValueChange={setFolderFilter}>
+            <SelectTrigger className="w-full md:w-[220px] h-10 border-border bg-background">
+              <SelectValue placeholder="All Folders" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Folders</SelectItem>
+              <SelectItem value="root">Root Materials</SelectItem>
+              {folders.map(folder => (
+                <SelectItem key={folder._id} value={folder._id}>
+                  {folder.path}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           {/* Filter by File Type */}
           <Select value={typeFilter} onValueChange={setTypeFilter}>
             <SelectTrigger className="w-full md:w-[150px] h-10 border-border bg-background">
@@ -572,6 +788,7 @@ export default function MaterialManager() {
               <TableRow className="bg-muted/50 hover:bg-muted/50">
                 <TableHead>File Name</TableHead>
                 <TableHead>Subject</TableHead>
+                <TableHead>Folder</TableHead>
                 <TableHead>Date Uploaded</TableHead>
                 <TableHead>File Size</TableHead>
                 <TableHead>Access</TableHead>
@@ -588,6 +805,7 @@ export default function MaterialManager() {
                     </div>
                   </TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
@@ -611,6 +829,7 @@ export default function MaterialManager() {
           </h3>
           <p className="text-muted-foreground mb-4">
             {searchTerm || typeFilter !== 'all' || subjectFilter !== 'all'
+              || folderFilter !== 'all'
               ? 'Try adjusting your search or filters'
               : 'Get started by uploading your first material'}
           </p>
@@ -622,6 +841,7 @@ export default function MaterialManager() {
               <TableRow className="bg-muted/50 hover:bg-muted/50">
                 <TableHead>File Name</TableHead>
                 <TableHead>Subject</TableHead>
+                <TableHead>Folder</TableHead>
                 <TableHead>Date Uploaded</TableHead>
                 <TableHead>File Size</TableHead>
                 <TableHead>Access</TableHead>
@@ -639,6 +859,9 @@ export default function MaterialManager() {
                   </TableCell>
                   <TableCell className="text-foreground">
                     {getSubjectName(material.subject_id)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {material.folder_path || 'Root'}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {new Date(material.created_at).toLocaleDateString('en-US', {
@@ -726,7 +949,7 @@ export default function MaterialManager() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="edit-type">Material Type *</Label>
                 <Select
@@ -761,6 +984,29 @@ export default function MaterialManager() {
                     {subjects.map(subject => (
                       <SelectItem key={subject._id} value={subject._id}>
                         {subject.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-folder">Folder</Label>
+                <Select
+                  value={editFormData.folder_id || 'none'}
+                  onValueChange={(value) => setEditFormData({
+                    ...editFormData,
+                    folder_id: value === 'none' ? '' : value,
+                  })}
+                >
+                  <SelectTrigger id="edit-folder">
+                    <SelectValue placeholder="Select folder" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Root (no folder)</SelectItem>
+                    {folders.map(folder => (
+                      <SelectItem key={folder._id} value={folder._id}>
+                        {folder.path}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -866,7 +1112,7 @@ export default function MaterialManager() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="type">Material Type *</Label>
                 <Select
@@ -890,16 +1136,43 @@ export default function MaterialManager() {
               <div className="space-y-2">
                 <Label htmlFor="subject">Subject</Label>
                 <Select
-                  value={formData.subject_id}
-                  onValueChange={(value) => setFormData({ ...formData, subject_id: value })}
+                  value={formData.subject_id || 'none'}
+                  onValueChange={(value) => setFormData({
+                    ...formData,
+                    subject_id: value === 'none' ? '' : value,
+                  })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select subject" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="none">No subject</SelectItem>
                     {subjects.map(subject => (
                       <SelectItem key={subject._id} value={subject._id}>
                         {subject.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="folder">Folder</Label>
+                <Select
+                  value={formData.folder_id || 'none'}
+                  onValueChange={(value) => setFormData({
+                    ...formData,
+                    folder_id: value === 'none' ? '' : value,
+                  })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select folder" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Root (no folder)</SelectItem>
+                    {folders.map(folder => (
+                      <SelectItem key={folder._id} value={folder._id}>
+                        {folder.path}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -587,7 +587,11 @@ export function useConversations() {
     queryFn: async () => {
       const response = await client.get('/conversations')
       if (response.error) throw new Error(response.error)
-      return response.data?.items || response.data || []
+      const payload = response.data
+      if (Array.isArray(payload)) return payload
+      if (Array.isArray(payload?.items)) return payload.items
+      if (Array.isArray(payload?.conversations)) return payload.conversations
+      return []
     },
   })
 }

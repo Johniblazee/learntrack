@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { useAuth } from '@clerk/clerk-react'
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -30,6 +31,7 @@ interface Message {
 }
 
 export function MessageInbox() {
+  const { userId } = useAuth()
   const { data: conversations, isLoading, isError } = useConversations()
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
@@ -41,22 +43,28 @@ export function MessageInbox() {
     if (!conversations || !Array.isArray(conversations)) return []
 
     return conversations.map((conv: any) => {
-      const otherParticipant = conv.participant_names?.[0] || 'Unknown'
+      const participantIds = Array.isArray(conv.participants) ? conv.participants : []
+      const otherParticipantId = participantIds.find((id: string) => id !== userId) || participantIds[0]
+      const otherParticipant = otherParticipantId
+        ? (conv.participant_names?.[otherParticipantId] || 'Unknown')
+        : 'Unknown'
       const initials = otherParticipant.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+      const conversationId = conv._id || conv.id
+      const unreadCountForUser = Number(conv.unread_count?.[userId ?? '']) || 0
 
       return {
-        id: conv._id || conv.id,
+        id: conversationId,
         sender: otherParticipant,
         senderAvatar: initials,
         subject: conv.title || 'No subject',
         preview: conv.last_message || 'No messages yet',
         timestamp: conv.updated_at ? formatDistanceToNow(new Date(conv.updated_at), { addSuffix: true }) : '',
-        isRead: readIds.has(conv._id || conv.id) || conv.is_read !== false,
-        isStarred: starredIds.has(conv._id || conv.id),
+        isRead: readIds.has(conversationId) || unreadCountForUser === 0,
+        isStarred: starredIds.has(conversationId),
         category: "inbox" as const
       }
     })
-  }, [conversations, starredIds, readIds])
+  }, [conversations, starredIds, readIds, userId])
 
   const unreadCount = messages.filter(m => !m.isRead).length
 

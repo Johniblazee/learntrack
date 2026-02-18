@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { useAuth } from "@clerk/clerk-react"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -30,6 +31,7 @@ interface MessagingViewProps {
 }
 
 export default function MessagingView({ type }: MessagingViewProps) {
+  const { userId } = useAuth()
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
 
@@ -40,8 +42,13 @@ export default function MessagingView({ type }: MessagingViewProps) {
     if (!conversations || !Array.isArray(conversations)) return []
 
     return conversations.map((conv: any) => {
-      const otherParticipant = conv.participant_names?.[0] || 'Unknown'
+      const participantIds = Array.isArray(conv.participants) ? conv.participants : []
+      const otherParticipantId = participantIds.find((id: string) => id !== userId) || participantIds[0]
+      const otherParticipant = otherParticipantId
+        ? (conv.participant_names?.[otherParticipantId] || 'Unknown')
+        : 'Unknown'
       const initials = otherParticipant.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+      const unreadCountForUser = Number(conv.unread_count?.[userId ?? '']) || 0
 
       return {
         id: conv._id || conv.id,
@@ -50,11 +57,11 @@ export default function MessagingView({ type }: MessagingViewProps) {
         subject: conv.title || 'No subject',
         preview: conv.last_message || 'No messages yet',
         timestamp: conv.updated_at ? formatDistanceToNow(new Date(conv.updated_at), { addSuffix: true }) : '',
-        isRead: conv.is_read !== false,
-        isUnread: conv.is_read === false
+        isRead: unreadCountForUser === 0,
+        isUnread: unreadCountForUser > 0
       }
     })
-  }, [conversations])
+  }, [conversations, userId])
 
   const unreadCount = messages.filter(m => m.isUnread).length
   const icon = type === "chats" ? MessageSquare : Mail
