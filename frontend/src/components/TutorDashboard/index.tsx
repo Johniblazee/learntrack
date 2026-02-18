@@ -1,20 +1,7 @@
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
-import { Button } from "@/components/ui/button"
-import { ThemeToggle } from "@/components/ui/theme-toggle"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { useNavigate, useLocation, Routes, Route, Navigate } from "react-router-dom"
-import { useClerk, useUser } from "@clerk/clerk-react"
-import { Plus, LogOut, User, Settings } from "lucide-react"
 import { AppSidebar } from "./AppSidebar"
 import { OverviewView } from "./views/OverviewView"
 import InvitationsView from "./views/InvitationsView"
@@ -42,8 +29,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
   void onBack
   const navigate = useNavigate()
   const location = useLocation()
-  const { user } = useUser()
-  const { signOut } = useClerk()
 
   // Use React Query for dashboard stats
   const { data: dashboardStats, isLoading: loading } = useDashboardStats()
@@ -146,23 +131,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
 
   const breadcrumbInfo = getBreadcrumbInfo()
 
-  const handleCreateAssignment = () => {
-    navigate('/dashboard/assignments/create')
-  }
-
-  const handleProfileClick = () => {
-    navigate('/profile')
-  }
-
-  const handleSettingsClick = () => {
-    navigate('/settings')
-  }
-
-  const handleSignOut = async () => {
-    await signOut()
-    navigate('/')
-  }
-
   return (
     <SidebarProvider>
       <AppSidebar activeView={activeView} onViewChange={handleViewChange} />
@@ -201,48 +169,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
             </Breadcrumb>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button onClick={handleCreateAssignment} size="sm" className="hidden md:inline-flex">
-              <Plus className="mr-1.5 h-4 w-4" />
-              New Assignment
-            </Button>
-            <ThemeToggle />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback>
-                      {user?.firstName?.[0]}{user?.lastName?.[0]}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium leading-none">{user?.fullName || 'User'}</p>
-                    <p className="text-xs text-muted-foreground leading-none">
-                      {user?.primaryEmailAddress?.emailAddress}
-                    </p>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleProfileClick}>
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleSettingsClick}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
         </header>
 
         {/* Main Content - Nested Routes */}

@@ -19,6 +19,7 @@ interface Session {
   session_id: string
   prompt: string
   created_at: string
+  updated_at?: string
   status: 'completed' | 'failed' | 'in_progress' | 'pending'
   question_count: number
   approved_count: number
@@ -31,6 +32,11 @@ interface ChatApiResponse {
   ready_to_generate?: boolean
   missing_fields?: string[]
   session_id?: string
+}
+
+interface SessionSnapshot {
+  questions: GeneratedQuestion[]
+  chatMessages: ChatMessage[]
 }
 
 export function OpenCanvasGenerator() {
@@ -65,6 +71,8 @@ export function OpenCanvasGenerator() {
   // Session state
   const [sessions, setSessions] = useState<Session[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+  const [sessionSnapshots, setSessionSnapshots] = useState<Record<string, SessionSnapshot>>({})
+  const [isDeletingSessions, setIsDeletingSessions] = useState(false)
 
   // Fetch AI defaults from settings on mount
   useEffect(() => {
@@ -93,7 +101,7 @@ export function OpenCanvasGenerator() {
   const fetchSessions = useCallback(async () => {
     try {
       const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/question-generator/sessions`, {
+      const response = await fetch(`${API_BASE_URL}/question-generator/sessions?per_page=100`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (response.ok) {
@@ -124,6 +132,16 @@ export function OpenCanvasGenerator() {
     }
     return fallback
   }
+
+  const mapPersistedChatMessages = useCallback((messages: any[] = []): ChatMessage[] => {
+    return messages.map((message: any) => ({
+      id: String(message.id || `msg-${Date.now()}-${Math.random()}`),
+      role: (message.role || 'assistant') as ChatMessage['role'],
+      content: String(message.content || ''),
+      referencedQuestionId: message.referenced_question_id || message.referencedQuestionId,
+      timestamp: message.timestamp ? new Date(message.timestamp) : new Date(),
+    }))
+  }, [])
 
   const buildGenerationPrompt = useCallback((instruction?: string): string | null => {
     const trimmedInstruction = instruction?.trim() || ''
@@ -680,6 +698,16 @@ export function OpenCanvasGenerator() {
 
   // Handle new conversation
   const handleNewConversation = useCallback(() => {
+    if (currentSessionId) {
+      setSessionSnapshots((previous) => ({
+        ...previous,
+        [currentSessionId]: {
+          questions,
+          chatMessages,
+        },
+      }))
+    }
+
     setChatMessages([])
     setCurrentSessionId(null)
     setQuestions([])
@@ -687,7 +715,80 @@ export function OpenCanvasGenerator() {
     setGenerationProgressCurrent(0)
     setSelectedQuestionId(null)
     toast.success('Started new conversation')
-  }, [])
+  }, [currentSessionId, questions, chatMessages])
+
+  const handleDeleteSessions = useCallback(async (sessionIds: string[]) => {
+    const uniqueSessionIds = Array.from(new Set(sessionIds.filter(Boolean)))
+    if (uniqueSessionIds.length === 0) {
+      return
+    }
+
+    setIsDeletingSessions(true)
+
+    try {
+      const token = await getToken()
+      const deletionResults = await Promise.allSettled(
+        uniqueSessionIds.map(async (sessionId) => {
+          const response = await fetch(`${API_BASE_URL}/question-generator/sessions/${sessionId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          })
+
+          if (!response.ok) {
+            throw new Error(`Delete failed for session ${sessionId}`)
+          }
+
+          return sessionId
+        })
+      )
+
+      const deletedSessionIds = deletionResults
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map((result) => result.value)
+      const failedDeletes = deletionResults.length - deletedSessionIds.length
+
+      if (deletedSessionIds.length > 0) {
+        setSessions((previous) => previous.filter((session) => !deletedSessionIds.includes(session.session_id)))
+        setSessionSnapshots((previous) => {
+          const next = { ...previous }
+          deletedSessionIds.forEach((sessionId) => {
+            delete next[sessionId]
+          })
+          return next
+        })
+
+        if (currentSessionId && deletedSessionIds.includes(currentSessionId)) {
+          setCurrentSessionId(null)
+          setQuestions([])
+          setStreamingContent('')
+          setGenerationProgressCurrent(0)
+          setChatMessages([])
+          setSelectedQuestionId(null)
+        }
+      }
+
+      await fetchSessions()
+
+      if (deletedSessionIds.length > 0 && failedDeletes === 0) {
+        toast.success(
+          deletedSessionIds.length === 1
+            ? 'Conversation deleted'
+            : `${deletedSessionIds.length} conversations deleted`
+        )
+      } else if (deletedSessionIds.length > 0 && failedDeletes > 0) {
+        toast.warning(
+          `${deletedSessionIds.length} conversation(s) deleted, ${failedDeletes} failed. Try again for the remaining items.`
+        )
+      } else {
+        toast.error('Failed to delete selected conversation(s)')
+      }
+    } catch (error) {
+      console.error('Delete sessions error:', error)
+      toast.error('Failed to delete selected conversation(s)')
+    } finally {
+      setIsDeletingSessions(false)
+    }
+  }, [currentSessionId, fetchSessions, getToken])
 
   // Handle delete conversation
   const handleDeleteConversation = useCallback(async () => {
@@ -696,55 +797,69 @@ export function OpenCanvasGenerator() {
       return
     }
 
-    try {
-      const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/question-generator/sessions/${currentSessionId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (response.ok) {
-        setSessions(prev => prev.filter(s => s.session_id !== currentSessionId))
-        setCurrentSessionId(null)
-        setQuestions([])
-        setStreamingContent('')
-        setGenerationProgressCurrent(0)
-        setChatMessages([])
-        toast.success('Conversation deleted')
-      } else {
-        toast.error('Failed to delete conversation')
-      }
-    } catch (error) {
-      console.error('Delete error:', error)
-      toast.error('Failed to delete conversation')
-    }
-  }, [currentSessionId, getToken])
+    await handleDeleteSessions([currentSessionId])
+  }, [currentSessionId, handleDeleteSessions])
 
   // Handle switch session
   const handleSwitchSession = useCallback(async (sessionId: string) => {
+    if (!sessionId) {
+      return
+    }
+
+    if (currentSessionId && currentSessionId !== sessionId) {
+      setSessionSnapshots((previous) => ({
+        ...previous,
+        [currentSessionId]: {
+          questions,
+          chatMessages,
+        },
+      }))
+    }
+
+    const cachedSession = sessionSnapshots[sessionId]
     setCurrentSessionId(sessionId)
+
+    if (cachedSession) {
+      setQuestions(cachedSession.questions)
+      setChatMessages(cachedSession.chatMessages)
+    }
+
     setIsGenerating(true)
+
     try {
       const token = await getToken()
       const response = await fetch(`${API_BASE_URL}/question-generator/sessions/${sessionId}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
+
       if (response.ok) {
         const data = await response.json()
-        if (data.questions) {
-          setQuestions(data.questions)
-        }
-        if (Array.isArray(data.chat_messages)) {
-          setChatMessages(data.chat_messages.map((message: any) => ({
-            id: message.id,
-            role: message.role,
-            content: message.content,
-            referencedQuestionId: message.referenced_question_id,
-            timestamp: message.timestamp ? new Date(message.timestamp) : new Date(),
-          })))
-        } else {
-          setChatMessages([])
-        }
-        toast.success('Session loaded')
+
+        const loadedQuestions: GeneratedQuestion[] = Array.isArray(data.questions)
+          ? data.questions
+          : cachedSession?.questions || []
+
+        const loadedChatMessages: ChatMessage[] = Array.isArray(data.chat_messages)
+          ? mapPersistedChatMessages(data.chat_messages)
+          : data.original_prompt
+            ? [{
+                id: `legacy-${sessionId}-prompt`,
+                role: 'user',
+                content: data.original_prompt,
+                timestamp: data.created_at ? new Date(data.created_at) : new Date(),
+              }]
+            : cachedSession?.chatMessages || []
+
+        setQuestions(loadedQuestions)
+        setChatMessages(loadedChatMessages)
+
+        setSessionSnapshots((previous) => ({
+          ...previous,
+          [sessionId]: {
+            questions: loadedQuestions,
+            chatMessages: loadedChatMessages,
+          },
+        }))
       } else {
         toast.error('Failed to load session')
       }
@@ -754,7 +869,14 @@ export function OpenCanvasGenerator() {
     } finally {
       setIsGenerating(false)
     }
-  }, [getToken])
+  }, [
+    currentSessionId,
+    questions,
+    chatMessages,
+    getToken,
+    mapPersistedChatMessages,
+    sessionSnapshots,
+  ])
 
   // Handle request regenerate from QuestionCard
   const handleRequestRegenerate = useCallback((questionId: string, _defaultMessage: string) => {
@@ -823,14 +945,16 @@ export function OpenCanvasGenerator() {
   }, [currentSessionId, getToken])
 
   // Convert sessions to ChatSession format
-  const chatSessions = sessions.map(session => ({
-    id: session.session_id,
-    title: session.prompt.slice(0, 60) || 'Untitled Session',
-    createdAt: new Date(session.created_at),
-    updatedAt: new Date(session.created_at),
-    messageCount: session.question_count,
-    preview: `${session.approved_count} approved, ${session.pending_count} pending`,
-  }))
+  const chatSessions = sessions
+    .map((session) => ({
+      id: session.session_id,
+      title: session.prompt.slice(0, 120) || 'Untitled Session',
+      createdAt: new Date(session.created_at),
+      updatedAt: new Date(session.updated_at || session.created_at),
+      messageCount: session.question_count,
+      preview: `${session.approved_count} approved, ${session.pending_count} pending`,
+    }))
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
 
   return (
     <div className="flex flex-col h-[calc(100vh-120px)] bg-background">
@@ -950,6 +1074,8 @@ export function OpenCanvasGenerator() {
             currentSessionId={currentSessionId || undefined}
             onNewConversation={handleNewConversation}
             onDeleteConversation={handleDeleteConversation}
+            onDeleteSessions={handleDeleteSessions}
+            isDeletingSessions={isDeletingSessions}
             onSwitchSession={handleSwitchSession}
             settings={{
               aiProvider: settings.aiProvider,

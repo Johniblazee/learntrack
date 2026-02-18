@@ -2,13 +2,15 @@
  * ChatPanel - Continuous chat interface for question generation
  * Features: Streaming messages, question references, chat history cycling, session management
  */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { 
   Bot, 
   User, 
@@ -19,13 +21,15 @@ import {
   MoreVertical,
   Plus,
   Trash2,
-  MessageSquare
+  MessageSquare,
+  Search
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AIInput } from '@/components/ui/animated-ai-input'
 import { MessageLoading } from '@/components/ui/message-loading'
 import { AgentPlan } from '@/components/ui/agent-plan'
 import { LoadingSpinner } from '@/components/ui/loading-state'
+import { formatDistanceToNow } from 'date-fns'
 
 import {
   DropdownMenu,
@@ -74,6 +78,8 @@ interface ChatPanelProps {
   // Session management props
   onNewConversation?: () => void
   onDeleteConversation?: () => void
+  onDeleteSessions?: (sessionIds: string[]) => void
+  isDeletingSessions?: boolean
   sessions?: ChatSession[]
   onSwitchSession?: (sessionId: string) => void
   currentSessionId?: string
@@ -94,6 +100,8 @@ export function ChatPanel({
   // Session management props
   onNewConversation,
   onDeleteConversation,
+  onDeleteSessions,
+  isDeletingSessions = false,
   sessions = [],
   onSwitchSession,
   currentSessionId,
@@ -101,7 +109,35 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [historySheetOpen, setHistorySheetOpen] = useState(false)
+  const [historyQuery, setHistoryQuery] = useState('')
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const filteredSessions = useMemo(() => {
+    const query = historyQuery.trim().toLowerCase()
+    if (!query) {
+      return sessions
+    }
+
+    return sessions.filter((session) => {
+      const title = session.title.toLowerCase()
+      const preview = (session.preview || '').toLowerCase()
+      return title.includes(query) || preview.includes(query)
+    })
+  }, [sessions, historyQuery])
+
+  const selectedCount = selectedSessionIds.size
+  const hasVisibleSessions = filteredSessions.length > 0
+  const allVisibleSelected =
+    hasVisibleSessions && filteredSessions.every((session) => selectedSessionIds.has(session.id))
+  const someVisibleSelected =
+    hasVisibleSessions && filteredSessions.some((session) => selectedSessionIds.has(session.id))
+
+  const allCheckboxState: boolean | 'indeterminate' = allVisibleSelected
+    ? true
+    : someVisibleSelected
+      ? 'indeterminate'
+      : false
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -120,11 +156,78 @@ export function ChatPanel({
     }
   }, [selectedQuestionId])
 
+  useEffect(() => {
+    setSelectedSessionIds((previous) => {
+      const next = new Set(
+        Array.from(previous).filter((sessionId) => sessions.some((session) => session.id === sessionId))
+      )
+      if (next.size === previous.size) {
+        return previous
+      }
+      return next
+    })
+  }, [sessions])
+
   const handleSubmit = () => {
     if (!input.trim() || isStreaming) return
     
     onSendMessage(input.trim(), selectedQuestionId || undefined)
     setInput('')
+  }
+
+  const toggleSessionSelection = (sessionId: string, checked: boolean) => {
+    setSelectedSessionIds((previous) => {
+      const next = new Set(previous)
+      if (checked) {
+        next.add(sessionId)
+      } else {
+        next.delete(sessionId)
+      }
+      return next
+    })
+  }
+
+  const toggleSelectAllVisible = (checked: boolean) => {
+    setSelectedSessionIds((previous) => {
+      const next = new Set(previous)
+      if (checked) {
+        filteredSessions.forEach((session) => next.add(session.id))
+      } else {
+        filteredSessions.forEach((session) => next.delete(session.id))
+      }
+      return next
+    })
+  }
+
+  const handleDeleteSelected = () => {
+    if (!onDeleteSessions || selectedSessionIds.size === 0) {
+      return
+    }
+
+    onDeleteSessions(Array.from(selectedSessionIds))
+    setSelectedSessionIds(new Set())
+  }
+
+  const handleDeleteSingleSession = (sessionId: string) => {
+    if (!onDeleteSessions) {
+      return
+    }
+
+    onDeleteSessions([sessionId])
+    setSelectedSessionIds((previous) => {
+      const next = new Set(previous)
+      next.delete(sessionId)
+      return next
+    })
+  }
+
+  const getSessionMeta = (session: ChatSession) => {
+    const updatedAt = session.updatedAt instanceof Date ? session.updatedAt : new Date(session.updatedAt)
+    if (Number.isNaN(updatedAt.getTime())) {
+      return 'Last message recently'
+    }
+
+    return `Last message ${formatDistanceToNow(updatedAt, { addSuffix: true })}`
   }
 
   return (
@@ -154,46 +257,141 @@ export function ChatPanel({
                 <History className="h-4 w-4" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-80">
-              <SheetHeader>
-                <SheetTitle className="flex items-center gap-2">
-                  <History className="h-5 w-5" />
-                  History
-                </SheetTitle>
-              </SheetHeader>
-              <div className="mt-4 space-y-2">
-                {sessions.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No previous conversations</p>
-                  </div>
-                ) : (
-                  sessions.map((session) => (
-                    <button
-                      key={session.id}
-                      onClick={() => {
-                        onSwitchSession?.(session.id)
-                        setHistorySheetOpen(false)
-                      }}
-                      className={cn(
-                        "w-full text-left p-3 rounded-lg border transition-colors",
-                        currentSessionId === session.id
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted/50"
-                      )}
+            <SheetContent side="right" className="w-full p-0 sm:max-w-3xl">
+              <div className="flex h-full flex-col bg-background">
+                <SheetHeader className="border-b px-6 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <SheetTitle className="text-left text-3xl font-semibold tracking-tight">
+                      Chats
+                    </SheetTitle>
+                    <Button
+                      type="button"
+                      onClick={onNewConversation}
+                      disabled={isDeletingSessions}
+                      className="gap-2"
                     >
-                      <div className="font-medium text-sm truncate">{session.title}</div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {session.messageCount} messages • {session.createdAt.toLocaleDateString()}
+                      <Plus className="h-4 w-4" />
+                      New chat
+                    </Button>
+                  </div>
+                </SheetHeader>
+
+                <div className="border-b px-6 py-4">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={historyQuery}
+                      onChange={(event) => setHistoryQuery(event.target.value)}
+                      placeholder="Search your chats..."
+                      className="pl-10"
+                    />
+                  </div>
+
+                  {selectedCount > 0 && (
+                    <div className="mt-3 flex items-center justify-between gap-2 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={allCheckboxState}
+                          onCheckedChange={(value) => toggleSelectAllVisible(Boolean(value))}
+                          aria-label="Select all visible chats"
+                        />
+                        <span>{selectedCount} selected</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={handleDeleteSelected}
+                          disabled={isDeletingSessions}
+                        >
+                          {isDeletingSessions ? (
+                            <LoadingSpinner size="sm" className="text-foreground" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
                       </div>
-                      {session.preview && (
-                        <div className="text-xs text-muted-foreground truncate mt-1">
-                          {session.preview}
-                        </div>
-                      )}
-                    </button>
-                  ))
-                )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setSelectedSessionIds(new Set())}
+                        disabled={isDeletingSessions}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <ScrollArea className="flex-1 px-6 pb-4">
+                  <div className="space-y-1 py-4">
+                    {filteredSessions.length === 0 ? (
+                      <div className="text-center py-10 text-muted-foreground">
+                        <MessageSquare className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                        <p className="text-sm">
+                          {historyQuery.trim()
+                            ? 'No chats match your search'
+                            : 'No previous conversations'}
+                        </p>
+                      </div>
+                    ) : (
+                      filteredSessions.map((session) => {
+                        const isSelected = selectedSessionIds.has(session.id)
+                        const isActive = currentSessionId === session.id
+
+                        return (
+                          <div
+                            key={session.id}
+                            className={cn(
+                              'group flex items-start gap-3 rounded-lg border-b border-border/60 px-3 py-3 transition-colors',
+                              isActive ? 'bg-primary/15' : 'hover:bg-muted/40'
+                            )}
+                          >
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(value) => toggleSessionSelection(session.id, Boolean(value))}
+                              className="mt-1"
+                              aria-label={`Select session ${session.title}`}
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => onSwitchSession?.(session.id)}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <p className={cn('truncate text-sm', isActive ? 'font-semibold' : 'font-medium')}>
+                                {session.title}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {getSessionMeta(session)}
+                              </p>
+                            </button>
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className={cn(
+                                'h-7 w-7 transition-opacity',
+                                isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                              )}
+                              onClick={() => handleDeleteSingleSession(session.id)}
+                              disabled={isDeletingSessions}
+                            >
+                              {isDeletingSessions ? (
+                                <LoadingSpinner size="sm" className="text-foreground" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
               </div>
             </SheetContent>
           </Sheet>
@@ -210,7 +408,7 @@ export function ChatPanel({
                 <Plus className="h-4 w-4 mr-2" />
                 New Conversation
               </DropdownMenuItem>
-              {messages.length > 0 && (
+              {(messages.length > 0 || currentSessionId) && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={onClearChat}>
