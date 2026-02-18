@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Settings, Sparkles, CheckCircle } from 'lucide-react'
+import { Settings, Sparkles } from 'lucide-react'
 import { useAuth } from '@clerk/clerk-react'
 import { toast } from '@/contexts/ToastContext'
 import { cn } from '@/lib/utils'
@@ -59,7 +59,6 @@ export function OpenCanvasGenerator() {
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false)
   const [isChatResponding, setIsChatResponding] = useState(false)
-  const [isSavingToBank, setIsSavingToBank] = useState(false)
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([])
   const [streamingContent, setStreamingContent] = useState('')
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
@@ -904,46 +903,6 @@ export function OpenCanvasGenerator() {
     URL.revokeObjectURL(url)
   }, [questions, currentSessionId])
 
-  const handleSaveToQuestionBank = useCallback(async () => {
-    if (!currentSessionId) {
-      toast.error('Save failed: no active session')
-      return
-    }
-
-    setIsSavingToBank(true)
-    try {
-      const token = await getToken()
-      const response = await fetch(
-        `${API_BASE_URL}/question-generator/sessions/${currentSessionId}/save-to-question-bank`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({}),
-        }
-      )
-
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data?.detail || 'Failed to save questions')
-      }
-
-      const failedCount = Array.isArray(data.failed_items) ? data.failed_items.length : 0
-      if (failedCount > 0) {
-        toast.error(`Saved ${data.saved_count}, failed ${failedCount}. Check session subject/topic mappings.`)
-      } else {
-        toast.success(`Saved ${data.saved_count} question(s) to question bank`)
-      }
-    } catch (error) {
-      console.error('Save to bank error:', error)
-      toast.error('Failed to save approved questions to question bank')
-    } finally {
-      setIsSavingToBank(false)
-    }
-  }, [currentSessionId, getToken])
-
   // Convert sessions to ChatSession format
   const chatSessions = sessions
     .map((session) => ({
@@ -998,18 +957,6 @@ export function OpenCanvasGenerator() {
             <Settings className="h-4 w-4" />
             Adjust Parameters
           </Button>
-
-          {questions.length > 0 && (
-            <Button
-              size="sm"
-              onClick={handleSaveToQuestionBank}
-              disabled={isSavingToBank || isGenerating}
-              className="bg-[#5c4a38] hover:bg-[#4a3c2e] gap-2"
-            >
-              <CheckCircle className="h-4 w-4" />
-              {isSavingToBank ? 'Saving...' : 'Save Approved to Bank'}
-            </Button>
-          )}
         </div>
       </div>
 

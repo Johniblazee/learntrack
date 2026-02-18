@@ -45,6 +45,12 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 export interface ChatMessage {
   id: string
@@ -127,6 +133,7 @@ export function ChatPanel({
   }, [sessions, historyQuery])
 
   const selectedCount = selectedSessionIds.size
+  const isSelectionMode = selectedCount > 0
   const hasVisibleSessions = filteredSessions.length > 0
   const allVisibleSelected =
     hasVisibleSessions && filteredSessions.every((session) => selectedSessionIds.has(session.id))
@@ -208,19 +215,6 @@ export function ChatPanel({
     setSelectedSessionIds(new Set())
   }
 
-  const handleDeleteSingleSession = (sessionId: string) => {
-    if (!onDeleteSessions) {
-      return
-    }
-
-    onDeleteSessions([sessionId])
-    setSelectedSessionIds((previous) => {
-      const next = new Set(previous)
-      next.delete(sessionId)
-      return next
-    })
-  }
-
   const getSessionMeta = (session: ChatSession) => {
     const updatedAt = session.updatedAt instanceof Date ? session.updatedAt : new Date(session.updatedAt)
     if (Number.isNaN(updatedAt.getTime())) {
@@ -231,7 +225,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className={cn("flex flex-col h-full bg-background border-l", className)}>
+    <div className={cn("flex flex-col h-full bg-background", className)}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
         <div className="flex items-center gap-2">
@@ -257,22 +251,31 @@ export function ChatPanel({
                 <History className="h-4 w-4" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-full p-0 sm:max-w-3xl">
+            <SheetContent side="left" className="w-full p-0 sm:max-w-3xl">
               <div className="flex h-full flex-col bg-background">
-                <SheetHeader className="border-b px-6 py-4">
+                <SheetHeader className="border-b px-6 py-4 pr-16">
                   <div className="flex items-center justify-between gap-3">
                     <SheetTitle className="text-left text-3xl font-semibold tracking-tight">
                       Chats
                     </SheetTitle>
-                    <Button
-                      type="button"
-                      onClick={onNewConversation}
-                      disabled={isDeletingSessions}
-                      className="gap-2"
-                    >
-                      <Plus className="h-4 w-4" />
-                      New chat
-                    </Button>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={onNewConversation}
+                            disabled={isDeletingSessions}
+                            className="h-9 w-9"
+                          >
+                            <Plus className="h-4 w-4" />
+                            <span className="sr-only">New chat</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>New chat</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
                 </SheetHeader>
 
@@ -287,7 +290,7 @@ export function ChatPanel({
                     />
                   </div>
 
-                  {selectedCount > 0 && (
+                  {isSelectionMode && (
                     <div className="mt-3 flex items-center justify-between gap-2 text-sm text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <Checkbox
@@ -345,21 +348,14 @@ export function ChatPanel({
                           <div
                             key={session.id}
                             className={cn(
-                              'group flex items-start gap-3 rounded-lg border-b border-border/60 px-3 py-3 transition-colors',
+                              'group relative rounded-lg border-b border-border/60 px-4 py-3 transition-colors',
                               isActive ? 'bg-primary/15' : 'hover:bg-muted/40'
                             )}
                           >
-                            <Checkbox
-                              checked={isSelected}
-                              onCheckedChange={(value) => toggleSessionSelection(session.id, Boolean(value))}
-                              className="mt-1"
-                              aria-label={`Select session ${session.title}`}
-                            />
-
                             <button
                               type="button"
                               onClick={() => onSwitchSession?.(session.id)}
-                              className="min-w-0 flex-1 text-left"
+                              className="min-w-0 w-full pr-8 text-left"
                             >
                               <p className={cn('truncate text-sm', isActive ? 'font-semibold' : 'font-medium')}>
                                 {session.title}
@@ -369,23 +365,22 @@ export function ChatPanel({
                               </p>
                             </button>
 
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
+                            <div
                               className={cn(
-                                'h-7 w-7 transition-opacity',
-                                isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                'absolute right-3 top-3 transition-opacity',
+                                isSelectionMode
+                                  ? 'opacity-100 pointer-events-auto'
+                                  : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'
                               )}
-                              onClick={() => handleDeleteSingleSession(session.id)}
-                              disabled={isDeletingSessions}
+                              onClick={(event) => event.stopPropagation()}
                             >
-                              {isDeletingSessions ? (
-                                <LoadingSpinner size="sm" className="text-foreground" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </Button>
+                              <Checkbox
+                                checked={isSelected}
+                                onCheckedChange={(value) => toggleSessionSelection(session.id, Boolean(value))}
+                                aria-label={`Select session ${session.title}`}
+                                disabled={isDeletingSessions}
+                              />
+                            </div>
                           </div>
                         )
                       })
