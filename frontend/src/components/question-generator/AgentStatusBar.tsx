@@ -3,7 +3,8 @@
  * Visualizes the agent's thinking steps and current action.
  */
 import { motion, AnimatePresence } from 'motion/react'
-import { FileSearch, CheckCircle2, Loader2 } from 'lucide-react'
+import { FileSearch, CheckCircle2 } from 'lucide-react'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import { cn } from '@/lib/utils'
 
 interface AgentStatusBarProps {
@@ -54,7 +55,7 @@ export function AgentStatusBar({
             )}
           >
             {isGenerating ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <LoadingSpinner size="sm" tone="inherit" />
             ) : (
               <CheckCircle2 className="w-4 h-4" />
             )}

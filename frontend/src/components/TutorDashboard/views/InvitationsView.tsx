@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import {
   Table,
   TableBody,
@@ -258,7 +259,7 @@ export default function InvitationsView() {
               disabled={refreshing}
               className="h-8 w-8"
             >
-              <RefreshCw className={cn("h-4 w-4", refreshing && 'animate-spin')} />
+              {refreshing ? <LoadingSpinner size="sm" tone="inherit" /> : <RefreshCw className="h-4 w-4" />}
             </Button>
           </div>
           <p className="text-sm text-muted-foreground mt-2 ml-12">
@@ -435,7 +436,7 @@ export default function InvitationsView() {
                                   className="h-8 text-[#5c4a38] border-[#5c4a38]/20 hover:bg-[#5c4a38]/10"
                                 >
                                   {resendingId === invitation.id ? (
-                                    <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                    <LoadingSpinner size="xs" tone="inherit" className="mr-1.5" />
                                   ) : (
                                     <Send className="w-3.5 h-3.5 mr-1.5" />
                                   )}
@@ -449,7 +450,7 @@ export default function InvitationsView() {
                                   className="h-8 text-red-600 border-red-200 hover:bg-red-50"
                                 >
                                   {revokingId === invitation.id ? (
-                                    <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                    <LoadingSpinner size="xs" tone="inherit" className="mr-1.5" />
                                   ) : (
                                     <XCircle className="w-3.5 h-3.5 mr-1.5" />
                                   )}

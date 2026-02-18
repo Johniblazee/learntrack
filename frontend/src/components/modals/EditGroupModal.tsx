@@ -15,7 +15,8 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Edit, Search, X, Users, UserPlus, RefreshCw, Loader2 } from 'lucide-react'
+import { LoadingSpinner } from '@/components/ui/loading-state'
+import { Edit, Search, X, Users, UserPlus, RefreshCw } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
 import { useApiClient } from '@/lib/api-client'
 import { getStudentInitials, useGroupMembers } from './group-members-shared'
@@ -178,7 +179,7 @@ export function EditGroupModal({
                       className="bg-white/90 hover:bg-white text-foreground shadow-lg"
                     >
                       {regeneratingImage ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <LoadingSpinner size="sm" tone="inherit" />
                       ) : (
                         <RefreshCw className="h-4 w-4" />
                       )}
@@ -197,7 +198,7 @@ export function EditGroupModal({
                     disabled={regeneratingImage}
                   >
                     {regeneratingImage ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                      <LoadingSpinner size="sm" tone="inherit" className="mr-1" />
                     ) : (
                       <RefreshCw className="h-4 w-4 mr-1" />
                     )}

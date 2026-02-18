@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
-import { Settings, Save, ToggleLeft, ToggleRight, RefreshCw } from 'lucide-react'
+import { Settings, Save, ToggleLeft, ToggleRight } from 'lucide-react'
+import { LoadingButtonContent, LoadingState } from '@/components/ui/loading-state'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
 
@@ -104,7 +105,7 @@ export function AdminSettingsPage() {
   }
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin text-primary" /></div>
+    return <LoadingState message="Loading settings..." />
   }
 
   return (
@@ -118,7 +119,7 @@ export function AdminSettingsPage() {
           </div>
         </div>
         <button onClick={handleSaveSettings} disabled={isSaving} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50">
-          <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save Changes'}
+          {isSaving ? <LoadingButtonContent label="Saving..." /> : <><Save className="w-4 h-4" />Save Changes</>}
         </button>
       </div>
 

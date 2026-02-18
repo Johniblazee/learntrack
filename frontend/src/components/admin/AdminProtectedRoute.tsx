@@ -1,8 +1,8 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import { useUserContext } from '../../contexts/UserContext'
-import { Loader2 } from 'lucide-react'
 import AccessDeniedPage from '../../pages/AccessDeniedPage'
+import { LoadingState } from '@/components/ui/loading-state'
 
 interface AdminProtectedRouteProps {
   children: React.ReactNode
@@ -17,12 +17,12 @@ export function AdminProtectedRoute({ children, requiredPermission }: AdminProte
   // Show loading while checking auth
   if (!isLoaded || !isBackendLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Verifying admin access...</p>
-        </div>
-      </div>
+      <LoadingState
+        fullScreen
+        className="bg-background"
+        size="xl"
+        message="Verifying admin access..."
+      />
     )
   }
 

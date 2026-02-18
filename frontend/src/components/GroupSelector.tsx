@@ -3,6 +3,7 @@ import { useAuth } from '@clerk/clerk-react'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent } from '@/components/ui/card'
+import { LoadingState } from '@/components/ui/loading-state'
 import { Users } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
@@ -84,12 +85,7 @@ export default function GroupSelector({ selectedGroups, onChange, onStudentCount
   }
 
   if (loading) {
-    return (
-      <div className="text-center py-4">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p className="mt-2 text-sm text-muted-foreground">Loading groups...</p>
-      </div>
-    )
+    return <LoadingState message="Loading groups..." minHeightClassName="py-4" />
   }
 
   if (groups.length === 0) {

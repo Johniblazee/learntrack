@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Search, Plus, Pencil, Trash2, Users, BookOpen, RefreshCw, Loader2, X } from 'lucide-react'
+import { LoadingSpinner } from '@/components/ui/loading-state'
+import { Search, Plus, Pencil, Trash2, Users, BookOpen, RefreshCw, X } from 'lucide-react'
 import { useAuth } from '@clerk/clerk-react'
 import { toast } from '@/contexts/ToastContext'
 import { CreateGroupModal } from '@/components/modals/CreateGroupModal'
@@ -284,7 +285,7 @@ export default function GroupsManagementView() {
                         className="bg-white/90 hover:bg-white"
                       >
                         {regeneratingImage === group._id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <LoadingSpinner size="sm" tone="inherit" />
                         ) : (
                           <RefreshCw className="h-4 w-4" />
                         )}
@@ -298,7 +299,7 @@ export default function GroupsManagementView() {
                         className="bg-red-600/90 hover:bg-red-600"
                       >
                         {removingImage === group._id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <LoadingSpinner size="sm" tone="inherit" />
                         ) : (
                           <X className="h-4 w-4" />
                         )}

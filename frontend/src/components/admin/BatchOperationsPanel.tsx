@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { CheckSquare, Square, Power, PowerOff, Trash2, AlertTriangle, Loader2 } from 'lucide-react'
+import { LoadingSpinner } from '@/components/ui/loading-state'
+import { CheckSquare, Square, Power, PowerOff, Trash2, AlertTriangle } from 'lucide-react'
 
 export type BatchOperationType = 'activate' | 'deactivate' | 'delete' | 'suspend'
 
@@ -158,7 +159,7 @@ export function BatchOperationsPanel({
                 disabled={isLoading}
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
-                {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                {isLoading && <LoadingSpinner size="sm" tone="inherit" />}
                 Confirm {operationLabels[showConfirm]}
               </button>
             </div>

@@ -6,6 +6,7 @@ import StudentDashboard from '@/components/StudentDashboard'
 import ParentDashboard from '@/components/ParentDashboard'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { LoadingState } from '@/components/ui/loading-state'
 
 type DashboardView = 'tutor' | 'student' | 'parent'
 
@@ -59,14 +60,7 @@ export default function DashboardPage() {
 
   // Loading state while Clerk loads
   if (!isLoaded) {
-    return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading dashboard...</p>
-        </div>
-      </div>
-    )
+    return <LoadingState fullScreen className="bg-background text-foreground" size="xl" message="Loading dashboard..." />
   }
 
   const renderDashboard = () => {
@@ -83,14 +77,7 @@ export default function DashboardPage() {
 
   // Show loading while redirecting to role-setup
   if (!userRole) {
-    return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-purple-600 mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Redirecting to role setup...</p>
-        </div>
-      </div>
-    )
+    return <LoadingState fullScreen className="bg-background text-foreground" size="xl" message="Redirecting to role setup..." />
   }
 
   return (

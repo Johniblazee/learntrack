@@ -9,13 +9,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import { 
   Bot, 
   User, 
   History, 
   ChevronLeft, 
   ChevronRight, 
-  Loader2,
   X,
   MoreVertical,
   Plus,
@@ -136,7 +136,7 @@ export function ChatPanel({
           <span className="font-semibold text-sm">AI Assistant</span>
           {isStreaming && (
             <Badge variant="secondary" className="text-xs animate-pulse">
-              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              <LoadingSpinner size="xs" tone="inherit" className="mr-1" />
               Thinking...
             </Badge>
           )}

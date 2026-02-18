@@ -3,9 +3,10 @@ import { useAuth } from '@clerk/clerk-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Cpu, ArrowLeft, Save, RefreshCw, Check, X,
-  ChevronDown, ChevronUp, AlertCircle, Loader2
+  ChevronDown, ChevronUp, AlertCircle
 } from 'lucide-react'
 import { API_BASE_URL } from '@/lib/config'
+import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 
 interface ModelAvailability {
   model_id: string
@@ -283,11 +284,7 @@ export function TenantAIConfigPage() {
   }
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    )
+    return <LoadingState message="Loading AI configuration..." />
   }
 
   const defaultProvider = configData?.providers.find(p => p.provider_id === formData.default_provider)
@@ -338,7 +335,7 @@ export function TenantAIConfigPage() {
             disabled={isSaving}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
           >
-            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {isSaving ? <LoadingSpinner size="sm" tone="inherit" /> : <Save className="w-4 h-4" />}
             Save Changes
           </button>
         </div>

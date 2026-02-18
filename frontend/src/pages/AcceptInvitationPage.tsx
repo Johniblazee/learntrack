@@ -4,8 +4,9 @@ import { useAuth, useUser, SignIn } from '@clerk/clerk-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { LoadingState } from '@/components/ui/loading-state'
 import { toast } from '@/contexts/ToastContext'
-import { CheckCircle, XCircle, Loader2, UserPlus, Mail } from 'lucide-react'
+import { CheckCircle, XCircle, UserPlus, Mail } from 'lucide-react'
 
 interface InvitationDetails {
   valid: boolean
@@ -127,9 +128,12 @@ export default function AcceptInvitationPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Card className="w-full max-w-md shadow-xl">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
-            <p className="text-muted-foreground">Verifying invitation...</p>
+          <CardContent className="py-12">
+            <LoadingState
+              message="Verifying invitation..."
+              minHeightClassName="h-auto"
+              size="xl"
+            />
           </CardContent>
         </Card>
       </div>
@@ -215,9 +219,12 @@ export default function AcceptInvitationPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Card className="w-full max-w-md shadow-xl">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
-            <p className="text-muted-foreground">Creating your account...</p>
+          <CardContent className="py-12">
+            <LoadingState
+              message="Creating your account..."
+              minHeightClassName="h-auto"
+              size="xl"
+            />
           </CardContent>
         </Card>
       </div>

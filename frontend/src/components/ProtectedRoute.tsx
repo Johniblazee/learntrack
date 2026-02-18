@@ -3,7 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { ReactNode } from 'react'
 import { useUserContext } from '../contexts/UserContext'
 import AccessDeniedPage from '../pages/AccessDeniedPage'
-import { Loader2 } from 'lucide-react'
+import { LoadingState } from '@/components/ui/loading-state'
 
 interface ProtectedRouteProps {
   children: ReactNode
@@ -24,14 +24,7 @@ export default function ProtectedRoute({
 
   // Loading state
   if (!isLoaded || (isSignedIn && !isBackendLoaded)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    )
+    return <LoadingState fullScreen className="bg-background" message="Loading..." size="xl" />
   }
 
   // Not signed in - redirect to sign-in

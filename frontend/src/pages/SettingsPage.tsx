@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
-import { User, Bell, Lock, Palette, Globe, Save, ArrowLeft, Loader2 } from 'lucide-react'
+import { User, Bell, Lock, Palette, Globe, Save, ArrowLeft } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { Switch } from '../components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { LoadingButtonContent, LoadingState } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
 import { useApiClient } from '../lib/api-client'
 import { toast } from '../contexts/ToastContext'
@@ -111,9 +112,11 @@ export default function SettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+      <LoadingState
+        fullScreen
+        className="bg-gray-50 dark:bg-gray-900"
+        message="Loading settings..."
+      />
     )
   }
 
@@ -142,8 +145,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <Button onClick={handleSave} disabled={isSaving}>
-              <Save className="h-4 w-4 mr-2" />
-              {isSaving ? 'Saving...' : 'Save Changes'}
+              {isSaving ? <LoadingButtonContent label="Saving..." /> : <><Save className="h-4 w-4 mr-2" />Save Changes</>}
             </Button>
           </div>
         </div>

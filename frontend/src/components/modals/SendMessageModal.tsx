@@ -14,10 +14,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, Loader2 } from 'lucide-react'
+import { Send } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
 import { useApiClient } from '@/lib/api-client'
 import { socketClient } from '@/lib/socket'
+import { LoadingButtonContent } from '@/components/ui/loading-state'
 
 interface Student {
   id: string
@@ -231,10 +232,7 @@ export function SendMessageModal({
               className="bg-[#C8A882] hover:bg-[#B89872] text-gray-900 font-semibold px-6 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {sending ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Sending...
-                </>
+                <LoadingButtonContent label="Sending..." />
               ) : (
                 <>
                   {deliveryMethod === 'email' ? 'Send Email' : 'Send Message'}
