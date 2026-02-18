@@ -486,6 +486,10 @@ export function ChatPanel({
                     "flex flex-col max-w-[80%]",
                     message.role === 'user' ? "items-end" : "items-start"
                   )}>
+                    <span className="mb-1 text-[11px] font-semibold text-foreground/80">
+                      {message.role === 'user' ? 'Tutor' : 'AI'}
+                    </span>
+
                     {/* Referenced Question Badge */}
                     {message.referencedQuestionId && (
                       <Badge 

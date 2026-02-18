@@ -1015,8 +1015,30 @@ export function OpenCanvasGenerator() {
 
       {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Questions Panel (Left - 70%) */}
-        <div className="w-[70%] border-r overflow-hidden flex flex-col">
+        {/* Chat Panel (Left - 30%) */}
+        <div className="w-[30%] border-r overflow-hidden">
+          <ChatPanel
+            messages={chatMessages}
+            isStreaming={isGenerating || isChatResponding}
+            onSendMessage={handleSendMessage}
+            onClearChat={handleClearChat}
+            selectedQuestionId={selectedQuestionId}
+            sessions={chatSessions}
+            currentSessionId={currentSessionId || undefined}
+            onNewConversation={handleNewConversation}
+            onDeleteConversation={handleDeleteConversation}
+            onDeleteSessions={handleDeleteSessions}
+            isDeletingSessions={isDeletingSessions}
+            onSwitchSession={handleSwitchSession}
+            settings={{
+              aiProvider: settings.aiProvider,
+              modelName: settings.modelName,
+            }}
+          />
+        </div>
+
+        {/* Questions Panel (Right - 70%) */}
+        <div className="w-[70%] overflow-hidden flex flex-col">
           {questions.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center">
               <motion.div
@@ -1060,28 +1082,6 @@ export function OpenCanvasGenerator() {
               onRequestRegenerate={handleRequestRegenerate}
             />
           )}
-        </div>
-
-        {/* Chat Panel (Right - 30%) */}
-        <div className="w-[30%] overflow-hidden">
-          <ChatPanel
-            messages={chatMessages}
-            isStreaming={isGenerating || isChatResponding}
-            onSendMessage={handleSendMessage}
-            onClearChat={handleClearChat}
-            selectedQuestionId={selectedQuestionId}
-            sessions={chatSessions}
-            currentSessionId={currentSessionId || undefined}
-            onNewConversation={handleNewConversation}
-            onDeleteConversation={handleDeleteConversation}
-            onDeleteSessions={handleDeleteSessions}
-            isDeletingSessions={isDeletingSessions}
-            onSwitchSession={handleSwitchSession}
-            settings={{
-              aiProvider: settings.aiProvider,
-              modelName: settings.modelName,
-            }}
-          />
         </div>
       </div>
 
