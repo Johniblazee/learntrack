@@ -2,20 +2,27 @@
 Message endpoints for chat system
 """
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
+from pydantic import BaseModel, Field
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_authenticated_user, ClerkUserContext
 from app.models.message import (
     Message,
     MessageCreate,
+    MessageDeliveryMethod,
+    MessageType,
     MessageUpdate,
     MessageListResponse,
 )
+from app.models.conversation import ConversationCreate
 from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService
+from app.services.email_service import EmailService
 from app.core.exceptions import NotFoundError, ValidationError
 
 logger = structlog.get_logger()
@@ -28,6 +35,23 @@ def _resolve_tenant_id(current_user: ClerkUserContext) -> str:
 
 def _sender_name(current_user: ClerkUserContext) -> str:
     return current_user.name or "Unknown User"
+
+
+async def _find_user_by_clerk_id(
+    db: AsyncIOMotorDatabase, clerk_id: str
+) -> Optional[dict]:
+    collections = [db.users, db.tutors, db.students, db.parents]
+    for collection in collections:
+        user = await collection.find_one({"clerk_id": clerk_id})
+        if user:
+            return user
+    return None
+
+
+class SendEmailMessageRequest(BaseModel):
+    recipient_id: str = Field(..., description="Recipient Clerk user ID")
+    subject: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., min_length=1)
 
 
 @router.post("/", response_model=Message, status_code=status.HTTP_201_CREATED)
@@ -59,6 +83,7 @@ async def create_message(
             conversation_id=message_data.conversation_id,
             message_content=message_data.content,
             sender_id=current_user.clerk_id,
+            delivery_method=message_data.delivery_method.value,
         )
 
         return message
@@ -71,6 +96,78 @@ async def create_message(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create message",
+        )
+
+
+@router.post("/email", response_model=Message, status_code=status.HTTP_201_CREATED)
+async def send_email_message(
+    email_data: SendEmailMessageRequest,
+    current_user: ClerkUserContext = Depends(require_authenticated_user),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Send a message via email and store it in conversation history."""
+    try:
+        tenant_id = _resolve_tenant_id(current_user)
+        conversation_service = ConversationService(db)
+
+        conversation = await conversation_service.create_conversation(
+            conversation_data=ConversationCreate(
+                participant_ids=[email_data.recipient_id],
+            ),
+            current_user_id=current_user.clerk_id,
+            tutor_id=tenant_id,
+        )
+
+        recipient = await _find_user_by_clerk_id(db, email_data.recipient_id)
+        if not recipient or not recipient.get("email"):
+            raise ValidationError("Recipient email not found")
+
+        delivered = EmailService.send_direct_message_email(
+            to_email=str(recipient.get("email")),
+            to_name=str(recipient.get("name") or "Learner"),
+            from_name=_sender_name(current_user),
+            subject=email_data.subject,
+            content=email_data.content,
+        )
+
+        message_service = MessageService(db)
+        message = await message_service.create_message(
+            message_data=MessageCreate(
+                conversation_id=conversation.id,
+                content=email_data.content,
+                message_type=MessageType.TEXT,
+                delivery_method=MessageDeliveryMethod.EMAIL,
+                subject=email_data.subject,
+            ),
+            sender_id=current_user.clerk_id,
+            sender_name=_sender_name(current_user),
+            sender_role=current_user.role,
+            tutor_id=tenant_id,
+        )
+
+        await conversation_service.update_last_message(
+            conversation_id=conversation.id,
+            message_content=f"Email: {email_data.subject}",
+            sender_id=current_user.clerk_id,
+            delivery_method=MessageDeliveryMethod.EMAIL.value,
+        )
+
+        if not delivered:
+            logger.warning(
+                "Email provider delivery failed; message persisted",
+                recipient_id=email_data.recipient_id,
+            )
+
+        return message
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to send email message", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send email message",
         )
 
 

@@ -66,6 +66,8 @@ class MessageService:
             "sender_role": sender_role.value,
             "content": message_data.content,
             "message_type": message_data.message_type.value,
+            "delivery_method": message_data.delivery_method.value,
+            "subject": message_data.subject,
             "tutor_id": tutor_id,
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc),

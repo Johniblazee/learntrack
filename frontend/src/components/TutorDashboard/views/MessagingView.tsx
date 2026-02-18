@@ -22,6 +22,7 @@ interface Message {
   subject: string
   preview: string
   timestamp: string
+  deliveryMethod: "chat" | "email"
   isRead: boolean
   isUnread: boolean
 }
@@ -41,7 +42,7 @@ export default function MessagingView({ type }: MessagingViewProps) {
   const messages: Message[] = useMemo(() => {
     if (!conversations || !Array.isArray(conversations)) return []
 
-    return conversations.map((conv: any) => {
+    const mappedMessages = conversations.map((conv: any) => {
       const participantIds = Array.isArray(conv.participants) ? conv.participants : []
       const otherParticipantId = participantIds.find((id: string) => id !== userId) || participantIds[0]
       const otherParticipant = otherParticipantId
@@ -49,19 +50,31 @@ export default function MessagingView({ type }: MessagingViewProps) {
         : 'Unknown'
       const initials = otherParticipant.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
       const unreadCountForUser = Number(conv.unread_count?.[userId ?? '']) || 0
+      const deliveryMethod: 'chat' | 'email' = conv.last_delivery_method === 'email' ? 'email' : 'chat'
+      const preview = conv.last_message || 'No messages yet'
+      const subject =
+        deliveryMethod === 'email'
+          ? (preview.startsWith('Email: ') ? preview.slice(7).trim() : 'Email message')
+          : (conv.title || 'Direct message')
 
       return {
         id: conv._id || conv.id,
         sender: otherParticipant,
         senderAvatar: initials,
-        subject: conv.title || 'No subject',
-        preview: conv.last_message || 'No messages yet',
+        subject,
+        preview,
         timestamp: conv.updated_at ? formatDistanceToNow(new Date(conv.updated_at), { addSuffix: true }) : '',
+        deliveryMethod,
         isRead: unreadCountForUser === 0,
         isUnread: unreadCountForUser > 0
       }
     })
-  }, [conversations, userId])
+
+    return mappedMessages.filter((message) => {
+      if (type === 'emails') return message.deliveryMethod === 'email'
+      return message.deliveryMethod === 'chat'
+    })
+  }, [conversations, type, userId])
 
   const unreadCount = messages.filter(m => m.isUnread).length
   const icon = type === "chats" ? MessageSquare : Mail

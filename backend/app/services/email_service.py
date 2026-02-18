@@ -373,6 +373,58 @@ class EmailService:
             print(f"[EMAIL] Failed to send deadline reminder to {to_email}: {str(e)}")
             return False
 
+    @staticmethod
+    def send_direct_message_email(
+        to_email: str,
+        to_name: str,
+        from_name: str,
+        subject: str,
+        content: str,
+    ) -> bool:
+        """Send a direct tutor message over email and report delivery status."""
+        if not to_email:
+            return False
+
+        if not plunk_client:
+            print(
+                f"[EMAIL] Simulated direct message to {to_email} (Plunk not configured)"
+            )
+            return True
+
+        try:
+            safe_content = (content or "").replace("\n", "<br>")
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .header {{ background: #2563eb; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+                    .content {{ background: #f8fafc; padding: 20px; border-radius: 0 0 8px 8px; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h2 style="margin:0;">New message from {from_name}</h2>
+                    </div>
+                    <div class="content">
+                        <p>Hi {to_name},</p>
+                        <p>{safe_content}</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+
+            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
+            print(f"[EMAIL] Direct message sent to {to_email}")
+            return True
+        except Exception as e:
+            print(f"[EMAIL] Failed to send direct message to {to_email}: {str(e)}")
+            return False
+
 
 # Convenience functions
 email_service = EmailService()

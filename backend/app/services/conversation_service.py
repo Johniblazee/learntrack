@@ -106,6 +106,7 @@ class ConversationService:
             "participant_roles": participant_roles,
             "tutor_id": tutor_id,
             "last_message": None,
+            "last_delivery_method": "chat",
             "last_message_at": None,
             "unread_count": {pid: 0 for pid in participant_ids},
             "created_at": datetime.now(timezone.utc),
@@ -177,7 +178,11 @@ class ConversationService:
         return conversations
 
     async def update_last_message(
-        self, conversation_id: str, message_content: str, sender_id: str
+        self,
+        conversation_id: str,
+        message_content: str,
+        sender_id: str,
+        delivery_method: str = "chat",
     ) -> None:
         """
         Update conversation's last message and increment unread count
@@ -209,6 +214,7 @@ class ConversationService:
             {
                 "$set": {
                     "last_message": message_content[:100],  # Truncate to 100 chars
+                    "last_delivery_method": delivery_method,
                     "last_message_at": datetime.now(timezone.utc),
                     "updated_at": datetime.now(timezone.utc),
                     **unread_updates,
