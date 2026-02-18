@@ -8,7 +8,12 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 
 from app.models.subject import Subject, SubjectCreate, SubjectUpdate, SubjectWithStats
-from app.core.exceptions import NotFoundError, DatabaseException
+from app.core.exceptions import (
+    AuthorizationError,
+    DatabaseException,
+    NotFoundError,
+    ValidationError,
+)
 from app.core.utils import to_object_id
 
 logger = structlog.get_logger()
@@ -32,8 +37,6 @@ class SubjectService:
             )
 
             if existing:
-                from app.core.exceptions import ValidationError
-
                 raise ValidationError(f"Subject '{subject_data.name}' already exists")
 
             subject_dict = subject_data.dict(exclude_none=True)
@@ -52,9 +55,9 @@ class SubjectService:
             )
             return Subject(**subject_dict)
 
+        except (ValidationError, DatabaseException):
+            raise
         except Exception as e:
-            if isinstance(e, (ValidationError, DatabaseException)):
-                raise
             logger.error("Failed to create subject", error=str(e))
             raise DatabaseException(f"Failed to create subject: {str(e)}")
 
@@ -170,9 +173,10 @@ class SubjectService:
         try:
             # Verify ownership
             subject = await self.get_subject_by_id(subject_id)
-            if subject.tutor_id != tutor_id:
-                from app.core.exceptions import AuthorizationError
+            if subject is None:
+                raise NotFoundError("Subject", subject_id)
 
+            if subject.tutor_id != tutor_id:
                 raise AuthorizationError("Not authorized to update this subject")
 
             update_data = subject_update.dict(exclude_unset=True)
@@ -190,7 +194,10 @@ class SubjectService:
                 raise NotFoundError("Subject", subject_id)
 
             logger.info("Subject updated", subject_id=subject_id)
-            return await self.get_subject_by_id(subject_id)
+            updated_subject = await self.get_subject_by_id(subject_id)
+            if updated_subject is None:
+                raise NotFoundError("Subject", subject_id)
+            return updated_subject
 
         except (NotFoundError, AuthorizationError):
             raise
@@ -205,9 +212,10 @@ class SubjectService:
         try:
             # Verify ownership
             subject = await self.get_subject_by_id(subject_id)
-            if subject.tutor_id != tutor_id:
-                from app.core.exceptions import AuthorizationError
+            if subject is None:
+                raise NotFoundError("Subject", subject_id)
 
+            if subject.tutor_id != tutor_id:
                 raise AuthorizationError("Not authorized to delete this subject")
 
             # Check if subject has questions or assignments
@@ -219,8 +227,6 @@ class SubjectService:
             )
 
             if question_count > 0 or assignment_count > 0:
-                from app.core.exceptions import ValidationError
-
                 raise ValidationError(
                     "Cannot delete subject with existing questions or assignments"
                 )
@@ -257,14 +263,13 @@ class SubjectService:
         try:
             # Verify ownership
             subject = await self.get_subject_by_id(subject_id)
-            if subject.tutor_id != tutor_id:
-                from app.core.exceptions import AuthorizationError
+            if subject is None:
+                raise NotFoundError("Subject", subject_id)
 
+            if subject.tutor_id != tutor_id:
                 raise AuthorizationError("Not authorized to modify this subject")
 
             if topic in subject.topics:
-                from app.core.exceptions import ValidationError
-
                 raise ValidationError(f"Topic '{topic}' already exists in this subject")
 
             oid = to_object_id(subject_id)
@@ -280,7 +285,10 @@ class SubjectService:
                 raise NotFoundError("Subject", subject_id)
 
             logger.info("Topic added to subject", subject_id=subject_id, topic=topic)
-            return await self.get_subject_by_id(subject_id)
+            updated_subject = await self.get_subject_by_id(subject_id)
+            if updated_subject is None:
+                raise NotFoundError("Subject", subject_id)
+            return updated_subject
 
         except (NotFoundError, AuthorizationError, ValidationError):
             raise
@@ -297,9 +305,10 @@ class SubjectService:
         try:
             # Verify ownership
             subject = await self.get_subject_by_id(subject_id)
-            if subject.tutor_id != tutor_id:
-                from app.core.exceptions import AuthorizationError
+            if subject is None:
+                raise NotFoundError("Subject", subject_id)
 
+            if subject.tutor_id != tutor_id:
                 raise AuthorizationError("Not authorized to modify this subject")
 
             # Check if topic has questions
@@ -308,8 +317,6 @@ class SubjectService:
             )
 
             if question_count > 0:
-                from app.core.exceptions import ValidationError
-
                 raise ValidationError(
                     f"Cannot remove topic '{topic}' with existing questions"
                 )
@@ -329,7 +336,10 @@ class SubjectService:
             logger.info(
                 "Topic removed from subject", subject_id=subject_id, topic=topic
             )
-            return await self.get_subject_by_id(subject_id)
+            updated_subject = await self.get_subject_by_id(subject_id)
+            if updated_subject is None:
+                raise NotFoundError("Subject", subject_id)
+            return updated_subject
 
         except (NotFoundError, AuthorizationError, ValidationError):
             raise

@@ -12,12 +12,15 @@ import {
   Search,
   Plus,
   Smile,
+  Mail,
   MessageCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { socketClient } from "@/lib/socket"
 import { useVisibility } from "@/hooks/useVisibility"
+import { useApiClient } from "@/lib/api-client"
+import { toast } from "@/contexts/ToastContext"
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
 
@@ -28,6 +31,8 @@ interface Message {
   sender_name: string
   sender_role: string
   content: string
+  subject?: string | null
+  delivery_method?: 'chat' | 'email'
   created_at: string
   read_by: string[]
 }
@@ -38,18 +43,23 @@ interface Conversation {
   participant_names: Record<string, string>
   participant_roles: Record<string, string>
   last_message: string | null
+  last_delivery_method?: 'chat' | 'email'
   last_message_at: string | null
   unread_count: Record<string, number>
 }
 
 export default function ConversationsView() {
   const { getToken, userId } = useAuth()
+  const client = useApiClient()
   const { visibleUserIds, loading: visibilityLoading } = useVisibility()
   const [searchQuery, setSearchQuery] = useState("")
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState("")
+  const [deliveryMethod, setDeliveryMethod] = useState<'chat' | 'email'>('chat')
+  const [emailSubject, setEmailSubject] = useState("")
+  const [sendingMessage, setSendingMessage] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
   const [loading, setLoading] = useState(true)
   const [messagesLoading, setMessagesLoading] = useState(false)
@@ -105,6 +115,28 @@ export default function ConversationsView() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (deliveryMethod !== 'email' || !selectedConversation) {
+      return
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+      typingTimeoutRef.current = null
+    }
+
+    socketClient.stopTyping(selectedConversation._id)
+    setIsTyping(false)
+  }, [deliveryMethod, selectedConversation])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -190,24 +222,102 @@ export default function ConversationsView() {
     if (selectedConversation) {
       socketClient.leaveConversation(selectedConversation._id)
     }
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+      typingTimeoutRef.current = null
+    }
+    setDeliveryMethod('chat')
+    setEmailSubject("")
     setSelectedConversation(conversation)
     loadMessages(conversation._id)
   }
 
-  const handleSendMessage = () => {
-    if (!newMessage.trim() || !selectedConversation) return
+  const getOtherParticipantId = (conversation: Conversation) => {
+    return conversation.participants.find((p) => p !== userId) || null
+  }
 
-    socketClient.sendMessage(selectedConversation._id, newMessage, "text", (response) => {
-      if (response.success) {
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedConversation || sendingMessage) return
+
+    if (deliveryMethod === 'email' && !emailSubject.trim()) {
+      toast.error('Please add an email subject')
+      return
+    }
+
+    try {
+      setSendingMessage(true)
+
+      if (deliveryMethod === 'email') {
+        const recipientId = getOtherParticipantId(selectedConversation)
+        if (!recipientId) {
+          throw new Error('Unable to determine email recipient')
+        }
+
+        const emailResponse = await client.post('/messages/email', {
+          recipient_id: recipientId,
+          subject: emailSubject.trim(),
+          content: newMessage.trim(),
+        })
+
+        if (emailResponse.error) {
+          throw new Error(emailResponse.error)
+        }
+
+        toast.success('Email sent successfully')
+        setNewMessage("")
+        setEmailSubject("")
+        await loadMessages(selectedConversation._id)
+        await loadConversations()
+        return
+      }
+
+      if (socketClient.isConnected()) {
+        const socketResponse = await new Promise<{ success: boolean; error?: string }>(
+          (resolve) => {
+            socketClient.sendMessage(
+              selectedConversation._id,
+              newMessage.trim(),
+              "text",
+              resolve,
+            )
+          }
+        )
+
+        if (!socketResponse.success) {
+          throw new Error(socketResponse.error || 'Failed to send message')
+        }
+
         setNewMessage("")
         socketClient.stopTyping(selectedConversation._id)
+        await loadConversations()
+        return
       }
-    })
+
+      const messageResponse = await client.post('/messages/', {
+        conversation_id: selectedConversation._id,
+        content: newMessage.trim(),
+        message_type: 'text',
+        delivery_method: 'chat',
+      })
+
+      if (messageResponse.error) {
+        throw new Error(messageResponse.error)
+      }
+
+      setNewMessage("")
+      await loadMessages(selectedConversation._id)
+      await loadConversations()
+    } catch (error: any) {
+      console.error('Failed to send message:', error)
+      toast.error(error.message || 'Failed to send message')
+    } finally {
+      setSendingMessage(false)
+    }
   }
 
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value)
-    if (!selectedConversation) return
+    if (!selectedConversation || deliveryMethod !== 'chat') return
 
     socketClient.startTyping(selectedConversation._id)
 
@@ -377,7 +487,7 @@ export default function ConversationsView() {
                           "text-xs mt-1 truncate",
                           hasUnread ? "text-accent font-medium" : "text-muted-foreground"
                         )}>
-                          {conv.last_message}
+                          {conv.last_delivery_method === 'email' ? `Email: ${conv.last_message}` : conv.last_message}
                         </p>
                       )}
                     </div>
@@ -477,6 +587,16 @@ export default function ConversationsView() {
                               : "bg-card border border-border text-foreground rounded-bl-md"
                           )}
                         >
+                          {message.delivery_method === 'email' && (
+                            <p
+                              className={cn(
+                                "text-[10px] mb-1 uppercase tracking-wide",
+                                isOwnMessage ? "text-accent-foreground/70" : "text-muted-foreground"
+                              )}
+                            >
+                              Email{message.subject ? ` • ${message.subject}` : ''}
+                            </p>
+                          )}
                           <p className="text-sm leading-relaxed">{message.content}</p>
                           <p className={cn(
                             "text-[10px] mt-1",
@@ -489,7 +609,7 @@ export default function ConversationsView() {
                     )
                   })
                 )}
-                {isTyping && (
+                {isTyping && deliveryMethod === 'chat' && (
                   <div className="flex justify-start">
                     <div className="bg-muted rounded-2xl px-4 py-2.5 rounded-bl-md">
                       <p className="text-sm text-muted-foreground italic">Typing...</p>
@@ -502,37 +622,85 @@ export default function ConversationsView() {
 
             {/* Message Input */}
             <div className="p-4 border-t border-border bg-card">
-              <div className="flex items-center gap-3 max-w-3xl mx-auto">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground"
-                >
-                  <Plus className="h-5 w-5" />
-                </Button>
-                <div className="flex-1 relative">
+              <div className="max-w-3xl mx-auto space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={deliveryMethod === 'chat' ? 'default' : 'outline'}
+                    className="h-8 px-3 text-xs"
+                    onClick={() => setDeliveryMethod('chat')}
+                    disabled={sendingMessage}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5 mr-1.5" />
+                    Chat
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={deliveryMethod === 'email' ? 'default' : 'outline'}
+                    className="h-8 px-3 text-xs"
+                    onClick={() => setDeliveryMethod('email')}
+                    disabled={sendingMessage}
+                  >
+                    <Mail className="h-3.5 w-3.5 mr-1.5" />
+                    Email
+                  </Button>
+                </div>
+
+                {deliveryMethod === 'email' && (
                   <Input
-                    placeholder="Type your message here..."
-                    value={newMessage}
-                    onChange={handleTyping}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
-                    className="h-11 pr-10 bg-background border-border rounded-full"
+                    placeholder="Email subject"
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    className="h-10 bg-background border-border"
+                    maxLength={200}
+                    disabled={sendingMessage}
                   />
+                )}
+
+                <div className="flex items-center gap-3">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+                    className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground"
+                    disabled={sendingMessage}
                   >
-                    <Smile className="h-5 w-5" />
+                    <Plus className="h-5 w-5" />
+                  </Button>
+                  <div className="flex-1 relative">
+                    <Input
+                      placeholder={deliveryMethod === 'email' ? 'Type your email message...' : 'Type your message here...'}
+                      value={newMessage}
+                      onChange={handleTyping}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          void handleSendMessage()
+                        }
+                      }}
+                      className="h-11 pr-10 bg-background border-border rounded-full"
+                      disabled={sendingMessage}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+                      disabled={sendingMessage}
+                    >
+                      <Smile className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <Button
+                    onClick={() => void handleSendMessage()}
+                    disabled={
+                      !newMessage.trim() ||
+                      sendingMessage ||
+                      (deliveryMethod === 'email' && !emailSubject.trim())
+                    }
+                    className="h-10 px-6 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground"
+                  >
+                    {sendingMessage ? 'Sending...' : deliveryMethod === 'email' ? 'Send Email' : 'Send'}
                   </Button>
                 </div>
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!newMessage.trim()}
-                  className="h-10 px-6 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground"
-                >
-                  Send
-                </Button>
               </div>
             </div>
           </>
