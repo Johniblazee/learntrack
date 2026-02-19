@@ -1,7 +1,6 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { useUser, useAuth } from '@clerk/clerk-react'
-import { setTokenGetter } from '@/lib/api-client'
-import { API_BASE_URL } from '@/lib/config'
+import { ApiClient, IMPERSONATION_SESSION_CHANGED_EVENT, setTokenGetter } from '@/lib/api-client'
 
 // User role types matching backend
 export type UserRole = 'tutor' | 'student' | 'parent' | 'super_admin'
@@ -76,6 +75,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined)
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const { user: clerkUser, isLoaded, isSignedIn } = useUser()
   const { getToken } = useAuth()
+  const apiClient = useMemo(() => new ApiClient(() => getToken()), [getToken])
 
   const [backendUser, setBackendUser] = useState<BackendUser | null>(null)
   const [isBackendLoaded, setIsBackendLoaded] = useState(false)
@@ -95,18 +95,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     try {
       setBackendError(null)
-      const token = await getToken()
-      
-      const response = await fetch(`${API_BASE_URL}/users/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      const response = await apiClient.get<BackendUser>('/users/me')
 
-      if (response.ok) {
-        const userData = await response.json()
-        setBackendUser(userData)
+      if (response.data) {
+        setBackendUser(response.data)
       } else if (response.status === 404) {
         // User not found in backend - might need role setup
         setBackendUser(null)
@@ -119,7 +111,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsBackendLoaded(true)
     }
-  }, [isSignedIn, clerkUser, getToken])
+  }, [apiClient, isSignedIn, clerkUser])
 
   // Fetch backend user when Clerk user changes
   useEffect(() => {
@@ -127,6 +119,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       fetchBackendUser()
     }
   }, [isLoaded, isSignedIn, clerkUser?.id, fetchBackendUser])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleImpersonationSessionChanged = () => {
+      fetchBackendUser().catch((error) => {
+        console.error('Failed to refresh backend user after impersonation change:', error)
+      })
+    }
+
+    window.addEventListener(IMPERSONATION_SESSION_CHANGED_EVENT, handleImpersonationSessionChanged)
+    return () => {
+      window.removeEventListener(IMPERSONATION_SESSION_CHANGED_EVENT, handleImpersonationSessionChanged)
+    }
+  }, [fetchBackendUser])
 
   // Derive role from backend user or Clerk metadata
   const role = backendUser?.role ||

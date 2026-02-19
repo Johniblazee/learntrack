@@ -84,6 +84,15 @@ export default function DashboardPage() {
     setActiveView(storedView ?? initialView)
   }, [canSwitchAllViews, initialView, isPreviewSwitcherUser])
 
+  useEffect(() => {
+    if (!isImpersonating || typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.removeItem(VIEW_AS_STORAGE_KEY)
+    setActiveView(initialView)
+  }, [initialView, isImpersonating])
+
   const handleSwitchView = (view: DashboardView) => {
     if (view === activeView) {
       return

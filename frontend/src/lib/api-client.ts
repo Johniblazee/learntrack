@@ -9,6 +9,7 @@ let globalTokenGetter: (() => Promise<string | null>) | null = null
 export const VIEW_AS_STORAGE_KEY = 'learntrack.view_as_role'
 export type ViewAsRole = 'tutor' | 'student' | 'parent'
 export const IMPERSONATION_STORAGE_KEY = 'impersonation_session'
+export const IMPERSONATION_SESSION_CHANGED_EVENT = 'learntrack:impersonation-session-changed'
 
 function readImpersonationSessionId(): string | null {
   if (typeof window === 'undefined') {
@@ -34,6 +35,10 @@ function readImpersonationSessionId(): string | null {
 
 function readViewAsRole(): ViewAsRole | null {
   if (typeof window === 'undefined') {
+    return null
+  }
+
+  if (readImpersonationSessionId()) {
     return null
   }
 

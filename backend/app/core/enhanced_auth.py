@@ -33,6 +33,13 @@ CROSS_VIEW_ROLE_HEADER = "x-learntrack-view-as"
 # Header containing active admin impersonation session ID.
 IMPERSONATION_SESSION_HEADER = "x-learntrack-impersonation-session"
 
+# Request state keys used to keep track of the original authenticated actor
+# and whether an impersonation override is active for this request.
+AUTHENTICATED_ACTOR_STATE_KEY = "authenticated_clerk_id"
+IMPERSONATION_ACTIVE_STATE_KEY = "impersonation_active"
+IMPERSONATION_ADMIN_STATE_KEY = "impersonation_admin_clerk_id"
+IMPERSONATION_SESSION_STATE_KEY = "impersonation_session_id"
+
 # Cache for user sync status - avoids syncing on every request
 # Key: clerk_id, Value: last sync timestamp
 # TTL of 5 minutes means we'll re-sync at most once every 5 minutes per user
@@ -628,6 +635,10 @@ async def _apply_impersonation_session_override(
     if not isinstance(session_id, str) or not session_id.strip():
         return current_user
 
+    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
+    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
+        requester_clerk_id = current_user.clerk_id
+
     try:
         from app.core.impersonation_store import get_impersonation_session
     except Exception as error:
@@ -638,10 +649,10 @@ async def _apply_impersonation_session_override(
     if not session:
         return current_user
 
-    if session.admin_clerk_id != current_user.clerk_id:
+    if session.admin_clerk_id != requester_clerk_id:
         logger.warning(
             "Rejected impersonation session for non-owner admin",
-            requester_clerk_id=current_user.clerk_id,
+            requester_clerk_id=requester_clerk_id,
             session_admin_clerk_id=session.admin_clerk_id,
         )
         return current_user
@@ -673,11 +684,15 @@ async def _apply_impersonation_session_override(
 
     logger.info(
         "Applying admin impersonation override",
-        admin_clerk_id=current_user.clerk_id,
+        admin_clerk_id=requester_clerk_id,
         target_clerk_id=session.target_clerk_id,
         target_role=target_role.value,
         session_id=session.session_id,
     )
+
+    setattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, True)
+    setattr(request.state, IMPERSONATION_ADMIN_STATE_KEY, session.admin_clerk_id)
+    setattr(request.state, IMPERSONATION_SESSION_STATE_KEY, session.session_id)
 
     return current_user.model_copy(
         update={
@@ -700,7 +715,14 @@ def _apply_cross_view_role_override(
     current_user: ClerkUserContext, request: Request
 ) -> ClerkUserContext:
     """Apply temporary role override for allowlisted QA users."""
-    if current_user.clerk_id not in CROSS_VIEW_ACCESS_CLERK_IDS:
+    if getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False):
+        return current_user
+
+    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
+    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
+        requester_clerk_id = current_user.clerk_id
+
+    if requester_clerk_id not in CROSS_VIEW_ACCESS_CLERK_IDS:
         return current_user
 
     requested_role = request.headers.get(CROSS_VIEW_ROLE_HEADER)
@@ -721,7 +743,7 @@ def _apply_cross_view_role_override(
 
     logger.info(
         "Applying cross-view role override",
-        clerk_id=current_user.clerk_id,
+        clerk_id=requester_clerk_id,
         original_role=current_user.role.value,
         override_role=override_role.value,
     )
@@ -745,7 +767,11 @@ async def get_current_user(
     """Get current authenticated user from JWT token"""
     token = credentials.credentials
     current_user = await enhanced_clerk_bearer.verify_token(token)
+    setattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, current_user.clerk_id)
+    setattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
     current_user = await _apply_impersonation_session_override(current_user, request)
+    if getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False):
+        return current_user
     return _apply_cross_view_role_override(current_user, request)
 
 
@@ -757,10 +783,18 @@ async def require_authenticated_user(
 
 
 async def require_tutor(
+    request: Request,
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require tutor role (super admins also have access)"""
-    if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
+    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
+        requester_clerk_id = current_user.clerk_id
+
+    if (
+        not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
+        and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
+    ):
         return current_user
     if current_user.role != UserRole.TUTOR and not current_user.is_super_admin:
         raise HTTPException(
@@ -770,10 +804,18 @@ async def require_tutor(
 
 
 async def require_student(
+    request: Request,
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require student role"""
-    if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
+    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
+        requester_clerk_id = current_user.clerk_id
+
+    if (
+        not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
+        and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
+    ):
         return current_user
     if current_user.role != UserRole.STUDENT:
         raise HTTPException(
@@ -783,10 +825,18 @@ async def require_student(
 
 
 async def require_parent(
+    request: Request,
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require parent role"""
-    if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
+    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
+        requester_clerk_id = current_user.clerk_id
+
+    if (
+        not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
+        and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
+    ):
         return current_user
     if current_user.role != UserRole.PARENT:
         raise HTTPException(
@@ -799,9 +849,17 @@ async def require_role(allowed_roles: List[UserRole]):
     """Factory function to require specific roles"""
 
     async def role_checker(
+        request: Request,
         current_user: ClerkUserContext = Depends(get_current_user),
     ) -> ClerkUserContext:
-        if current_user.clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS:
+        requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
+        if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
+            requester_clerk_id = current_user.clerk_id
+
+        if (
+            not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
+            and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
+        ):
             return current_user
         if current_user.role not in allowed_roles:
             raise HTTPException(

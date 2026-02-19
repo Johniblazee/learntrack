@@ -147,6 +147,15 @@ export default function SettingsPage() {
     })
   }, [isPreviewSwitcherUser, impersonationRoleFilter])
 
+  useEffect(() => {
+    if (!isImpersonating || typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.removeItem(VIEW_AS_STORAGE_KEY)
+    setViewAsRole(initialViewAsRole)
+  }, [initialViewAsRole, isImpersonating])
+
   const handleSetViewAsRole = (role: ViewAsRole) => {
     if (role === viewAsRole) {
       return
@@ -377,7 +386,7 @@ export default function SettingsPage() {
 
           {/* Profile Tab */}
           <TabsContent value="profile" className="space-y-6">
-            {isPreviewSwitcherUser && (
+            {isPreviewSwitcherUser && !isImpersonating && (
               <Card>
                 <CardHeader>
                   <CardTitle>View As (Temporary)</CardTitle>
