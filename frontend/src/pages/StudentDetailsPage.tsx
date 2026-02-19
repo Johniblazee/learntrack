@@ -21,6 +21,7 @@ import { MessageCircle, Edit, CheckCircle2, Clock, Users, FileText, Calendar, X,
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
+import { useImpersonation } from '@/contexts/ImpersonationContext'
 import { format, isValid } from 'date-fns'
 import { SendMessageModal } from '@/components/modals/SendMessageModal'
 import { LoadingSpinner } from '@/components/ui/loading-state'
@@ -184,6 +185,7 @@ export default function StudentDetailsPage() {
   const [selectedGroupId, setSelectedGroupId] = useState('')
   const [loadingAllGroups, setLoadingAllGroups] = useState(false)
   const [assigningGroup, setAssigningGroup] = useState(false)
+  const [viewAsStudentDialogOpen, setViewAsStudentDialogOpen] = useState(false)
 
   const isMountedRef = useRef(false)
   const activeFetchIdRef = useRef(0)
@@ -191,6 +193,7 @@ export default function StudentDetailsPage() {
 
   const client = useApiClient()
   const queryClient = useQueryClient()
+  const { startImpersonation, isLoading: isImpersonationLoading } = useImpersonation()
 
   const selectableParents = availableParents.filter(
     (parent) => !linkedParents.some((linked) => linked.id === parent.id)
@@ -667,6 +670,40 @@ export default function StudentDetailsPage() {
     setSendMessageModalOpen(true)
   }
 
+  const handleOpenViewAsStudentDialog = () => {
+    if (!student) {
+      return
+    }
+
+    setViewAsStudentDialogOpen(true)
+  }
+
+  const handleStartViewAsStudent = async () => {
+    if (!student) {
+      return
+    }
+
+    const targetUserId = student.clerkId || student.id
+    if (!targetUserId) {
+      toast.error('Unable to start student view', {
+        description: 'Student ID is missing. Refresh and try again.',
+      })
+      return
+    }
+
+    try {
+      await startImpersonation(targetUserId)
+      queryClient.clear()
+      setViewAsStudentDialogOpen(false)
+      toast.success(`Now viewing as ${student.name}`)
+      navigate('/dashboard')
+    } catch (error: any) {
+      toast.error('Failed to start student view', {
+        description: error?.message || 'Please try again.',
+      })
+    }
+  }
+
   const handleEditProfile = () => {
     if (!student) {
       return
@@ -869,6 +906,15 @@ export default function StudentDetailsPage() {
                     >
                       <MessageCircle className="h-4 w-4 mr-2" />
                       Send Message
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleOpenViewAsStudentDialog}
+                      disabled={isImpersonationLoading}
+                      className="border-[#5c4a38] border-2 text-[#5c4a38] bg-transparent hover:bg-[#5c4a38] hover:text-white dark:border-[#C8A882] dark:text-[#C8A882] dark:hover:bg-[#C8A882] dark:hover:text-white"
+                    >
+                      <User className="h-4 w-4 mr-2" />
+                      {isImpersonationLoading ? 'Starting...' : 'View as Student'}
                     </Button>
                     <Button
                       onClick={handleEditProfile}
@@ -1276,6 +1322,57 @@ export default function StudentDetailsPage() {
           </div>
             </>
           )}
+
+      {/* View As Student Confirmation */}
+      <Dialog open={viewAsStudentDialogOpen} onOpenChange={setViewAsStudentDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <User className="h-5 w-5 text-primary" />
+              View as Student
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              You are about to enter {student?.name}&apos;s account. You will see the app exactly as this student sees it.
+            </p>
+            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <p className="font-medium text-foreground">{student?.name}</p>
+              <p className="text-muted-foreground">{student?.email}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              A banner will appear while you are acting as this student. You can exit at any time.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setViewAsStudentDialogOpen(false)}
+              disabled={isImpersonationLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleStartViewAsStudent}
+              disabled={isImpersonationLoading}
+              className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] border-0 dark:bg-[#C8A882] dark:hover:bg-[#B89872]"
+            >
+              {isImpersonationLoading ? (
+                <>
+                  <LoadingSpinner size="sm" className="mr-2 text-white" />
+                  Starting...
+                </>
+              ) : (
+                'Proceed as Student'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Profile Modal */}
       <Dialog open={editProfileModalOpen} onOpenChange={setEditProfileModalOpen}>

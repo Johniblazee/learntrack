@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useUserContext } from "@/contexts/UserContext"
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
 
@@ -48,8 +49,10 @@ export default function StudentAssignmentWorkspace({
   onSubmitted,
 }: StudentAssignmentWorkspaceProps) {
   const { user } = useUser()
+  const { backendUser } = useUserContext()
   const client = useApiClient()
   const queryClient = useQueryClient()
+  const activeStudentId = backendUser?.clerk_id || user?.id || null
 
   const [loading, setLoading] = useState(false)
   const [savingDraft, setSavingDraft] = useState(false)
@@ -74,7 +77,7 @@ export default function StudentAssignmentWorkspace({
   const currentQuestion = questions[currentQuestionIndex]
 
   useEffect(() => {
-    if (!open || !assignmentId || !user?.id) return
+    if (!open || !assignmentId || !activeStudentId) return
 
     const loadWorkspace = async () => {
       try {
@@ -89,7 +92,9 @@ export default function StudentAssignmentWorkspace({
         const assignment = assignmentResponse.data as any
         setAssignmentTitle(assignment.title || "Assignment")
 
-        const progressResponse = await client.get(`/progress/assignment/${assignmentId}/student/${user.id}`)
+        const progressResponse = await client.get(
+          `/progress/assignment/${assignmentId}/student/${activeStudentId}`
+        )
         if (progressResponse.error || !progressResponse.data) {
           throw new Error(progressResponse.error || "Failed to load assignment progress")
         }
@@ -151,7 +156,7 @@ export default function StudentAssignmentWorkspace({
     }
 
     loadWorkspace()
-  }, [assignmentId, client, onOpenChange, open, user?.id])
+  }, [activeStudentId, assignmentId, client, onOpenChange, open])
 
   const updateAnswer = (questionId: string, nextState: Partial<AnswerState>) => {
     setAnswers((prev) => ({

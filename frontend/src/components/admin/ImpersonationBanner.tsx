@@ -36,7 +36,7 @@ export function ImpersonationBanner() {
           </div>
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4" />
-            <span className="font-medium">Impersonation Mode</span>
+            <span className="font-medium">Acting as User</span>
             <span className="text-white/80">|</span>
             <div className="flex items-center gap-2">
               <User className="w-4 h-4" />

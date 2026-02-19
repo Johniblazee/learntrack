@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import StudentAssignmentWorkspace from "@/components/student-assignment-workspace"
+import { useUserContext } from "@/contexts/UserContext"
 import {
   useMyAssignments,
   useStudentDashboardStats,
@@ -154,6 +155,7 @@ export default function StudentDashboard() {
   const { user } = useUser()
   const { signOut } = useClerk()
   const navigate = useNavigate()
+  const { backendUser } = useUserContext()
 
   const [searchTerm, setSearchTerm] = useState("")
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null)
@@ -171,7 +173,7 @@ export default function StudentDashboard() {
   const { data: dashboardStats, isLoading: statsLoading } = useStudentDashboardStats()
   const { data: progressAnalytics, isLoading: analyticsLoading } = useStudentProgressAnalytics()
 
-  const studentName = user?.fullName || user?.firstName || "Student"
+  const studentName = backendUser?.name || user?.fullName || user?.firstName || "Student"
   const assignments = useMemo(() => toAssignmentCards(rawAssignments as any[]), [rawAssignments])
 
   const visibleAssignments = useMemo(() => {
