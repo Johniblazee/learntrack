@@ -1,9 +1,18 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { Users, Search, ChevronLeft, ChevronRight, MoreVertical, Eye, Edit, Shield, UserCheck } from 'lucide-react'
 import { useImpersonation } from '../../contexts/ImpersonationContext'
 import { BatchOperationsPanel, SelectCheckbox, BatchOperationType } from '../../components/admin/BatchOperationsPanel'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { API_BASE_URL } from '@/lib/config'
 
 interface AdminUserInfo {
@@ -30,6 +39,7 @@ const roleColors: Record<string, string> = {
 export function UsersPage() {
   const { getToken } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { startImpersonation, isLoading: isImpersonating } = useImpersonation()
   const [users, setUsers] = useState<AdminUserInfo[]>([])
   const [total, setTotal] = useState(0)
@@ -42,22 +52,36 @@ export function UsersPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('')
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [impersonationTarget, setImpersonationTarget] = useState<AdminUserInfo | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isBatchLoading, setIsBatchLoading] = useState(false)
 
-  const handleImpersonate = async (user: AdminUserInfo) => {
+  const handleOpenImpersonationDialog = (user: AdminUserInfo) => {
     if (user.is_super_admin) {
       alert('Cannot impersonate super admin users')
       return
     }
+
+    setOpenMenuId(null)
+    setImpersonationTarget(user)
+  }
+
+  const handleImpersonate = async () => {
+    if (!impersonationTarget) {
+      return
+    }
+
+    if (impersonationTarget.is_super_admin) {
+      setImpersonationTarget(null)
+      alert('Cannot impersonate super admin users')
+      return
+    }
+
     try {
-      await startImpersonation(user.clerk_id)
-      setOpenMenuId(null)
-      // Navigate to the appropriate dashboard based on role
-      const dashboardPath = user.role === 'tutor' ? '/dashboard/tutor' :
-                           user.role === 'student' ? '/dashboard/student' :
-                           user.role === 'parent' ? '/dashboard/parent' : '/dashboard'
-      navigate(dashboardPath)
+      await startImpersonation(impersonationTarget.clerk_id)
+      queryClient.clear()
+      setImpersonationTarget(null)
+      navigate('/dashboard')
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to start impersonation')
     }
@@ -152,6 +176,7 @@ export function UsersPage() {
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <div className="p-2 bg-primary/10 rounded-lg">
@@ -247,12 +272,12 @@ export function UsersPage() {
                         <button onClick={() => setOpenMenuId(null)} className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted"><Edit className="w-4 h-4" /> Edit</button>
                         {!user.is_super_admin && (
                           <button
-                            onClick={() => handleImpersonate(user)}
+                            onClick={() => handleOpenImpersonationDialog(user)}
                             disabled={isImpersonating}
                             className="w-full flex items-center gap-2 px-4 py-2 text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-b-lg disabled:opacity-50"
                           >
                             <UserCheck className="w-4 h-4" />
-                            {isImpersonating ? 'Starting...' : 'Impersonate'}
+                            Act as User
                           </button>
                         )}
                       </div>
@@ -276,6 +301,50 @@ export function UsersPage() {
         )}
       </div>
     </div>
+    <Dialog open={Boolean(impersonationTarget)} onOpenChange={(open) => {
+      if (!open) {
+        setImpersonationTarget(null)
+      }
+    }}>
+      <DialogContent className="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle>Act as User</DialogTitle>
+          <DialogDescription>
+            You are about to enter this user account and see LearnTrack exactly as they see it.
+          </DialogDescription>
+        </DialogHeader>
+
+        {impersonationTarget && (
+          <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm space-y-1">
+            <p className="font-medium text-foreground">{impersonationTarget.name}</p>
+            <p className="text-muted-foreground">{impersonationTarget.email}</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              Role: {impersonationTarget.role}
+            </p>
+          </div>
+        )}
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => setImpersonationTarget(null)}
+            disabled={isImpersonating}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleImpersonate}
+            disabled={isImpersonating || !impersonationTarget}
+            className="px-4 py-2 text-sm rounded-lg bg-[#5c4a38] text-white hover:bg-[#4a3c2e] disabled:opacity-50"
+          >
+            {isImpersonating ? 'Starting...' : 'Proceed as User'}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
 

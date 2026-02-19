@@ -43,15 +43,17 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useParentDashboardStats, useParentProgress } from '@/hooks/useQueries'
+import { useUserContext } from '@/contexts/UserContext'
 
 type ParentTab = 'overview' | 'children' | 'upcoming'
 
 export default function ParentDashboard() {
   const { user } = useUser()
+  const { backendUser } = useUserContext()
   const { signOut } = useClerk()
   const navigate = useNavigate()
 
-  const parentName = user?.fullName || user?.firstName || 'Parent'
+  const parentName = backendUser?.name || user?.fullName || user?.firstName || 'Parent'
   const [activeTab, setActiveTab] = useState<ParentTab>('overview')
 
   const { data: dashboardStats, isLoading: isLoadingStats } = useParentDashboardStats()

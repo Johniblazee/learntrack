@@ -19,6 +19,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { useUser, useClerk } from "@clerk/clerk-react"
 import { useTheme } from "@/contexts/ThemeContext"
+import { useUserContext } from "@/contexts/UserContext"
 import { useNavigate, Link } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { useApiClient } from "@/lib/api-client"
@@ -132,11 +133,24 @@ const menuItems = [
 
 export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
   const { user } = useUser()
+  const { backendUser } = useUserContext()
   const { signOut } = useClerk()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const client = useApiClient()
   void onViewChange
+
+  const displayName = backendUser?.name || user?.fullName || "User"
+  const displayEmail = backendUser?.email || user?.primaryEmailAddress?.emailAddress || ""
+  const initials =
+    displayName
+      .trim()
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((token) => token[0]?.toUpperCase() || "")
+      .join("") || "U"
+  const showClerkAvatar = !backendUser || backendUser.clerk_id === user?.id
 
   // Notifications state
   const [notifications, setNotifications] = useState<any[]>([])
@@ -362,15 +376,14 @@ export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
                   tooltip="Profile"
                 >
                   <Avatar className="h-8 w-8 rounded-lg group-data-[collapsible=icon]:mx-auto">
-                    <AvatarImage src={user?.imageUrl} alt={user?.fullName || "User"} />
+                    {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
                     <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                      {user?.firstName?.charAt(0) || "U"}
-                      {user?.lastName?.charAt(0) || ""}
+                      {initials}
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-semibold">{user?.fullName || "User"}</span>
-                    <span className="truncate text-xs">{user?.primaryEmailAddress?.emailAddress}</span>
+                    <span className="truncate font-semibold">{displayName}</span>
+                    <span className="truncate text-xs">{displayEmail}</span>
                   </div>
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
@@ -383,16 +396,15 @@ export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
                 <DropdownMenuLabel className="p-0 font-normal">
                   <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                     <Avatar className="h-8 w-8 rounded-lg">
-                      <AvatarImage src={user?.imageUrl} alt={user?.fullName || "User"} />
+                      {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
                       <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                        {user?.firstName?.charAt(0) || "U"}
-                        {user?.lastName?.charAt(0) || ""}
+                        {initials}
                       </AvatarFallback>
                     </Avatar>
                     <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-semibold">{user?.fullName || "User"}</span>
+                      <span className="truncate font-semibold">{displayName}</span>
                       <span className="truncate text-xs text-muted-foreground">
-                        {user?.primaryEmailAddress?.emailAddress}
+                        {displayEmail}
                       </span>
                     </div>
                   </div>

@@ -57,7 +57,7 @@ export function ImpersonationBanner() {
           className="flex items-center gap-2 px-4 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors font-medium disabled:opacity-50"
         >
           <X className="w-4 h-4" />
-          {isLoading ? 'Exiting...' : 'Exit Impersonation'}
+          {isLoading ? 'Stopping...' : 'Stop Acting as User'}
         </button>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { RecentActivity } from "../components/RecentActivity"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { useUser } from "@clerk/clerk-react"
+import { useUserContext } from "@/contexts/UserContext"
 
 interface OverviewViewProps {
   dashboardStats: any
@@ -14,7 +15,9 @@ interface OverviewViewProps {
 
 export function OverviewView({ dashboardStats, loading, onViewChange }: OverviewViewProps) {
   const { user } = useUser()
-  const firstName = user?.firstName || "there"
+  const { backendUser } = useUserContext()
+  const firstName =
+    backendUser?.name?.trim()?.split(" ")[0] || user?.firstName || "there"
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -58,4 +61,3 @@ export function OverviewView({ dashboardStats, loading, onViewChange }: Overview
     </div>
   )
 }
-
