@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/clerk-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { User, Bell, Lock, Palette, Globe, Save, ArrowLeft } from 'lucide-react'
 import { Button } from '../components/ui/button'
@@ -10,16 +11,42 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
-import { useApiClient } from '../lib/api-client'
+import { useApiClient, VIEW_AS_STORAGE_KEY } from '../lib/api-client'
 import { toast } from '../contexts/ToastContext'
+
+type ViewAsRole = 'tutor' | 'student' | 'parent'
+
+const PREVIEW_SWITCHER_USER_ID = 'user_33bbM70rwXsrbn1GWQTGORD9d8T'
+
+function readStoredViewAsRole(): ViewAsRole | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const value = window.localStorage.getItem(VIEW_AS_STORAGE_KEY)
+  if (value === 'tutor' || value === 'student' || value === 'parent') {
+    return value
+  }
+
+  return null
+}
 
 export default function SettingsPage() {
   const { user } = useUser()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { theme, toggleTheme } = useTheme()
   const apiClient = useApiClient()
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+
+  const userRole = (user?.publicMetadata?.role || user?.unsafeMetadata?.role) as string | undefined
+  const initialViewAsRole: ViewAsRole =
+    userRole === 'student' || userRole === 'parent' || userRole === 'tutor'
+      ? userRole
+      : 'tutor'
+  const isPreviewSwitcherUser = user?.id === PREVIEW_SWITCHER_USER_ID
+  const [viewAsRole, setViewAsRole] = useState<ViewAsRole>(initialViewAsRole)
 
   // Settings state
   const [settings, setSettings] = useState({
@@ -75,6 +102,43 @@ export default function SettingsPage() {
 
     loadSettings()
   }, [user])
+
+  useEffect(() => {
+    if (!isPreviewSwitcherUser) {
+      return
+    }
+
+    const storedRole = readStoredViewAsRole()
+    setViewAsRole(storedRole ?? initialViewAsRole)
+  }, [initialViewAsRole, isPreviewSwitcherUser])
+
+  const handleSetViewAsRole = (role: ViewAsRole) => {
+    if (role === viewAsRole) {
+      return
+    }
+
+    setViewAsRole(role)
+
+    if (!isPreviewSwitcherUser || typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(VIEW_AS_STORAGE_KEY, role)
+    queryClient.clear()
+    toast.success(`Preview role set to ${role}`)
+  }
+
+  const handleExitViewAs = () => {
+    setViewAsRole(initialViewAsRole)
+
+    if (!isPreviewSwitcherUser || typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.removeItem(VIEW_AS_STORAGE_KEY)
+    queryClient.clear()
+    toast.success('View-as preview reset to default role')
+  }
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -183,6 +247,53 @@ export default function SettingsPage() {
 
           {/* Profile Tab */}
           <TabsContent value="profile" className="space-y-6">
+            {isPreviewSwitcherUser && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>View As (Temporary)</CardTitle>
+                  <CardDescription>
+                    Preview the dashboard as tutor, student, or parent. This does not change your real account role.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    {(['tutor', 'student', 'parent'] as ViewAsRole[]).map((role) => (
+                      <Button
+                        key={role}
+                        type="button"
+                        size="sm"
+                        variant={viewAsRole === role ? 'default' : 'outline'}
+                        onClick={() => handleSetViewAsRole(role)}
+                      >
+                        {role.charAt(0).toUpperCase() + role.slice(1)}
+                      </Button>
+                    ))}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleExitViewAs}
+                    >
+                      Exit
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <span>Current preview:</span>
+                    <span className="font-medium text-foreground">{viewAsRole}</span>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0"
+                      onClick={() => navigate('/dashboard')}
+                    >
+                      Open dashboard view
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle>Profile Information</CardTitle>

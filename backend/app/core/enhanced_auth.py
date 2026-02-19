@@ -27,6 +27,9 @@ CROSS_VIEW_ACCESS_CLERK_IDS = {
     "user_33bbM70rwXsrbn1GWQTGORD9d8T",
 }
 
+# Header used by the frontend preview switcher to temporarily override role context.
+CROSS_VIEW_ROLE_HEADER = "x-learntrack-view-as"
+
 # Cache for user sync status - avoids syncing on every request
 # Key: clerk_id, Value: last sync timestamp
 # TTL of 5 minutes means we'll re-sync at most once every 5 minutes per user
@@ -614,12 +617,56 @@ enhanced_clerk_bearer = EnhancedClerkJWTBearer()
 security = HTTPBearer()
 
 
+def _apply_cross_view_role_override(
+    current_user: ClerkUserContext, request: Request
+) -> ClerkUserContext:
+    """Apply temporary role override for allowlisted QA users."""
+    if current_user.clerk_id not in CROSS_VIEW_ACCESS_CLERK_IDS:
+        return current_user
+
+    requested_role = request.headers.get(CROSS_VIEW_ROLE_HEADER)
+    if not isinstance(requested_role, str) or not requested_role.strip():
+        return current_user
+
+    normalized_role = requested_role.strip().lower()
+    if normalized_role not in {
+        UserRole.TUTOR.value,
+        UserRole.STUDENT.value,
+        UserRole.PARENT.value,
+    }:
+        return current_user
+
+    override_role = UserRole(normalized_role)
+    if override_role == current_user.role:
+        return current_user
+
+    logger.info(
+        "Applying cross-view role override",
+        clerk_id=current_user.clerk_id,
+        original_role=current_user.role.value,
+        override_role=override_role.value,
+    )
+
+    return current_user.model_copy(
+        update={
+            "role": override_role,
+            "roles": [override_role],
+            "permissions": enhanced_clerk_bearer._get_role_permissions(override_role),
+            # Disable elevated admin behavior while previewing student/parent/tutor views.
+            "is_super_admin": False,
+            "admin_permissions": [],
+        }
+    )
+
+
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> ClerkUserContext:
     """Get current authenticated user from JWT token"""
     token = credentials.credentials
-    return await enhanced_clerk_bearer.verify_token(token)
+    current_user = await enhanced_clerk_bearer.verify_token(token)
+    return _apply_cross_view_role_override(current_user, request)
 
 
 async def require_authenticated_user(
