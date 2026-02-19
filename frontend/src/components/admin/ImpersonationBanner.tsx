@@ -1,10 +1,11 @@
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AlertTriangle, X, User, Shield } from 'lucide-react'
 import { useImpersonation } from '../../contexts/ImpersonationContext'
 
 export function ImpersonationBanner() {
   const { isImpersonating, impersonatedUser, endImpersonation, isLoading } = useImpersonation()
   const navigate = useNavigate()
+  const location = useLocation()
 
   if (!isImpersonating || !impersonatedUser) {
     return null
@@ -12,7 +13,12 @@ export function ImpersonationBanner() {
 
   const handleExitImpersonation = async () => {
     await endImpersonation()
-    navigate('/admin/users')
+    if (location.pathname.startsWith('/admin')) {
+      navigate('/admin/users')
+      return
+    }
+
+    navigate('/dashboard')
   }
 
   const roleColors: Record<string, string> = {

@@ -5,7 +5,7 @@ Allows super admins to impersonate users for support/debugging
 
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 import secrets
@@ -13,7 +13,13 @@ import structlog
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_admin_permission, ClerkUserContext
-from app.models.user import UserRole, AdminPermission
+from app.core.impersonation_store import (
+    get_impersonation_session as get_impersonation_session_record,
+    list_impersonation_sessions_for_admin,
+    put_impersonation_session,
+    remove_impersonation_session,
+)
+from app.models.user import AdminPermission
 from app.models.admin import (
     AuditAction,
     ImpersonationSession,
@@ -25,8 +31,10 @@ from app.api.v1.admin.audit_utils import log_admin_action as _log_admin_action
 logger = structlog.get_logger()
 router = APIRouter()
 
-# In-memory store for active impersonation sessions (use Redis in production)
-_active_sessions: dict[str, ImpersonationSession] = {}
+
+def get_active_impersonation_session(session_id: str) -> Optional[ImpersonationSession]:
+    """Compatibility helper used by auth layer."""
+    return get_impersonation_session_record(session_id)
 
 
 @router.post("/start", response_model=ImpersonationResponse)
@@ -91,7 +99,7 @@ async def start_impersonation(
             expires_at=expires_at,
         )
 
-        _active_sessions[session_id] = session
+        put_impersonation_session(session)
 
         # Log the impersonation start
         await _log_admin_action(
@@ -147,7 +155,7 @@ async def end_impersonation(
 ):
     """End an impersonation session"""
     try:
-        session = _active_sessions.get(session_id)
+        session = get_impersonation_session_record(session_id)
 
         if not session:
             raise HTTPException(
@@ -161,7 +169,7 @@ async def end_impersonation(
             )
 
         # Remove the session
-        del _active_sessions[session_id]
+        remove_impersonation_session(session_id)
 
         # Log the impersonation end
         await _log_admin_action(
@@ -206,7 +214,7 @@ async def get_impersonation_session(
     ),
 ):
     """Get details of an active impersonation session"""
-    session = _active_sessions.get(session_id)
+    session = get_impersonation_session_record(session_id)
 
     if not session:
         raise HTTPException(status_code=404, detail="Impersonation session not found")
@@ -216,11 +224,6 @@ async def get_impersonation_session(
         raise HTTPException(
             status_code=403, detail="Not authorized to view this session"
         )
-
-    # Check if expired
-    if datetime.now(timezone.utc) > session.expires_at:
-        del _active_sessions[session_id]
-        raise HTTPException(status_code=410, detail="Impersonation session has expired")
 
     return {
         "session_id": session.session_id,
@@ -250,27 +253,18 @@ async def get_active_sessions(
     """Get all active impersonation sessions for the current admin"""
     now = datetime.now(timezone.utc)
     sessions = []
-    expired_keys = []
 
-    for session_id, session in _active_sessions.items():
-        if session.admin_clerk_id == current_user.clerk_id:
-            if now > session.expires_at:
-                expired_keys.append(session_id)
-            else:
-                sessions.append(
-                    {
-                        "session_id": session.session_id,
-                        "target_email": session.target_email,
-                        "target_name": session.target_name,
-                        "target_role": session.target_role,
-                        "remaining_minutes": max(
-                            0, int((session.expires_at - now).total_seconds() / 60)
-                        ),
-                    }
-                )
-
-    # Clean up expired sessions
-    for key in expired_keys:
-        del _active_sessions[key]
+    for session in list_impersonation_sessions_for_admin(current_user.clerk_id):
+        sessions.append(
+            {
+                "session_id": session.session_id,
+                "target_email": session.target_email,
+                "target_name": session.target_name,
+                "target_role": session.target_role,
+                "remaining_minutes": max(
+                    0, int((session.expires_at - now).total_seconds() / 60)
+                ),
+            }
+        )
 
     return {"sessions": sessions}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useUser } from '@clerk/clerk-react'
+import { useAuth, useUser } from '@clerk/clerk-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { User, Bell, Lock, Palette, Globe, Save, ArrowLeft } from 'lucide-react'
@@ -13,8 +13,20 @@ import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
 import { useApiClient, VIEW_AS_STORAGE_KEY } from '../lib/api-client'
 import { toast } from '../contexts/ToastContext'
+import { API_BASE_URL } from '@/lib/config'
+import { useImpersonation } from '@/contexts/ImpersonationContext'
 
 type ViewAsRole = 'tutor' | 'student' | 'parent'
+type ImpersonationTargetRole = 'student' | 'parent'
+
+interface AdminImpersonationTarget {
+  id: string
+  clerk_id: string
+  email: string
+  name: string
+  role: string
+  tutor_id?: string
+}
 
 const PREVIEW_SWITCHER_USER_ID = 'user_33bbM70rwXsrbn1GWQTGORD9d8T'
 
@@ -32,11 +44,19 @@ function readStoredViewAsRole(): ViewAsRole | null {
 }
 
 export default function SettingsPage() {
+  const { getToken } = useAuth()
   const { user } = useUser()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { theme, toggleTheme } = useTheme()
   const apiClient = useApiClient()
+  const {
+    isImpersonating,
+    impersonatedUser,
+    startImpersonation,
+    endImpersonation,
+    isLoading: isImpersonationLoading,
+  } = useImpersonation()
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -47,6 +67,11 @@ export default function SettingsPage() {
       : 'tutor'
   const isPreviewSwitcherUser = user?.id === PREVIEW_SWITCHER_USER_ID
   const [viewAsRole, setViewAsRole] = useState<ViewAsRole>(initialViewAsRole)
+  const [impersonationRoleFilter, setImpersonationRoleFilter] = useState<ImpersonationTargetRole>('student')
+  const [impersonationSearch, setImpersonationSearch] = useState('')
+  const [impersonationTargets, setImpersonationTargets] = useState<AdminImpersonationTarget[]>([])
+  const [isLoadingImpersonationTargets, setIsLoadingImpersonationTargets] = useState(false)
+  const [selectedImpersonationTargetId, setSelectedImpersonationTargetId] = useState<string | null>(null)
 
   // Settings state
   const [settings, setSettings] = useState({
@@ -112,6 +137,16 @@ export default function SettingsPage() {
     setViewAsRole(storedRole ?? initialViewAsRole)
   }, [initialViewAsRole, isPreviewSwitcherUser])
 
+  useEffect(() => {
+    if (!isPreviewSwitcherUser) {
+      return
+    }
+
+    fetchImpersonationTargets('').catch((error) => {
+      console.error('Initial impersonation target load failed:', error)
+    })
+  }, [isPreviewSwitcherUser, impersonationRoleFilter])
+
   const handleSetViewAsRole = (role: ViewAsRole) => {
     if (role === viewAsRole) {
       return
@@ -138,6 +173,101 @@ export default function SettingsPage() {
     window.localStorage.removeItem(VIEW_AS_STORAGE_KEY)
     queryClient.clear()
     toast.success('View-as preview reset to default role')
+  }
+
+  const fetchImpersonationTargets = async (searchOverride?: string) => {
+    if (!isPreviewSwitcherUser) {
+      return
+    }
+
+    try {
+      setIsLoadingImpersonationTargets(true)
+
+      const token = await getToken()
+      const params = new URLSearchParams({
+        page: '1',
+        per_page: '50',
+        role_filter: impersonationRoleFilter,
+      })
+
+      const searchValue = (searchOverride ?? impersonationSearch).trim()
+      if (searchValue) {
+        params.append('search', searchValue)
+      }
+
+      const response = await fetch(`${API_BASE_URL}/admin/users/?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.detail || 'Failed to load impersonation targets')
+      }
+
+      const payload = await response.json()
+      const users: AdminImpersonationTarget[] = Array.isArray(payload?.users) ? payload.users : []
+      setImpersonationTargets(users)
+
+      if (users.length === 0) {
+        setSelectedImpersonationTargetId(null)
+      } else if (
+        selectedImpersonationTargetId &&
+        !users.some((target) => target.clerk_id === selectedImpersonationTargetId)
+      ) {
+        setSelectedImpersonationTargetId(null)
+      }
+    } catch (error) {
+      console.error('Failed to fetch impersonation targets:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to load impersonation targets')
+      setImpersonationTargets([])
+      setSelectedImpersonationTargetId(null)
+    } finally {
+      setIsLoadingImpersonationTargets(false)
+    }
+  }
+
+  const handleStartImpersonation = async () => {
+    if (!selectedImpersonationTargetId) {
+      toast.error('Select a user to preview first')
+      return
+    }
+
+    const selectedTarget = impersonationTargets.find(
+      (target) => target.clerk_id === selectedImpersonationTargetId
+    )
+
+    if (!selectedTarget) {
+      toast.error('Selected user is no longer available')
+      return
+    }
+
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(VIEW_AS_STORAGE_KEY)
+      }
+
+      await startImpersonation(selectedTarget.clerk_id)
+      queryClient.clear()
+      toast.success(`Now previewing ${selectedTarget.name}`)
+      navigate('/dashboard')
+    } catch (error) {
+      console.error('Failed to start impersonation:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to start impersonation')
+    }
+  }
+
+  const handleEndImpersonation = async () => {
+    try {
+      await endImpersonation()
+      queryClient.clear()
+      toast.success('Stopped user preview session')
+    } catch (error) {
+      console.error('Failed to end impersonation:', error)
+      toast.error('Failed to stop user preview session')
+    }
   }
 
   const handleSave = async () => {
@@ -290,6 +420,125 @@ export default function SettingsPage() {
                       Open dashboard view
                     </Button>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {isPreviewSwitcherUser && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>View As User (Phase 2)</CardTitle>
+                  <CardDescription>
+                    Start a true user preview session to load data as a specific student or parent account.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isImpersonating && impersonatedUser ? (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+                      <p className="font-medium text-amber-900 dark:text-amber-100">
+                        Currently previewing: {impersonatedUser.name} ({impersonatedUser.role})
+                      </p>
+                      <p className="mt-1 text-amber-800 dark:text-amber-200">{impersonatedUser.email}</p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={handleEndImpersonation}
+                          disabled={isImpersonationLoading}
+                        >
+                          {isImpersonationLoading ? 'Stopping...' : 'Exit User Preview'}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate('/dashboard')}
+                        >
+                          Open preview dashboard
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {(['student', 'parent'] as ImpersonationTargetRole[]).map((role) => (
+                          <Button
+                            key={role}
+                            type="button"
+                            size="sm"
+                            variant={impersonationRoleFilter === role ? 'default' : 'outline'}
+                            onClick={() => {
+                              setImpersonationRoleFilter(role)
+                              setSelectedImpersonationTargetId(null)
+                            }}
+                          >
+                            {role === 'student' ? 'Students' : 'Parents'}
+                          </Button>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={impersonationSearch}
+                          onChange={(event) => setImpersonationSearch(event.target.value)}
+                          placeholder={`Search ${impersonationRoleFilter}s by name or email`}
+                          className="max-w-md"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => fetchImpersonationTargets()}
+                          disabled={isLoadingImpersonationTargets}
+                        >
+                          {isLoadingImpersonationTargets ? 'Loading...' : 'Search'}
+                        </Button>
+                      </div>
+
+                      <div className="max-h-64 space-y-2 overflow-y-auto rounded-md border p-2">
+                        {isLoadingImpersonationTargets ? (
+                          <p className="text-sm text-muted-foreground">Loading available users...</p>
+                        ) : impersonationTargets.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">No matching users found.</p>
+                        ) : (
+                          impersonationTargets.map((target) => (
+                            <button
+                              key={target.clerk_id}
+                              type="button"
+                              className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                                selectedImpersonationTargetId === target.clerk_id
+                                  ? 'border-primary bg-primary/5'
+                                  : 'border-border hover:bg-muted/40'
+                              }`}
+                              onClick={() => setSelectedImpersonationTargetId(target.clerk_id)}
+                            >
+                              <p className="text-sm font-medium text-foreground">{target.name}</p>
+                              <p className="text-xs text-muted-foreground">{target.email}</p>
+                            </button>
+                          ))
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleStartImpersonation}
+                          disabled={!selectedImpersonationTargetId || isImpersonationLoading}
+                        >
+                          {isImpersonationLoading ? 'Starting...' : 'Start User Preview'}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate('/dashboard')}
+                        >
+                          Back to dashboard
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}

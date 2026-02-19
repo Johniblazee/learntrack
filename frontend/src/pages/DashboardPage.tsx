@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { LoadingState } from '@/components/ui/loading-state'
 import { VIEW_AS_STORAGE_KEY } from '@/lib/api-client'
+import { useImpersonation } from '@/contexts/ImpersonationContext'
 
 type DashboardView = 'tutor' | 'student' | 'parent'
 
@@ -38,6 +39,7 @@ export default function DashboardPage() {
   const { isLoaded, user } = useUser()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { isImpersonating, impersonatedUser } = useImpersonation()
 
   // Get user role from metadata (check both public and unsafe metadata)
   const userRole = (user?.publicMetadata?.role || user?.unsafeMetadata?.role) as string | undefined
@@ -53,6 +55,13 @@ export default function DashboardPage() {
   }, [userRole])
 
   const [activeView, setActiveView] = useState<DashboardView>(initialView)
+  const impersonatedRole =
+    isImpersonating &&
+    (impersonatedUser?.role === 'tutor' ||
+      impersonatedUser?.role === 'student' ||
+      impersonatedUser?.role === 'parent')
+      ? impersonatedUser.role
+      : null
 
   useEffect(() => {
     if (!canSwitchAllViews) {
@@ -126,7 +135,7 @@ export default function DashboardPage() {
   }
 
   const renderDashboard = () => {
-    const view: DashboardView = canSwitchAllViews ? activeView : initialView
+    const view: DashboardView = impersonatedRole || (canSwitchAllViews ? activeView : initialView)
     switch (view) {
       case 'tutor':
         return <TutorDashboard />
@@ -144,7 +153,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      {canSwitchAllViews && (
+      {canSwitchAllViews && !isImpersonating && (
         <Card className="fixed top-4 right-4 z-[70] p-2.5 border-border/70 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85">
           <div className="flex flex-col gap-2">
             {isPreviewSwitcherUser && (

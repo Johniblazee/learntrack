@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { useAuth } from '@clerk/clerk-react'
+import { IMPERSONATION_STORAGE_KEY } from '@/lib/api-client'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
 
@@ -30,7 +31,7 @@ interface ImpersonationContextType {
 
 const ImpersonationContext = createContext<ImpersonationContextType | undefined>(undefined)
 
-const STORAGE_KEY = 'impersonation_session'
+const STORAGE_KEY = IMPERSONATION_STORAGE_KEY
 
 export function ImpersonationProvider({ children }: { children: React.ReactNode }) {
   const { getToken } = useAuth()

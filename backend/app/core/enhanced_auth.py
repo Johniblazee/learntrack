@@ -30,6 +30,9 @@ CROSS_VIEW_ACCESS_CLERK_IDS = {
 # Header used by the frontend preview switcher to temporarily override role context.
 CROSS_VIEW_ROLE_HEADER = "x-learntrack-view-as"
 
+# Header containing active admin impersonation session ID.
+IMPERSONATION_SESSION_HEADER = "x-learntrack-impersonation-session"
+
 # Cache for user sync status - avoids syncing on every request
 # Key: clerk_id, Value: last sync timestamp
 # TTL of 5 minutes means we'll re-sync at most once every 5 minutes per user
@@ -617,6 +620,82 @@ enhanced_clerk_bearer = EnhancedClerkJWTBearer()
 security = HTTPBearer()
 
 
+async def _apply_impersonation_session_override(
+    current_user: ClerkUserContext, request: Request
+) -> ClerkUserContext:
+    """Apply admin impersonation session override if present and valid."""
+    session_id = request.headers.get(IMPERSONATION_SESSION_HEADER)
+    if not isinstance(session_id, str) or not session_id.strip():
+        return current_user
+
+    try:
+        from app.core.impersonation_store import get_impersonation_session
+    except Exception as error:
+        logger.warning("Failed to load impersonation session store", error=str(error))
+        return current_user
+
+    session = get_impersonation_session(session_id.strip())
+    if not session:
+        return current_user
+
+    if session.admin_clerk_id != current_user.clerk_id:
+        logger.warning(
+            "Rejected impersonation session for non-owner admin",
+            requester_clerk_id=current_user.clerk_id,
+            session_admin_clerk_id=session.admin_clerk_id,
+        )
+        return current_user
+
+    try:
+        target_role = UserRole(str(session.target_role).lower())
+    except ValueError:
+        logger.warning(
+            "Invalid role on impersonation session",
+            session_id=session_id,
+            target_role=session.target_role,
+        )
+        return current_user
+
+    target_user = await enhanced_clerk_bearer._get_user_from_database(
+        session.target_clerk_id
+    )
+    target_student_ids = []
+    if target_user:
+        target_student_ids = target_user.get("student_ids") or target_user.get(
+            "parent_children", []
+        )
+
+    target_tutor_id = (
+        (target_user.get("tutor_id") if target_user else None)
+        or session.target_tutor_id
+        or session.target_clerk_id
+    )
+
+    logger.info(
+        "Applying admin impersonation override",
+        admin_clerk_id=current_user.clerk_id,
+        target_clerk_id=session.target_clerk_id,
+        target_role=target_role.value,
+        session_id=session.session_id,
+    )
+
+    return current_user.model_copy(
+        update={
+            "user_id": session.target_clerk_id,
+            "clerk_id": session.target_clerk_id,
+            "email": session.target_email or current_user.email,
+            "name": session.target_name or current_user.name,
+            "role": target_role,
+            "roles": [target_role],
+            "permissions": enhanced_clerk_bearer._get_role_permissions(target_role),
+            "tutor_id": target_tutor_id,
+            "student_ids": [str(student_id) for student_id in target_student_ids],
+            "is_super_admin": False,
+            "admin_permissions": [],
+        }
+    )
+
+
 def _apply_cross_view_role_override(
     current_user: ClerkUserContext, request: Request
 ) -> ClerkUserContext:
@@ -666,6 +745,7 @@ async def get_current_user(
     """Get current authenticated user from JWT token"""
     token = credentials.credentials
     current_user = await enhanced_clerk_bearer.verify_token(token)
+    current_user = await _apply_impersonation_session_override(current_user, request)
     return _apply_cross_view_role_override(current_user, request)
 
 

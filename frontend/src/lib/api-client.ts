@@ -8,6 +8,29 @@ let globalTokenGetter: (() => Promise<string | null>) | null = null
 
 export const VIEW_AS_STORAGE_KEY = 'learntrack.view_as_role'
 export type ViewAsRole = 'tutor' | 'student' | 'parent'
+export const IMPERSONATION_STORAGE_KEY = 'impersonation_session'
+
+function readImpersonationSessionId(): string | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const raw = window.localStorage.getItem(IMPERSONATION_STORAGE_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.sessionId === 'string' && parsed.sessionId.trim()) {
+      return parsed.sessionId
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
 
 function readViewAsRole(): ViewAsRole | null {
   if (typeof window === 'undefined') {
@@ -75,6 +98,11 @@ export class ApiClient {
       // Avoid accidental double prefixing if callers pass '/api/v1/...'
       const sanitized = endpoint.replace(/^\/api\/v\d+/, '')
       let path = sanitized.startsWith('/') ? sanitized : `/${sanitized}`
+
+      const impersonationSessionId = readImpersonationSessionId()
+      if (impersonationSessionId && !path.startsWith('/admin/')) {
+        headers['X-LearnTrack-Impersonation-Session'] = impersonationSessionId
+      }
 
       // Ensure trailing slash for root collection endpoints (FastAPI routes with redirect_slashes=False)
       // Only add trailing slash for top-level collection endpoints like /students, /groups, /invitations
