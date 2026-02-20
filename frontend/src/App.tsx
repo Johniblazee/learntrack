@@ -41,7 +41,10 @@ function App() {
           <ToastProvider>
             <ErrorBoundary>
               <ImpersonationBanner />
-              <div className="min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
+              <div
+                className="min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300"
+                style={{ paddingTop: 'var(--lt-impersonation-offset, 0px)' }}
+              >
                 <Routes>
               {/* Public routes */}
               <Route path="/" element={<HomePage />} />

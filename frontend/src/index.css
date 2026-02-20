@@ -92,6 +92,8 @@
 
 @layer base {
   :root {
+    --lt-impersonation-offset: 0px;
+
     /* Light mode - Warm beige background like the design */
     --background: 30 20% 97%; /* Light beige/cream #F8F6F3 */
     --foreground: 20 14% 20%; /* Dark brown for text #3D3530 */

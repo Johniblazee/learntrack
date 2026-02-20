@@ -1,11 +1,52 @@
+import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AlertTriangle, X, User, Shield } from 'lucide-react'
 import { useImpersonation } from '../../contexts/ImpersonationContext'
+
+const IMPERSONATION_OFFSET_CSS_VAR = '--lt-impersonation-offset'
 
 export function ImpersonationBanner() {
   const { isImpersonating, impersonatedUser, endImpersonation, isLoading } = useImpersonation()
   const navigate = useNavigate()
   const location = useLocation()
+  const bannerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    const root = document.documentElement
+
+    const setOffset = (value: number) => {
+      root.style.setProperty(IMPERSONATION_OFFSET_CSS_VAR, `${Math.max(0, Math.ceil(value))}px`)
+    }
+
+    if (!isImpersonating) {
+      setOffset(0)
+      return
+    }
+
+    const updateOffset = () => {
+      const height = bannerRef.current?.getBoundingClientRect().height ?? 0
+      setOffset(height)
+    }
+
+    updateOffset()
+    window.addEventListener('resize', updateOffset)
+
+    let observer: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined' && bannerRef.current) {
+      observer = new ResizeObserver(updateOffset)
+      observer.observe(bannerRef.current)
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateOffset)
+      observer?.disconnect()
+      setOffset(0)
+    }
+  }, [isImpersonating, impersonatedUser?.email, impersonatedUser?.name, impersonatedUser?.role])
 
   if (!isImpersonating || !impersonatedUser) {
     return null
@@ -28,7 +69,10 @@ export function ImpersonationBanner() {
   }
 
   return (
-    <div className="sticky top-0 left-0 right-0 z-[100] bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white shadow-lg">
+    <div
+      ref={bannerRef}
+      className="fixed top-0 left-0 right-0 z-[100] bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white shadow-lg"
+    >
       <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="p-1.5 bg-white/20 rounded-lg shrink-0">
