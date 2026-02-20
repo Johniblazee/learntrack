@@ -28,23 +28,23 @@ export function ImpersonationBanner() {
   }
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[100] bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white shadow-lg">
-      <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-white/20 rounded-lg">
+    <div className="sticky top-0 left-0 right-0 z-[100] bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white shadow-lg">
+      <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="p-1.5 bg-white/20 rounded-lg shrink-0">
             <AlertTriangle className="w-5 h-5" />
           </div>
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4" />
+          <div className="flex min-w-0 items-center gap-2">
+            <Shield className="w-4 h-4 shrink-0" />
             <span className="font-medium">Acting as User</span>
-            <span className="text-white/80">|</span>
-            <div className="flex items-center gap-2">
-              <User className="w-4 h-4" />
-              <span className="font-semibold">{impersonatedUser.name}</span>
-              <span className={`text-sm ${roleColors[impersonatedUser.role] || 'text-white/80'}`}>
+            <span className="text-white/80 hidden sm:inline">|</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <User className="w-4 h-4 shrink-0" />
+              <span className="font-semibold truncate max-w-[24ch]">{impersonatedUser.name}</span>
+              <span className={`text-sm shrink-0 ${roleColors[impersonatedUser.role] || 'text-white/80'}`}>
                 ({impersonatedUser.role})
               </span>
-              <span className="text-white/60 text-sm">
+              <span className="text-white/60 text-sm truncate hidden md:inline max-w-[28ch]">
                 {impersonatedUser.email}
               </span>
             </div>
@@ -54,7 +54,7 @@ export function ImpersonationBanner() {
         <button
           onClick={handleExitImpersonation}
           disabled={isLoading}
-          className="flex items-center gap-2 px-4 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors font-medium disabled:opacity-50"
+          className="flex items-center gap-2 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors font-medium disabled:opacity-50 shrink-0"
         >
           <X className="w-4 h-4" />
           {isLoading ? 'Stopping...' : 'Stop Acting as User'}

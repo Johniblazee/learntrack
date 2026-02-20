@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { useUser, useClerk } from "@clerk/clerk-react"
 import { useTheme } from "@/contexts/ThemeContext"
 import { useUserContext } from "@/contexts/UserContext"
+import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { useNavigate, Link } from "react-router-dom"
 import { useState, useEffect } from "react"
 import { useApiClient } from "@/lib/api-client"
@@ -134,14 +135,20 @@ const menuItems = [
 export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
   const { user } = useUser()
   const { backendUser } = useUserContext()
+  const { isImpersonating } = useImpersonation()
   const { signOut } = useClerk()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const client = useApiClient()
   void onViewChange
 
-  const displayName = backendUser?.name || user?.fullName || "User"
-  const displayEmail = backendUser?.email || user?.primaryEmailAddress?.emailAddress || ""
+  const actorName = user?.fullName || user?.firstName || "User"
+  const impersonatedName = backendUser?.name && backendUser.name !== "Unknown User" ? backendUser.name : actorName
+  const displayName = isImpersonating ? impersonatedName : actorName
+
+  const actorEmail = user?.primaryEmailAddress?.emailAddress || ""
+  const impersonatedEmail = backendUser?.email || actorEmail
+  const displayEmail = isImpersonating ? impersonatedEmail : actorEmail
   const initials =
     displayName
       .trim()
@@ -150,7 +157,7 @@ export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
       .slice(0, 2)
       .map((token) => token[0]?.toUpperCase() || "")
       .join("") || "U"
-  const showClerkAvatar = !backendUser || backendUser.clerk_id === user?.id
+  const showClerkAvatar = !isImpersonating || backendUser?.clerk_id === user?.id
 
   // Notifications state
   const [notifications, setNotifications] = useState<any[]>([])

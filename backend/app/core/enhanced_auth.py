@@ -21,15 +21,6 @@ from app.core.database import get_database
 
 logger = structlog.get_logger()
 
-# Temporary cross-view access allowlist for QA/demo users who need to switch between
-# tutor, student, and parent dashboards without changing their primary role.
-CROSS_VIEW_ACCESS_CLERK_IDS = {
-    "user_33bbM70rwXsrbn1GWQTGORD9d8T",
-}
-
-# Header used by the frontend preview switcher to temporarily override role context.
-CROSS_VIEW_ROLE_HEADER = "x-learntrack-view-as"
-
 # Header containing active admin impersonation session ID.
 IMPERSONATION_SESSION_HEADER = "x-learntrack-impersonation-session"
 
@@ -711,55 +702,6 @@ async def _apply_impersonation_session_override(
     )
 
 
-def _apply_cross_view_role_override(
-    current_user: ClerkUserContext, request: Request
-) -> ClerkUserContext:
-    """Apply temporary role override for allowlisted QA users."""
-    if getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False):
-        return current_user
-
-    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
-    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
-        requester_clerk_id = current_user.clerk_id
-
-    if requester_clerk_id not in CROSS_VIEW_ACCESS_CLERK_IDS:
-        return current_user
-
-    requested_role = request.headers.get(CROSS_VIEW_ROLE_HEADER)
-    if not isinstance(requested_role, str) or not requested_role.strip():
-        return current_user
-
-    normalized_role = requested_role.strip().lower()
-    if normalized_role not in {
-        UserRole.TUTOR.value,
-        UserRole.STUDENT.value,
-        UserRole.PARENT.value,
-    }:
-        return current_user
-
-    override_role = UserRole(normalized_role)
-    if override_role == current_user.role:
-        return current_user
-
-    logger.info(
-        "Applying cross-view role override",
-        clerk_id=requester_clerk_id,
-        original_role=current_user.role.value,
-        override_role=override_role.value,
-    )
-
-    return current_user.model_copy(
-        update={
-            "role": override_role,
-            "roles": [override_role],
-            "permissions": enhanced_clerk_bearer._get_role_permissions(override_role),
-            # Disable elevated admin behavior while previewing student/parent/tutor views.
-            "is_super_admin": False,
-            "admin_permissions": [],
-        }
-    )
-
-
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -770,9 +712,7 @@ async def get_current_user(
     setattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, current_user.clerk_id)
     setattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
     current_user = await _apply_impersonation_session_override(current_user, request)
-    if getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False):
-        return current_user
-    return _apply_cross_view_role_override(current_user, request)
+    return current_user
 
 
 async def require_authenticated_user(
@@ -787,15 +727,6 @@ async def require_tutor(
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require tutor role (super admins also have access)"""
-    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
-    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
-        requester_clerk_id = current_user.clerk_id
-
-    if (
-        not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
-        and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
-    ):
-        return current_user
     if current_user.role != UserRole.TUTOR and not current_user.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Tutor access required"
@@ -808,15 +739,6 @@ async def require_student(
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require student role"""
-    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
-    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
-        requester_clerk_id = current_user.clerk_id
-
-    if (
-        not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
-        and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
-    ):
-        return current_user
     if current_user.role != UserRole.STUDENT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Student access required"
@@ -829,15 +751,6 @@ async def require_parent(
     current_user: ClerkUserContext = Depends(get_current_user),
 ) -> ClerkUserContext:
     """Require parent role"""
-    requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
-    if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
-        requester_clerk_id = current_user.clerk_id
-
-    if (
-        not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
-        and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
-    ):
-        return current_user
     if current_user.role != UserRole.PARENT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Parent access required"
@@ -852,15 +765,6 @@ async def require_role(allowed_roles: List[UserRole]):
         request: Request,
         current_user: ClerkUserContext = Depends(get_current_user),
     ) -> ClerkUserContext:
-        requester_clerk_id = getattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, None)
-        if not isinstance(requester_clerk_id, str) or not requester_clerk_id.strip():
-            requester_clerk_id = current_user.clerk_id
-
-        if (
-            not getattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
-            and requester_clerk_id in CROSS_VIEW_ACCESS_CLERK_IDS
-        ):
-            return current_user
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

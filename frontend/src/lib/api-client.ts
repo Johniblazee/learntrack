@@ -6,8 +6,6 @@ import { API_BASE_URL } from './config'
 const API_ROOT = API_BASE_URL
 let globalTokenGetter: (() => Promise<string | null>) | null = null
 
-export const VIEW_AS_STORAGE_KEY = 'learntrack.view_as_role'
-export type ViewAsRole = 'tutor' | 'student' | 'parent'
 export const IMPERSONATION_STORAGE_KEY = 'impersonation_session'
 export const IMPERSONATION_SESSION_CHANGED_EVENT = 'learntrack:impersonation-session-changed'
 
@@ -28,28 +26,6 @@ function readImpersonationSessionId(): string | null {
     }
   } catch {
     return null
-  }
-
-  return null
-}
-
-function readViewAsRole(): ViewAsRole | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  if (readImpersonationSessionId()) {
-    return null
-  }
-
-  // Keep the override scoped to dashboard experiences only.
-  if (!window.location.pathname.startsWith('/dashboard')) {
-    return null
-  }
-
-  const value = window.localStorage.getItem(VIEW_AS_STORAGE_KEY)
-  if (value === 'tutor' || value === 'student' || value === 'parent') {
-    return value
   }
 
   return null
@@ -93,11 +69,6 @@ export class ApiClient {
 
       if (token) {
         headers['Authorization'] = `Bearer ${token}`
-      }
-
-      const viewAsRole = readViewAsRole()
-      if (viewAsRole) {
-        headers['X-LearnTrack-View-As'] = viewAsRole
       }
 
       // Avoid accidental double prefixing if callers pass '/api/v1/...'

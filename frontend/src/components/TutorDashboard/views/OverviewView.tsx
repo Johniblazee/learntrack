@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { useUser } from "@clerk/clerk-react"
 import { useUserContext } from "@/contexts/UserContext"
+import { useImpersonation } from "@/contexts/ImpersonationContext"
 
 interface OverviewViewProps {
   dashboardStats: any
@@ -16,8 +17,14 @@ interface OverviewViewProps {
 export function OverviewView({ dashboardStats, loading, onViewChange }: OverviewViewProps) {
   const { user } = useUser()
   const { backendUser } = useUserContext()
+  const { isImpersonating } = useImpersonation()
+  const actorFirstName = user?.firstName || user?.fullName?.trim()?.split(" ")[0]
+  const impersonatedFirstName = backendUser?.name?.trim()?.split(" ")[0]
   const firstName =
-    backendUser?.name?.trim()?.split(" ")[0] || user?.firstName || "there"
+    (isImpersonating ? impersonatedFirstName : actorFirstName) ||
+    impersonatedFirstName ||
+    actorFirstName ||
+    "there"
 
   return (
     <div className="flex-1 overflow-y-auto">

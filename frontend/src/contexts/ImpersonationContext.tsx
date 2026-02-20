@@ -3,7 +3,6 @@ import { useAuth } from '@clerk/clerk-react'
 import {
   IMPERSONATION_SESSION_CHANGED_EVENT,
   IMPERSONATION_STORAGE_KEY,
-  VIEW_AS_STORAGE_KEY,
 } from '@/lib/api-client'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
@@ -92,7 +91,6 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
     setSession(nextSession)
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
-      window.localStorage.removeItem(VIEW_AS_STORAGE_KEY)
       emitImpersonationSessionChangedEvent()
     }
   }, [])
@@ -101,7 +99,6 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
     setSession(null)
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(STORAGE_KEY)
-      window.localStorage.removeItem(VIEW_AS_STORAGE_KEY)
       emitImpersonationSessionChangedEvent()
     }
   }, [])
