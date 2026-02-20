@@ -18,6 +18,7 @@ import { useImpersonation } from '@/contexts/ImpersonationContext'
 
 type ViewAsRole = 'tutor' | 'student' | 'parent'
 type ImpersonationTargetRole = 'student' | 'parent'
+type StudentDefaultTab = 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
 
 interface AdminImpersonationTarget {
   id: string
@@ -90,6 +91,12 @@ export default function SettingsPage() {
     profileVisibility: 'students',
     showEmail: false,
     showPhone: false,
+
+    // Preferences
+    defaultStudentTab: 'dashboard' as StudentDefaultTab,
+    showWeekendSchedule: true,
+    compactAssignmentCards: false,
+    autoOpenNextAssignment: false,
   })
 
   // Load settings from backend on mount
@@ -115,6 +122,18 @@ export default function SettingsPage() {
             profileVisibility: data.privacy?.profile_visibility || 'students',
             showEmail: data.privacy?.show_email ?? false,
             showPhone: data.privacy?.show_phone ?? false,
+            // Preferences
+            defaultStudentTab:
+              data.preferences?.default_student_tab === 'dashboard' ||
+              data.preferences?.default_student_tab === 'courses' ||
+              data.preferences?.default_student_tab === 'assignments' ||
+              data.preferences?.default_student_tab === 'grades' ||
+              data.preferences?.default_student_tab === 'library'
+                ? data.preferences.default_student_tab
+                : 'dashboard',
+            showWeekendSchedule: data.preferences?.show_weekend_schedule ?? true,
+            compactAssignmentCards: data.preferences?.compact_assignment_cards ?? false,
+            autoOpenNextAssignment: data.preferences?.auto_open_next_assignment ?? false,
           }))
         }
       } catch (error) {
@@ -297,6 +316,12 @@ export default function SettingsPage() {
           profile_visibility: settings.profileVisibility,
           show_email: settings.showEmail,
           show_phone: settings.showPhone,
+        },
+        preferences: {
+          default_student_tab: settings.defaultStudentTab,
+          show_weekend_schedule: settings.showWeekendSchedule,
+          compact_assignment_cards: settings.compactAssignmentCards,
+          auto_open_next_assignment: settings.autoOpenNextAssignment,
         },
       })
 
@@ -768,13 +793,78 @@ export default function SettingsPage() {
               <CardHeader>
                 <CardTitle>Preferences</CardTitle>
                 <CardDescription>
-                  Customize your experience
+                  Tailor your student workspace experience
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Additional preferences will be available soon.
-                </p>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="defaultStudentTab">Default Student Dashboard Tab</Label>
+                  <select
+                    id="defaultStudentTab"
+                    value={settings.defaultStudentTab}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        defaultStudentTab: e.target.value as StudentDefaultTab,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  >
+                    <option value="dashboard">Dashboard</option>
+                    <option value="courses">My Courses</option>
+                    <option value="assignments">Assignments</option>
+                    <option value="grades">Grades</option>
+                    <option value="library">Library</option>
+                  </select>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Choose which tab opens first when you enter the student dashboard.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Show Weekend in Weekly Schedule</Label>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Include Saturday and Sunday in the student schedule view.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.showWeekendSchedule}
+                    onCheckedChange={(checked) =>
+                      setSettings({ ...settings, showWeekendSchedule: checked })
+                    }
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Compact Assignment Cards</Label>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Reduce card spacing so more assignments are visible at once.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.compactAssignmentCards}
+                    onCheckedChange={(checked) =>
+                      setSettings({ ...settings, compactAssignmentCards: checked })
+                    }
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Auto-open Next Assignment</Label>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Open the next in-progress assignment when using Resume Learning Session.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.autoOpenNextAssignment}
+                    onCheckedChange={(checked) =>
+                      setSettings({ ...settings, autoOpenNextAssignment: checked })
+                    }
+                  />
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

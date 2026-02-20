@@ -693,6 +693,87 @@ export function useStudentProgressAnalytics() {
   })
 }
 
+/**
+ * Hook to fetch student's personal activity feed
+ */
+export function useMyActivities(limit: number = 20) {
+  const client = useApiClient()
+
+  return useQuery({
+    queryKey: ['activities', 'me', limit],
+    queryFn: async () => {
+      const response = await client.get(`/activity/me?limit=${limit}`)
+      if (response.error) throw new Error(response.error)
+      return Array.isArray(response.data) ? response.data : []
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+/**
+ * Hook to fetch materials visible to the current student
+ */
+export function useStudentMaterials(subjectId?: string) {
+  const client = useApiClient()
+
+  return useQuery({
+    queryKey: ['materials', 'student', subjectId || 'all'],
+    queryFn: async () => {
+      const suffix = subjectId ? `?subject_id=${encodeURIComponent(subjectId)}` : ''
+      const response = await client.get(`/materials/student${suffix}`)
+      if (response.error) throw new Error(response.error)
+      return Array.isArray(response.data) ? response.data : []
+    },
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export interface UserPreferenceSettings {
+  default_student_tab: 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
+  show_weekend_schedule: boolean
+  compact_assignment_cards: boolean
+  auto_open_next_assignment: boolean
+}
+
+export interface UserSettingsResponse {
+  profile?: {
+    display_name?: string | null
+    timezone?: string
+  }
+  notifications?: {
+    email_notifications?: boolean
+    assignment_reminders?: boolean
+    message_notifications?: boolean
+    weekly_digest?: boolean
+  }
+  privacy?: {
+    profile_visibility?: string
+    show_email?: boolean
+    show_phone?: boolean
+  }
+  preferences?: Partial<UserPreferenceSettings>
+}
+
+/**
+ * Hook to fetch current user's settings/preferences
+ */
+export function useUserSettings() {
+  const client = useApiClient()
+
+  return useQuery<UserSettingsResponse>({
+    queryKey: ['user-settings'],
+    queryFn: async () => {
+      const response = await client.get('/settings/user')
+      if (response.error) throw new Error(response.error)
+      return (response.data || {}) as UserSettingsResponse
+    },
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  })
+}
+
 // ============================================
 // Generation History Queries
 // ============================================
