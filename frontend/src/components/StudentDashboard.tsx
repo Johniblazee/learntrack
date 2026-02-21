@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useAuth, useClerk, useUser } from "@clerk/clerk-react"
 import { useNavigate } from "react-router-dom"
 import {
-  Bell,
   BookOpen,
   CheckCircle2,
   Clock3,
@@ -15,17 +14,12 @@ import {
   Layers,
   LayoutDashboard,
   Library,
-  LogOut,
-  Moon,
   Search,
-  Settings,
   Sparkles,
-  Sun,
   TrendingUp,
   Trophy,
 } from "lucide-react"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -37,22 +31,12 @@ import {
 } from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarInset,
@@ -63,20 +47,18 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { DashboardHeaderActions } from "@/components/dashboard/DashboardHeaderActions"
 import StudentAssignmentWorkspace from "@/components/student-assignment-workspace"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
-import { useTheme } from "@/contexts/ThemeContext"
 import { toast } from "@/contexts/ToastContext"
 import { useUserContext } from "@/contexts/UserContext"
 import {
   useAnnouncements,
   useMyActivities,
   useMyAssignments,
-  useNotifications,
   useStudentDashboardStats,
   useStudentMaterials,
   useStudentProgressAnalytics,
-  useUnreadNotificationCount,
   useUserSettings,
 } from "@/hooks/useQueries"
 import { useApiClient } from "@/lib/api-client"
@@ -405,7 +387,6 @@ export default function StudentDashboard() {
   const client = useApiClient()
   const { backendUser } = useUserContext()
   const { isImpersonating } = useImpersonation()
-  const { theme, toggleTheme } = useTheme()
 
   const [activeNavSection, setActiveNavSection] = useState<StudentNavSection>("dashboard")
   const [hasAppliedPreferredTab, setHasAppliedPreferredTab] = useState(false)
@@ -424,8 +405,6 @@ export default function StudentDashboard() {
   const { data: activityFeed = [], isLoading: activitiesLoading } = useMyActivities(20)
   const { data: materials = [], isLoading: materialsLoading } = useStudentMaterials()
   const { data: userSettings, isLoading: settingsLoading } = useUserSettings()
-  const { data: notificationResponse } = useNotifications(1, 5)
-  const { data: unreadResponse } = useUnreadNotificationCount()
 
   const actorName = user?.fullName || user?.firstName || "Student"
   const actorEmail = user?.primaryEmailAddress?.emailAddress || ""
@@ -444,12 +423,6 @@ export default function StudentDashboard() {
       .map((token) => token[0]?.toUpperCase() || "")
       .join("") || "S"
   const showClerkAvatar = !isImpersonating || backendUser?.clerk_id === user?.id
-
-  const notifications = Array.isArray(notificationResponse?.items)
-    ? notificationResponse.items
-    : []
-  const unreadCount =
-    typeof unreadResponse?.unread_count === "number" ? unreadResponse.unread_count : 0
 
   const preferences = userSettings?.preferences || {}
   const showWeekendSchedule = preferences.show_weekend_schedule ?? true
@@ -1575,78 +1548,6 @@ export default function StudentDashboard() {
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <SidebarMenuButton
-                    size="lg"
-                    tooltip="Profile"
-                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                  >
-                    <Avatar className="h-8 w-8 rounded-lg group-data-[collapsible=icon]:mx-auto">
-                      {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                      <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                        {initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                      <span className="truncate font-semibold">{displayName}</span>
-                      <span className="truncate text-xs text-muted-foreground">{displayEmail}</span>
-                    </div>
-                  </SidebarMenuButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  side="top"
-                  align="end"
-                  sideOffset={4}
-                  className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
-                >
-                  <DropdownMenuLabel className="p-0 font-normal">
-                    <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                      <Avatar className="h-8 w-8 rounded-lg">
-                        {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                        <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                          {initials}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="grid flex-1 text-left text-sm leading-tight">
-                        <span className="truncate font-semibold">{displayName}</span>
-                        <span className="truncate text-xs text-muted-foreground">{displayEmail}</span>
-                      </div>
-                    </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem onClick={handleOpenSettings}>
-                      <Settings className="mr-2 h-4 w-4" />
-                      Settings
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={toggleTheme}>
-                      {theme === "dark" ? (
-                        <>
-                          <Sun className="mr-2 h-4 w-4" />
-                          Light Mode
-                        </>
-                      ) : (
-                        <>
-                          <Moon className="mr-2 h-4 w-4" />
-                          Dark Mode
-                        </>
-                      )}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleSignOut}>
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Log out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
       </Sidebar>
 
       <SidebarInset className="bg-background">
@@ -1667,95 +1568,15 @@ export default function StudentDashboard() {
             </Breadcrumb>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative">
-                  <Bell className="h-4 w-4" />
-                  {unreadCount > 0 && (
-                    <Badge
-                      variant="destructive"
-                      className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px]"
-                    >
-                      {unreadCount}
-                    </Badge>
-                  )}
-                  <span className="sr-only">Notifications</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-80 rounded-lg">
-                <DropdownMenuLabel className="flex items-center justify-between">
-                  <span>Notifications</span>
-                  <span className="text-xs text-muted-foreground">{unreadCount} unread</span>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  {notifications.length === 0 ? (
-                    <DropdownMenuItem disabled>
-                      <span className="text-sm text-muted-foreground">No notifications</span>
-                    </DropdownMenuItem>
-                  ) : (
-                    notifications.slice(0, 4).map((notification: any, index: number) => (
-                      <DropdownMenuItem
-                        key={String(notification?.id ?? notification?._id ?? `student-notification-${index}`)}
-                      >
-                        <div className="flex flex-col gap-1">
-                          <span className="font-medium">{notification?.title || "Notification"}</span>
-                          <span className="line-clamp-2 text-xs text-muted-foreground">
-                            {notification?.message || "No details provided"}
-                          </span>
-                        </div>
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <Button variant="ghost" size="icon" onClick={toggleTheme}>
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              <span className="sr-only">Toggle theme</span>
-            </Button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-9 px-2">
-                  <Avatar className="h-8 w-8 rounded-lg">
-                    {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                    <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="min-w-56 rounded-lg">
-                <DropdownMenuLabel className="p-0 font-normal">
-                  <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                    <Avatar className="h-8 w-8 rounded-lg">
-                      {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                      <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                        {initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-semibold">{displayName}</span>
-                      <span className="truncate text-xs text-muted-foreground">{displayEmail}</span>
-                    </div>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleOpenSettings}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <DashboardHeaderActions
+            displayName={displayName}
+            displayEmail={displayEmail}
+            initials={initials}
+            avatarUrl={user?.imageUrl}
+            showAvatarImage={showClerkAvatar}
+            onSettings={handleOpenSettings}
+            onSignOut={handleSignOut}
+          />
         </header>
 
         <div className="flex flex-1 flex-col gap-4 bg-background p-4">

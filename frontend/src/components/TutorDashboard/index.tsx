@@ -1,22 +1,10 @@
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { useNavigate, useLocation, Routes, Route, Navigate } from "react-router-dom"
-import { Bell, LogOut, Moon, Settings, Sun } from "lucide-react"
 import { useClerk, useUser } from "@clerk/clerk-react"
 import { AppSidebar } from "./AppSidebar"
+import { DashboardHeaderActions } from "@/components/dashboard/DashboardHeaderActions"
 import { OverviewView } from "./views/OverviewView"
 import InvitationsView from "./views/InvitationsView"
 import GroupsManagementView from "./views/GroupsManagementView"
@@ -33,8 +21,7 @@ import GradingView from "./views/GradingView"
 import MessagingView from "./views/MessagingView"
 import ConversationsView from "./views/ConversationsView"
 import StudentDetailsPage from "@/pages/StudentDetailsPage"
-import { useDashboardStats, useNotifications, useUnreadNotificationCount } from "@/hooks/useQueries"
-import { useTheme } from "@/contexts/ThemeContext"
+import { useDashboardStats } from "@/hooks/useQueries"
 import { useUserContext } from "@/contexts/UserContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 
@@ -48,14 +35,11 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
   const { signOut } = useClerk()
   const navigate = useNavigate()
   const location = useLocation()
-  const { theme, toggleTheme } = useTheme()
   const { backendUser } = useUserContext()
   const { isImpersonating } = useImpersonation()
 
   // Use React Query for dashboard stats
   const { data: dashboardStats, isLoading: loading } = useDashboardStats()
-  const { data: notificationResponse } = useNotifications(1, 5)
-  const { data: unreadResponse } = useUnreadNotificationCount()
 
   const actorName = user?.fullName || user?.firstName || "Tutor"
   const actorEmail = user?.primaryEmailAddress?.emailAddress || ""
@@ -73,12 +57,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       .map((token) => token[0]?.toUpperCase() || "")
       .join("") || "T"
   const showClerkAvatar = !isImpersonating || backendUser?.clerk_id === user?.id
-
-  const notifications = Array.isArray(notificationResponse?.items)
-    ? notificationResponse.items
-    : []
-  const unreadCount =
-    typeof unreadResponse?.unread_count === "number" ? unreadResponse.unread_count : 0
 
   // Determine active view from URL path
   const getActiveViewFromPath = () => {
@@ -225,95 +203,15 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
             </Breadcrumb>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative">
-                  <Bell className="h-4 w-4" />
-                  {unreadCount > 0 && (
-                    <Badge
-                      variant="destructive"
-                      className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px]"
-                    >
-                      {unreadCount}
-                    </Badge>
-                  )}
-                  <span className="sr-only">Notifications</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-80 rounded-lg">
-                <DropdownMenuLabel className="flex items-center justify-between">
-                  <span>Notifications</span>
-                  <span className="text-xs text-muted-foreground">{unreadCount} unread</span>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  {notifications.length === 0 ? (
-                    <DropdownMenuItem disabled>
-                      <span className="text-sm text-muted-foreground">No notifications</span>
-                    </DropdownMenuItem>
-                  ) : (
-                    notifications.slice(0, 4).map((notification: any, index: number) => (
-                      <DropdownMenuItem
-                        key={String(notification?.id ?? notification?._id ?? `tutor-notification-${index}`)}
-                      >
-                        <div className="flex flex-col gap-1">
-                          <span className="font-medium">{notification?.title || 'Notification'}</span>
-                          <span className="line-clamp-2 text-xs text-muted-foreground">
-                            {notification?.message || 'No details provided'}
-                          </span>
-                        </div>
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <Button variant="ghost" size="icon" onClick={toggleTheme}>
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              <span className="sr-only">Toggle theme</span>
-            </Button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-9 px-2">
-                  <Avatar className="h-8 w-8 rounded-lg">
-                    {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                    <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="min-w-56 rounded-lg">
-                <DropdownMenuLabel className="p-0 font-normal">
-                  <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                    <Avatar className="h-8 w-8 rounded-lg">
-                      {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                      <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                        {initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-semibold">{displayName}</span>
-                      <span className="truncate text-xs text-muted-foreground">{displayEmail}</span>
-                    </div>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleOpenSettings}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <DashboardHeaderActions
+            displayName={displayName}
+            displayEmail={displayEmail}
+            initials={initials}
+            avatarUrl={user?.imageUrl}
+            showAvatarImage={showClerkAvatar}
+            onSettings={handleOpenSettings}
+            onSignOut={handleSignOut}
+          />
 
         </header>
 

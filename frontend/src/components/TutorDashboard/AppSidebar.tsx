@@ -1,26 +1,12 @@
-import { LayoutDashboard, Users, FileText, BookOpen, Settings, ChevronRight, UserPlus, MessageSquare, Mail, Brain, CheckSquare, Library, FolderOpen, Calendar, ClipboardList, GraduationCap, LogOut, Moon, Sun, Layers } from "lucide-react"
+import { LayoutDashboard, Users, FileText, BookOpen, ChevronRight, UserPlus, MessageSquare, Mail, Brain, CheckSquare, Library, FolderOpen, Calendar, ClipboardList, GraduationCap, Layers } from "lucide-react"
 
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar"
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { useUser, useClerk } from "@clerk/clerk-react"
-import { useTheme } from "@/contexts/ThemeContext"
-import { useUserContext } from "@/contexts/UserContext"
-import { useImpersonation } from "@/contexts/ImpersonationContext"
-import { useNavigate, Link } from "react-router-dom"
+import { Link } from "react-router-dom"
 
 interface AppSidebarProps {
   activeView: string
@@ -130,39 +116,7 @@ const menuItems = [
 ]
 
 export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
-  const { user } = useUser()
-  const { backendUser } = useUserContext()
-  const { isImpersonating } = useImpersonation()
-  const { signOut } = useClerk()
-  const { theme, toggleTheme } = useTheme()
-  const navigate = useNavigate()
   void onViewChange
-
-  const actorName = user?.fullName || user?.firstName || "User"
-  const impersonatedName = backendUser?.name && backendUser.name !== "Unknown User" ? backendUser.name : actorName
-  const displayName = isImpersonating ? impersonatedName : actorName
-
-  const actorEmail = user?.primaryEmailAddress?.emailAddress || ""
-  const impersonatedEmail = backendUser?.email || actorEmail
-  const displayEmail = isImpersonating ? impersonatedEmail : actorEmail
-  const initials =
-    displayName
-      .trim()
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((token) => token[0]?.toUpperCase() || "")
-      .join("") || "U"
-  const showClerkAvatar = !isImpersonating || backendUser?.clerk_id === user?.id
-
-  const handleSignOut = async () => {
-    await signOut()
-    navigate("/")
-  }
-
-  const handleSettings = () => {
-    navigate("/settings")
-  }
 
   // Map view names to routes
   const getRouteForView = (view: string): string => {
@@ -261,80 +215,6 @@ export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton
-                  size="lg"
-                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                  tooltip="Profile"
-                >
-                  <Avatar className="h-8 w-8 rounded-lg group-data-[collapsible=icon]:mx-auto">
-                    {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                    <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-semibold">{displayName}</span>
-                    <span className="truncate text-xs">{displayEmail}</span>
-                  </div>
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
-                side="top"
-                align="end"
-                sideOffset={4}
-              >
-                <DropdownMenuLabel className="p-0 font-normal">
-                  <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                    <Avatar className="h-8 w-8 rounded-lg">
-                      {showClerkAvatar && <AvatarImage src={user?.imageUrl} alt={displayName} />}
-                      <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                        {initials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-semibold">{displayName}</span>
-                      <span className="truncate text-xs text-muted-foreground">
-                        {displayEmail}
-                      </span>
-                    </div>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={handleSettings}>
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={toggleTheme}>
-                    {theme === "dark" ? (
-                      <>
-                        <Sun className="mr-2 h-4 w-4" />
-                        Light Mode
-                      </>
-                    ) : (
-                      <>
-                        <Moon className="mr-2 h-4 w-4" />
-                        Dark Mode
-                      </>
-                    )}
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
     </Sidebar>
   )
 }
