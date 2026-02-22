@@ -276,19 +276,126 @@ async def get_recent_activity(
     database: AsyncIOMotorDatabase = Depends(get_database),
     limit: int = 10,
 ):
-    """Get recent student activity from database"""
+    """Get recent tutor activity feed derived from tracked activity events."""
     try:
-        # Fetch from recent_activity collection
-        activities = (
-            await database.recent_activity.find({"tutor_id": current_user.clerk_id})
+        activity_docs = (
+            await database.activities.find({"tutor_id": current_user.clerk_id})
             .sort("created_at", -1)
             .limit(limit)
             .to_list(length=limit)
         )
 
-        # Remove MongoDB _id field
-        for activity in activities:
-            activity.pop("_id", None)
+        if not activity_docs:
+            return []
+
+        student_ids = {
+            str(doc.get("user_id"))
+            for doc in activity_docs
+            if isinstance(doc.get("user_id"), str)
+        }
+
+        assignment_object_ids = []
+        seen_assignment_ids = set()
+        for doc in activity_docs:
+            metadata = doc.get("metadata") or {}
+            related_entity_type = str(doc.get("related_entity_type") or "").lower()
+            related_entity_id = str(doc.get("related_entity_id") or "")
+            metadata_assignment_id = str(metadata.get("assignment_id") or "")
+
+            candidate_ids = []
+            if related_entity_type == "assignment" and related_entity_id:
+                candidate_ids.append(related_entity_id)
+            if metadata_assignment_id:
+                candidate_ids.append(metadata_assignment_id)
+
+            for assignment_id in candidate_ids:
+                if assignment_id in seen_assignment_ids:
+                    continue
+                try:
+                    assignment_object_ids.append(ObjectId(assignment_id))
+                    seen_assignment_ids.add(assignment_id)
+                except Exception:
+                    continue
+
+        students = []
+        if student_ids:
+            students = await database.students.find(
+                {"clerk_id": {"$in": list(student_ids)}},
+                {"clerk_id": 1, "name": 1},
+            ).to_list(length=len(student_ids))
+        students_by_id = {
+            str(student.get("clerk_id")): str(student.get("name") or "Learner")
+            for student in students
+            if student.get("clerk_id")
+        }
+
+        assignments = []
+        if assignment_object_ids:
+            assignments = await database.assignments.find(
+                {"_id": {"$in": assignment_object_ids}},
+                {"title": 1},
+            ).to_list(length=len(assignment_object_ids))
+        assignments_by_id = {
+            str(assignment.get("_id")): str(
+                assignment.get("title") or "Untitled assignment"
+            )
+            for assignment in assignments
+            if assignment.get("_id")
+        }
+
+        action_map = {
+            "assignment_submitted": "submitted",
+            "assignment_completed": "completed",
+            "assignment_started": "started",
+            "material_viewed": "viewed",
+            "material_downloaded": "downloaded",
+            "message_sent": "sent",
+            "invitation_accepted": "joined",
+        }
+        type_map = {
+            "assignment_submitted": "submitted",
+            "assignment_completed": "completed",
+            "invitation_accepted": "joined",
+        }
+
+        activities = []
+        for doc in activity_docs:
+            activity_type = str(doc.get("activity_type") or "").lower()
+            metadata = doc.get("metadata") or {}
+
+            actor_id = str(doc.get("user_id") or "")
+            actor_name = str(metadata.get("student_name") or "").strip()
+            if not actor_name:
+                if actor_id == current_user.clerk_id:
+                    actor_name = "You"
+                else:
+                    actor_name = students_by_id.get(actor_id, "Learner")
+
+            related_assignment_id = str(doc.get("related_entity_id") or "")
+            if not related_assignment_id:
+                related_assignment_id = str(metadata.get("assignment_id") or "")
+
+            assignment_title = str(metadata.get("assignment_title") or "").strip()
+            if not assignment_title and related_assignment_id:
+                assignment_title = assignments_by_id.get(related_assignment_id, "")
+            if not assignment_title:
+                if activity_type == "message_sent":
+                    assignment_title = "a conversation"
+                elif activity_type.startswith("material_"):
+                    assignment_title = "learning material"
+                else:
+                    assignment_title = "an activity"
+
+            activities.append(
+                {
+                    "student": actor_name,
+                    "action": action_map.get(activity_type, "updated"),
+                    "assignment": assignment_title,
+                    "time": "Recently",
+                    "type": type_map.get(activity_type, "activity"),
+                    "created_at": doc.get("created_at"),
+                }
+            )
 
         return activities
     except Exception as e:

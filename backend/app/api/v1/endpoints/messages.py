@@ -8,9 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 from pydantic import BaseModel, Field
+from bson import ObjectId
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_authenticated_user, ClerkUserContext
+from app.models.activity import ActivityCreate, ActivityType
 from app.models.message import (
     Message,
     MessageCreate,
@@ -20,9 +22,12 @@ from app.models.message import (
     MessageListResponse,
 )
 from app.models.conversation import ConversationCreate
+from app.models.notification import NotificationCreate, NotificationType
+from app.services.activity_service import ActivityService
 from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService
 from app.services.email_service import EmailService
+from app.services.notification_service import NotificationService
 from app.core.exceptions import NotFoundError, ValidationError
 
 logger = structlog.get_logger()
@@ -35,6 +40,142 @@ def _resolve_tenant_id(current_user: ClerkUserContext) -> str:
 
 def _sender_name(current_user: ClerkUserContext) -> str:
     return current_user.name or "Unknown User"
+
+
+def _message_preview(content: str, limit: int = 120) -> str:
+    normalized = " ".join((content or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3].rstrip()}..."
+
+
+async def _record_message_activity(
+    db: AsyncIOMotorDatabase,
+    *,
+    sender_id: str,
+    tutor_id: str,
+    conversation_id: str,
+    delivery_method: MessageDeliveryMethod,
+    description: str,
+) -> None:
+    try:
+        activity_service = ActivityService(db)
+        await activity_service.create_activity(
+            activity_data=ActivityCreate(
+                activity_type=ActivityType.MESSAGE_SENT,
+                user_id=sender_id,
+                tutor_id=tutor_id,
+                description=description,
+                related_entity_id=conversation_id,
+                related_entity_type="conversation",
+                metadata={
+                    "delivery_method": delivery_method.value,
+                },
+            ),
+            user_id=sender_id,
+            tutor_id=tutor_id,
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to record message activity",
+            conversation_id=conversation_id,
+            sender_id=sender_id,
+            error=str(error),
+        )
+
+
+async def _notify_recipient(
+    db: AsyncIOMotorDatabase,
+    *,
+    recipient_id: str,
+    sender_id: str,
+    sender_name: str,
+    tutor_id: str,
+    conversation_id: str,
+    delivery_method: MessageDeliveryMethod,
+    preview: str,
+) -> None:
+    if not recipient_id or recipient_id == sender_id:
+        return
+
+    title = (
+        f"New email from {sender_name}"
+        if delivery_method == MessageDeliveryMethod.EMAIL
+        else f"New message from {sender_name}"
+    )
+    action_url = (
+        "/dashboard/messages/emails"
+        if delivery_method == MessageDeliveryMethod.EMAIL
+        else "/dashboard/messages/chats"
+    )
+
+    try:
+        notification_service = NotificationService(db)
+        await notification_service.create_notification(
+            NotificationCreate(
+                title=title,
+                message=preview,
+                notification_type=NotificationType.MESSAGE_RECEIVED,
+                recipient_id=recipient_id,
+                tutor_id=tutor_id,
+                related_entity_id=conversation_id,
+                related_entity_type="conversation",
+                action_url=action_url,
+            )
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to create message notification",
+            recipient_id=recipient_id,
+            sender_id=sender_id,
+            conversation_id=conversation_id,
+            error=str(error),
+        )
+
+
+async def _notify_conversation_participants(
+    db: AsyncIOMotorDatabase,
+    *,
+    conversation_id: str,
+    sender_id: str,
+    sender_name: str,
+    tutor_id: str,
+    delivery_method: MessageDeliveryMethod,
+    preview: str,
+) -> None:
+    conversation = None
+    try:
+        conversation = await db.conversations.find_one(
+            {
+                "_id": ObjectId(conversation_id),
+                "tutor_id": tutor_id,
+            }
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to load conversation for notification",
+            conversation_id=conversation_id,
+            error=str(error),
+        )
+        return
+
+    participant_ids = [
+        participant
+        for participant in (conversation or {}).get("participants", [])
+        if isinstance(participant, str)
+    ]
+
+    for recipient_id in participant_ids:
+        await _notify_recipient(
+            db,
+            recipient_id=recipient_id,
+            sender_id=sender_id,
+            sender_name=sender_name,
+            tutor_id=tutor_id,
+            conversation_id=conversation_id,
+            delivery_method=delivery_method,
+            preview=preview,
+        )
 
 
 async def _find_user_by_clerk_id(
@@ -68,13 +209,16 @@ async def create_message(
     - **message_type**: Message type (text, image, file, system)
     """
     try:
+        tenant_id = _resolve_tenant_id(current_user)
+        sender_name = _sender_name(current_user)
+
         service = MessageService(db)
         message = await service.create_message(
             message_data=message_data,
             sender_id=current_user.clerk_id,
-            sender_name=_sender_name(current_user),
+            sender_name=sender_name,
             sender_role=current_user.role,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=tenant_id,
         )
 
         # Update conversation's last message
@@ -84,6 +228,29 @@ async def create_message(
             message_content=message_data.content,
             sender_id=current_user.clerk_id,
             delivery_method=message_data.delivery_method.value,
+        )
+
+        preview = _message_preview(message_data.content)
+        await _record_message_activity(
+            db,
+            sender_id=current_user.clerk_id,
+            tutor_id=tenant_id,
+            conversation_id=message_data.conversation_id,
+            delivery_method=message_data.delivery_method,
+            description=(
+                f"Sent an email: {preview}"
+                if message_data.delivery_method == MessageDeliveryMethod.EMAIL
+                else f"Sent a message: {preview}"
+            ),
+        )
+        await _notify_conversation_participants(
+            db,
+            conversation_id=message_data.conversation_id,
+            sender_id=current_user.clerk_id,
+            sender_name=sender_name,
+            tutor_id=tenant_id,
+            delivery_method=message_data.delivery_method,
+            preview=preview,
         )
 
         return message
@@ -171,6 +338,26 @@ async def send_email_message(
             message_content=f"Email: {email_data.subject}",
             sender_id=current_user.clerk_id,
             delivery_method=MessageDeliveryMethod.EMAIL.value,
+        )
+
+        preview = _message_preview(email_data.subject)
+        await _record_message_activity(
+            db,
+            sender_id=current_user.clerk_id,
+            tutor_id=tenant_id,
+            conversation_id=conversation.id,
+            delivery_method=MessageDeliveryMethod.EMAIL,
+            description=f"Sent an email: {preview}",
+        )
+        await _notify_recipient(
+            db,
+            recipient_id=email_data.recipient_id,
+            sender_id=current_user.clerk_id,
+            sender_name=_sender_name(current_user),
+            tutor_id=tenant_id,
+            conversation_id=conversation.id,
+            delivery_method=MessageDeliveryMethod.EMAIL,
+            preview=preview,
         )
 
         return message

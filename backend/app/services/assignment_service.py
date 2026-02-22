@@ -18,6 +18,8 @@ from app.models.assignment import (
     AssignmentStatus,
     QuestionAssignment,
 )
+from app.models.notification import NotificationCreate, NotificationType
+from app.models.activity import ActivityCreate, ActivityType
 from app.core.exceptions import (
     AuthorizationError,
     DatabaseException,
@@ -25,7 +27,9 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.utils import to_object_id
+from app.services.activity_service import ActivityService
 from app.services.email_service import email_service
+from app.services.notification_service import NotificationService
 
 logger = structlog.get_logger()
 
@@ -150,10 +154,13 @@ class AssignmentService:
                 tutor_name = (
                     tutor.get("name", "Your Teacher") if tutor else "Your Teacher"
                 )
+                notification_service = NotificationService(self.db)
+                activity_service = ActivityService(self.db)
 
                 assignment_link = (
                     f"{FRONTEND_URL}/assignments/{str(result.inserted_id)}"
                 )
+                assignment_id_str = str(result.inserted_id)
 
                 # Send to each student
                 for student_id in student_ids:
@@ -166,15 +173,52 @@ class AssignmentService:
                         student = await self.db.students.find_one(
                             {"clerk_id": student_id}
                         )
+                        student_name = (
+                            student.get("name", "Student")
+                            if isinstance(student, dict)
+                            else "Student"
+                        )
+
                         if student and student.get("email"):
                             email_service.send_assignment_notification(
                                 to_email=student["email"],
-                                to_name=student.get("name", "Student"),
+                                to_name=student_name,
                                 assignment_title=assignment_data.title,
                                 teacher_name=tutor_name,
                                 due_date=notification_due_date,
                                 assignment_link=assignment_link,
                             )
+
+                        await notification_service.create_notification(
+                            NotificationCreate(
+                                title="New assignment assigned",
+                                message=f"{assignment_data.title} was assigned by {tutor_name}",
+                                notification_type=NotificationType.SYSTEM,
+                                recipient_id=student_id,
+                                tutor_id=tutor_id,
+                                related_entity_id=assignment_id_str,
+                                related_entity_type="assignment",
+                                action_url="/dashboard/assignments",
+                            )
+                        )
+
+                        await activity_service.create_activity(
+                            activity_data=ActivityCreate(
+                                activity_type=ActivityType.ASSIGNMENT_STARTED,
+                                user_id=student_id,
+                                tutor_id=tutor_id,
+                                description=f"Assigned {assignment_data.title}",
+                                related_entity_id=assignment_id_str,
+                                related_entity_type="assignment",
+                                metadata={
+                                    "assignment_title": assignment_data.title,
+                                    "student_name": student_name,
+                                    "assigned_by": tutor_name,
+                                },
+                            ),
+                            user_id=student_id,
+                            tutor_id=tutor_id,
+                        )
                     except Exception as e:
                         logger.warning(
                             "Failed to send assignment notification",

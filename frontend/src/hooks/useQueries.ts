@@ -199,8 +199,9 @@ export function useNotifications(
       if (response.error) throw new Error(response.error)
       return response.data as PaginatedResponse<any>
     },
-    // Poll for new notifications every 60 seconds
-    refetchInterval: 60000, // 1 minute
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 20 * 1000,
   })
 }
 
@@ -217,8 +218,9 @@ export function useUnreadNotificationCount() {
       if (response.error) throw new Error(response.error)
       return response.data
     },
-    // Refetch more frequently for notification count
-    refetchInterval: 30000, // 30 seconds
+    staleTime: 10 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15 * 1000,
   })
 }
 
@@ -239,6 +241,27 @@ export function useMarkNotificationRead() {
       // Invalidate and refetch notifications
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
       queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
+    },
+  })
+}
+
+/**
+ * Hook to mark all notifications as read
+ */
+export function useMarkAllNotificationsRead() {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await client.put('/notifications/mark-all-read', {})
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] })
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
+      queryClient.invalidateQueries({ queryKey: ['announcements'] })
     },
   })
 }
@@ -307,7 +330,9 @@ export function useRecentActivity(limit: number = 10) {
         created_at: string
       }>
     },
-    staleTime: 1 * 60 * 1000, // 1 minute - activity updates more frequently
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 20 * 1000,
   })
 }
 
@@ -627,11 +652,13 @@ export function useAnnouncements() {
   return useQuery({
     queryKey: ['announcements'],
     queryFn: async () => {
-      // Use notifications endpoint as announcements
       const response = await client.get('/notifications?per_page=10')
       if (response.error) throw new Error(response.error)
       return response.data?.items || response.data || []
     },
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 20 * 1000,
   })
 }
 
@@ -706,8 +733,9 @@ export function useMyActivities(limit: number = 20) {
       if (response.error) throw new Error(response.error)
       return Array.isArray(response.data) ? response.data : []
     },
-    staleTime: 60 * 1000,
+    staleTime: 20 * 1000,
     refetchOnWindowFocus: true,
+    refetchInterval: 20 * 1000,
   })
 }
 

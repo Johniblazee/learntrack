@@ -34,12 +34,88 @@ from app.models.progress import (
     StudentPerformanceData,
     WeeklyProgressData,
 )
+from app.models.activity import ActivityCreate, ActivityType
+from app.models.notification import NotificationCreate, NotificationType
 from app.services.progress_service import ProgressService
+from app.services.activity_service import ActivityService
+from app.services.notification_service import NotificationService
 from app.core.utils import to_object_id
 from app.core.exceptions import NotFoundError
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+async def _record_activity_event(
+    database: AsyncIOMotorDatabase,
+    *,
+    activity_type: ActivityType,
+    user_id: str,
+    tutor_id: str,
+    description: str,
+    related_entity_id: Optional[str] = None,
+    related_entity_type: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    try:
+        activity_service = ActivityService(database)
+        await activity_service.create_activity(
+            activity_data=ActivityCreate(
+                activity_type=activity_type,
+                user_id=user_id,
+                tutor_id=tutor_id,
+                description=description,
+                related_entity_id=related_entity_id,
+                related_entity_type=related_entity_type,
+                metadata=metadata or {},
+            ),
+            user_id=user_id,
+            tutor_id=tutor_id,
+        )
+    except Exception as event_error:
+        logger.warning(
+            "Failed to record activity event",
+            activity_type=activity_type.value,
+            user_id=user_id,
+            tutor_id=tutor_id,
+            error=str(event_error),
+        )
+
+
+async def _create_notification_event(
+    database: AsyncIOMotorDatabase,
+    *,
+    recipient_id: str,
+    tutor_id: str,
+    title: str,
+    message: str,
+    notification_type: NotificationType,
+    related_entity_id: Optional[str] = None,
+    related_entity_type: Optional[str] = None,
+    action_url: Optional[str] = None,
+) -> None:
+    try:
+        notification_service = NotificationService(database)
+        await notification_service.create_notification(
+            NotificationCreate(
+                title=title,
+                message=message,
+                notification_type=notification_type,
+                recipient_id=recipient_id,
+                tutor_id=tutor_id,
+                related_entity_id=related_entity_id,
+                related_entity_type=related_entity_type,
+                action_url=action_url,
+            )
+        )
+    except Exception as event_error:
+        logger.warning(
+            "Failed to create notification event",
+            recipient_id=recipient_id,
+            tutor_id=tutor_id,
+            notification_type=notification_type.value,
+            error=str(event_error),
+        )
 
 
 @router.get("/student", response_model=ProgressAnalytics)
@@ -677,6 +753,42 @@ async def submit_answer(
     updated_progress = await progress_service.update_progress(
         str(progress.id), progress_update
     )
+
+    if submission.submit_assignment:
+        assignment_title = str(assignment.get("title") or "Assignment")
+        tutor_id = str(
+            assignment.get("tutor_id") or current_user.tutor_id or current_user.clerk_id
+        )
+        student_name = current_user.name or "A student"
+
+        await _record_activity_event(
+            database,
+            activity_type=ActivityType.ASSIGNMENT_SUBMITTED,
+            user_id=current_user.clerk_id,
+            tutor_id=tutor_id,
+            description=f"Submitted {assignment_title}",
+            related_entity_id=assignment_id,
+            related_entity_type="assignment",
+            metadata={
+                "assignment_title": assignment_title,
+                "student_name": student_name,
+                "score": score,
+            },
+        )
+
+        if tutor_id != current_user.clerk_id:
+            await _create_notification_event(
+                database,
+                recipient_id=tutor_id,
+                tutor_id=tutor_id,
+                title="Assignment submitted",
+                message=f"{student_name} submitted {assignment_title}",
+                notification_type=NotificationType.ASSIGNMENT_SUBMITTED,
+                related_entity_id=assignment_id,
+                related_entity_type="assignment",
+                action_url="/dashboard/assignments/grading",
+            )
+
     return updated_progress
 
 
@@ -834,7 +946,60 @@ async def grade_submission(
         graded_at=datetime.now(timezone.utc),
         graded_by=current_user.clerk_id,
     )
-    return await progress_service.update_progress(progress_id, update)
+    updated_progress = await progress_service.update_progress(progress_id, update)
+
+    assignment_id = str(existing.get("assignment_id") or "")
+    student_id = str(existing.get("student_id") or "")
+    assignment_title = "Assignment"
+    if assignment_id:
+        try:
+            assignment_doc = await database.assignments.find_one(
+                {"_id": to_object_id(assignment_id)},
+                {"title": 1},
+            )
+            if assignment_doc and assignment_doc.get("title"):
+                assignment_title = str(assignment_doc.get("title"))
+        except Exception as lookup_error:
+            logger.warning(
+                "Failed to load assignment title for grading event",
+                assignment_id=assignment_id,
+                error=str(lookup_error),
+            )
+
+    if student_id:
+        await _record_activity_event(
+            database,
+            activity_type=ActivityType.ASSIGNMENT_COMPLETED,
+            user_id=student_id,
+            tutor_id=current_user.clerk_id,
+            description=f"{assignment_title} was graded",
+            related_entity_id=assignment_id or None,
+            related_entity_type="assignment",
+            metadata={
+                "assignment_title": assignment_title,
+                "score": grade_data.score,
+                "graded_by": current_user.clerk_id,
+            },
+        )
+
+        score_label = (
+            f"{grade_data.score:.0f}%"
+            if isinstance(grade_data.score, (float, int))
+            else "a new score"
+        )
+        await _create_notification_event(
+            database,
+            recipient_id=student_id,
+            tutor_id=current_user.clerk_id,
+            title="Assignment graded",
+            message=f"{assignment_title} was graded with {score_label}",
+            notification_type=NotificationType.ASSIGNMENT_GRADED,
+            related_entity_id=assignment_id or None,
+            related_entity_type="assignment",
+            action_url="/dashboard/grades",
+        )
+
+    return updated_progress
 
 
 @router.get("/subject/{subject_id}/analytics", response_model=Dict[str, Any])

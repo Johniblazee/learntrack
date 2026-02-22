@@ -1,4 +1,6 @@
-import { Bell, LogOut, Moon, Settings, Sun } from 'lucide-react'
+import { Bell, CheckCheck, Loader2, LogOut, Moon, Settings, Sun } from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
+import { useNavigate } from 'react-router-dom'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +15,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useNotifications, useUnreadNotificationCount } from '@/hooks/useQueries'
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+  useUnreadNotificationCount,
+} from '@/hooks/useQueries'
+import { cn } from '@/lib/utils'
 
 interface DashboardHeaderActionsProps {
   displayName: string
@@ -35,8 +43,11 @@ export function DashboardHeaderActions({
   onSignOut,
 }: DashboardHeaderActionsProps) {
   const { theme, toggleTheme } = useTheme()
-  const { data: notificationResponse } = useNotifications(1, 5)
+  const navigate = useNavigate()
+  const { data: notificationResponse } = useNotifications(1, 8)
   const { data: unreadResponse } = useUnreadNotificationCount()
+  const markNotificationRead = useMarkNotificationRead()
+  const markAllNotificationsRead = useMarkAllNotificationsRead()
 
   const notifications = Array.isArray(notificationResponse?.items)
     ? notificationResponse.items
@@ -44,9 +55,90 @@ export function DashboardHeaderActions({
   const unreadCount =
     typeof unreadResponse?.unread_count === 'number' ? unreadResponse.unread_count : 0
 
+  const mapTypeToTitle = (notificationType: string): string => {
+    const labels: Record<string, string> = {
+      assignment_submitted: 'Assignment submitted',
+      assignment_graded: 'Assignment graded',
+      question_approved: 'Question approved',
+      question_rejected: 'Question rejected',
+      student_joined: 'Student joined',
+      parent_joined: 'Parent joined',
+      message_received: 'New message',
+      assignment_due_soon: 'Assignment due soon',
+      assignment_overdue: 'Assignment overdue',
+      invitation_accepted: 'Invitation accepted',
+      system: 'System update',
+    }
+
+    return labels[notificationType] || 'Notification'
+  }
+
+  const resolveNotificationTitle = (notification: any): string => {
+    if (typeof notification?.title === 'string' && notification.title.trim()) {
+      return notification.title.trim()
+    }
+
+    const type =
+      typeof notification?.notification_type === 'string'
+        ? notification.notification_type
+        : 'system'
+    return mapTypeToTitle(type)
+  }
+
+  const resolveNotificationMessage = (notification: any): string => {
+    if (typeof notification?.message === 'string' && notification.message.trim()) {
+      return notification.message.trim()
+    }
+    return 'No details available.'
+  }
+
+  const resolveNotificationTime = (notification: any): string => {
+    const raw = notification?.created_at
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return 'just now'
+    }
+
+    const parsed = new Date(raw)
+    if (Number.isNaN(parsed.getTime())) {
+      return 'just now'
+    }
+
+    return formatDistanceToNow(parsed, { addSuffix: true })
+  }
+
+  const getNotificationId = (notification: any): string | null => {
+    const raw = notification?.id ?? notification?._id
+    return typeof raw === 'string' && raw.trim() ? raw : null
+  }
+
   const handleSignOutClick = () => {
     void onSignOut()
   }
+
+  const handleMarkAllRead = () => {
+    if (unreadCount <= 0 || markAllNotificationsRead.isPending) {
+      return
+    }
+
+    markAllNotificationsRead.mutate()
+  }
+
+  const handleNotificationSelect = (notification: any) => {
+    const notificationId = getNotificationId(notification)
+    const isRead = Boolean(notification?.is_read)
+
+    if (notificationId && !isRead && !markNotificationRead.isPending) {
+      markNotificationRead.mutate(notificationId)
+    }
+
+    const actionUrl =
+      typeof notification?.action_url === 'string' ? notification.action_url.trim() : ''
+    if (actionUrl.startsWith('/')) {
+      navigate(actionUrl)
+    }
+  }
+
+  const unreadBadge = unreadCount > 99 ? '99+' : String(unreadCount)
 
   return (
     <div className="flex items-center gap-1.5">
@@ -59,7 +151,7 @@ export function DashboardHeaderActions({
                 variant="destructive"
                 className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px]"
               >
-                {unreadCount}
+                {unreadBadge}
               </Badge>
             )}
             <span className="sr-only">Notifications</span>
@@ -67,8 +159,25 @@ export function DashboardHeaderActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-80 rounded-lg">
           <DropdownMenuLabel className="flex items-center justify-between">
-            <span>Notifications</span>
-            <span className="text-xs text-muted-foreground">{unreadCount} unread</span>
+            <span className="text-sm">Notifications</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">{unreadCount} unread</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={handleMarkAllRead}
+                disabled={unreadCount <= 0 || markAllNotificationsRead.isPending}
+              >
+                {markAllNotificationsRead.isPending ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <CheckCheck className="mr-1 h-3 w-3" />
+                )}
+                Mark all read
+              </Button>
+            </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
@@ -77,18 +186,36 @@ export function DashboardHeaderActions({
                 <span className="text-sm text-muted-foreground">No notifications</span>
               </DropdownMenuItem>
             ) : (
-              notifications.slice(0, 4).map((notification: any, index: number) => (
+              notifications.slice(0, 6).map((notification: any, index: number) => {
+                const notificationId = getNotificationId(notification)
+                const isRead = Boolean(notification?.is_read)
+
+                return (
                 <DropdownMenuItem
-                  key={String(notification?.id ?? notification?._id ?? `notification-${index}`)}
+                  key={String(notificationId ?? `notification-${index}`)}
+                  onSelect={() => handleNotificationSelect(notification)}
+                  className="items-start gap-2 py-2"
                 >
+                  <span
+                    className={cn(
+                      'mt-1 h-2 w-2 rounded-full',
+                      isRead ? 'bg-transparent' : 'bg-primary'
+                    )}
+                  />
                   <div className="flex flex-col gap-1">
-                    <span className="font-medium">{notification?.title || 'Notification'}</span>
+                    <span className={cn('text-sm', !isRead && 'font-semibold')}>
+                      {resolveNotificationTitle(notification)}
+                    </span>
                     <span className="line-clamp-2 text-xs text-muted-foreground">
-                      {notification?.message || 'No details provided'}
+                      {resolveNotificationMessage(notification)}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      {resolveNotificationTime(notification)}
                     </span>
                   </div>
                 </DropdownMenuItem>
-              ))
+                )
+              })
             )}
           </DropdownMenuGroup>
         </DropdownMenuContent>

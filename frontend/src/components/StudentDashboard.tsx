@@ -54,6 +54,8 @@ import { toast } from "@/contexts/ToastContext"
 import { useUserContext } from "@/contexts/UserContext"
 import {
   useAnnouncements,
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
   useMyActivities,
   useMyAssignments,
   useStudentDashboardStats,
@@ -365,6 +367,27 @@ function readableActivityType(activityType: string): string {
     .join(" ")
 }
 
+function readableNotificationType(notificationType: string | null | undefined): string {
+  const normalized = String(notificationType || "").trim().toLowerCase()
+  if (!normalized) return "Announcement"
+
+  const labels: Record<string, string> = {
+    assignment_submitted: "Assignment submitted",
+    assignment_graded: "Assignment graded",
+    question_approved: "Question approved",
+    question_rejected: "Question rejected",
+    student_joined: "Student joined",
+    parent_joined: "Parent joined",
+    message_received: "New message",
+    assignment_due_soon: "Assignment due soon",
+    assignment_overdue: "Assignment overdue",
+    invitation_accepted: "Invitation accepted",
+    system: "System update",
+  }
+
+  return labels[normalized] || readableActivityType(normalized)
+}
+
 function resolveMaterialUrl(fileUrl: string): string {
   if (/^https?:\/\//i.test(fileUrl)) {
     return fileUrl
@@ -405,6 +428,8 @@ export default function StudentDashboard() {
   const { data: activityFeed = [], isLoading: activitiesLoading } = useMyActivities(20)
   const { data: materials = [], isLoading: materialsLoading } = useStudentMaterials()
   const { data: userSettings, isLoading: settingsLoading } = useUserSettings()
+  const markAnnouncementRead = useMarkNotificationRead()
+  const markAllAnnouncementsRead = useMarkAllNotificationsRead()
 
   const actorName = user?.fullName || user?.firstName || "Student"
   const actorEmail = user?.primaryEmailAddress?.emailAddress || ""
@@ -578,12 +603,45 @@ export default function StudentDashboard() {
 
     return announcements.slice(0, 5).map((item: any, index: number) => ({
       id: String(item?.id ?? item?._id ?? `announcement-${index}`),
-      title: String(item?.title ?? "Announcement"),
+      notificationId:
+        typeof (item?.id ?? item?._id) === "string" ? String(item.id ?? item._id) : null,
+      title:
+        typeof item?.title === "string" && item.title.trim()
+          ? String(item.title)
+          : readableNotificationType(item?.notification_type),
       message: String(item?.message ?? "No details provided."),
       stamp: formatTimestamp(item?.created_at),
       isRead: Boolean(item?.is_read),
+      actionUrl: typeof item?.action_url === "string" ? item.action_url : null,
     }))
   }, [announcements])
+
+  const unreadAnnouncementCount = useMemo(
+    () => announcementItems.filter((item) => !item.isRead).length,
+    [announcementItems]
+  )
+
+  const handleAnnouncementSelect = (item: {
+    notificationId: string | null
+    isRead: boolean
+    actionUrl: string | null
+  }) => {
+    if (item.notificationId && !item.isRead && !markAnnouncementRead.isPending) {
+      markAnnouncementRead.mutate(item.notificationId)
+    }
+
+    if (item.actionUrl && item.actionUrl.startsWith("/")) {
+      navigate(item.actionUrl)
+    }
+  }
+
+  const handleMarkAllAnnouncementsRead = () => {
+    if (unreadAnnouncementCount <= 0 || markAllAnnouncementsRead.isPending) {
+      return
+    }
+
+    markAllAnnouncementsRead.mutate()
+  }
 
   const courseSummaries = useMemo<CourseSummary[]>(() => {
     const subjectStats = new Map<string, CourseSummary>()
@@ -1011,7 +1069,27 @@ export default function StudentDashboard() {
             </section>
 
             <section>
-              <h2 className="mb-4 text-xl font-semibold">Announcements</h2>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold">Announcements</h2>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={
+                    unreadAnnouncementCount <= 0 ||
+                    announcementsLoading ||
+                    markAllAnnouncementsRead.isPending
+                  }
+                  onClick={handleMarkAllAnnouncementsRead}
+                >
+                  {markAllAnnouncementsRead.isPending
+                    ? "Marking..."
+                    : `Mark all read${
+                        unreadAnnouncementCount > 0 ? ` (${unreadAnnouncementCount})` : ""
+                      }`}
+                </Button>
+              </div>
               <Card className="border-0 bg-card shadow-sm">
                 <CardContent className="space-y-4 p-5">
                   {announcementsLoading ? (
@@ -1025,13 +1103,23 @@ export default function StudentDashboard() {
                     <p className="text-sm text-muted-foreground">No announcements at the moment.</p>
                   ) : (
                     announcementItems.map((item) => (
-                      <div key={item.id} className="rounded-lg border border-border bg-muted/35 p-3">
-                        <p className="text-sm font-semibold">{item.title}</p>
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={cn(
+                          "w-full rounded-lg border border-border bg-muted/35 p-3 text-left transition-colors hover:bg-muted/60",
+                          !item.isRead && "border-primary/40 bg-primary/5"
+                        )}
+                        onClick={() => handleAnnouncementSelect(item)}
+                        disabled={markAnnouncementRead.isPending}
+                      >
+                        <p className={cn("text-sm", !item.isRead && "font-semibold")}>{item.title}</p>
                         <p className="mt-1 text-xs text-muted-foreground">{item.message}</p>
                         <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {item.stamp}{item.isRead ? "" : " • Unread"}
+                          {item.stamp}
+                          {item.isRead ? "" : " • Unread"}
                         </p>
-                      </div>
+                      </button>
                     ))
                   )}
                 </CardContent>
