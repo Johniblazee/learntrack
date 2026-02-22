@@ -1122,6 +1122,7 @@ dependencies = [
     { name = "motor" },
     { name = "numpy" },
     { name = "openai" },
+    { name = "plunk" },
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
@@ -1180,6 +1181,7 @@ requires-dist = [
     { name = "motor", specifier = ">=3.3.0,<4.0.0" },
     { name = "numpy", specifier = ">=1.24.0,<2.0.0" },
     { name = "openai", specifier = ">=1.12.0,<2.0.0" },
+    { name = "plunk", specifier = ">=0.0.1,<1.0.0" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.5.0,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.1.0,<3.0.0" },
     { name = "pyjwt", specifier = ">=2.8.0,<3.0.0" },
@@ -1663,6 +1665,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "plunk"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/8e/c1df4d2cc939f0feb1bcd7b8b53bb9ffa36081ee403f1ac83e219b0d2507/plunk-0.3.1.tar.gz", hash = "sha256:6d911f52b1671447cba9338f7935fe9af08feab6637ca7d2c80a97cdfa0a2897", size = 51824, upload-time = "2025-11-14T02:22:56.115Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/04/716416f0d01fec030564eb7d7d596b1e32e3da68f64801cec01f2b803147/plunk-0.3.1-py3-none-any.whl", hash = "sha256:100068699c15e41789d86ff5b5c74c3f25a13d4932e9521a73719bd35306e7a8", size = 49253, upload-time = "2025-11-14T02:22:55.042Z" },
 ]
 
 [[package]]

@@ -1,25 +1,124 @@
-"""
-Email service using Plunk for sending transactional emails
-"""
+"""Email service using Plunk for sending transactional emails."""
 
-from typing import Optional, Dict, Any, List
-import os
+from dataclasses import dataclass
 from datetime import datetime
+import importlib
+import os
+from typing import Optional
 
-# Initialize Plunk client
-PLUNK_API_KEY = os.getenv("PLUNK_API_KEY", "")
+import structlog
 
-# Try to import Plunk, but don't fail if not available
+logger = structlog.get_logger()
+
+PLUNK_API_KEY = os.getenv("PLUNK_API_KEY", "").strip()
+
 try:
-    import plunk
-
-    plunk_client = plunk.Plunk(PLUNK_API_KEY) if PLUNK_API_KEY else None
+    plunk = importlib.import_module("plunk")
 except (ImportError, AttributeError):
-    plunk_client = None
+    plunk = None
+
+
+@dataclass
+class EmailDeliveryResult:
+    """Normalized provider response for delivery attempts."""
+
+    delivered: bool
+    provider: str
+    provider_message_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+def _extract_provider_message_id(response: object) -> Optional[str]:
+    """Best-effort extraction of provider message id from unknown response shapes."""
+    if response is None:
+        return None
+
+    if isinstance(response, dict):
+        candidate = (
+            response.get("id")
+            or response.get("message_id")
+            or response.get("messageId")
+            or response.get("request_id")
+        )
+        return str(candidate) if candidate else None
+
+    for attr in ("id", "message_id", "messageId", "request_id"):
+        candidate = getattr(response, attr, None)
+        if candidate:
+            return str(candidate)
+
+    return None
+
+
+plunk_client = plunk.Plunk(PLUNK_API_KEY) if (plunk and PLUNK_API_KEY) else None
 
 
 class EmailService:
     """Service for sending emails via Plunk"""
+
+    @staticmethod
+    def _send_with_plunk(
+        to_email: str,
+        subject: str,
+        html_body: str,
+        *,
+        category: str,
+    ) -> EmailDeliveryResult:
+        """Send an email through Plunk and normalize result semantics."""
+        if not to_email:
+            return EmailDeliveryResult(
+                delivered=False,
+                provider="plunk",
+                error="Recipient email is required",
+            )
+
+        if not plunk_client:
+            logger.error(
+                "Email provider unavailable",
+                provider="plunk",
+                category=category,
+                recipient=to_email,
+                plunk_configured=bool(PLUNK_API_KEY),
+            )
+            return EmailDeliveryResult(
+                delivered=False,
+                provider="plunk",
+                error="Plunk is not configured",
+            )
+
+        try:
+            response = plunk_client.emails.send(
+                to=to_email,
+                subject=subject,
+                body=html_body,
+            )
+            provider_message_id = _extract_provider_message_id(response)
+            logger.info(
+                "Email sent",
+                provider="plunk",
+                category=category,
+                recipient=to_email,
+                provider_message_id=provider_message_id,
+            )
+            return EmailDeliveryResult(
+                delivered=True,
+                provider="plunk",
+                provider_message_id=provider_message_id,
+            )
+        except Exception as exc:
+            error_message = str(exc)
+            logger.error(
+                "Email send failed",
+                provider="plunk",
+                category=category,
+                recipient=to_email,
+                error=error_message,
+            )
+            return EmailDeliveryResult(
+                delivered=False,
+                provider="plunk",
+                error=error_message,
+            )
 
     @staticmethod
     def send_invitation_email(
@@ -38,10 +137,6 @@ class EmailService:
         Returns:
             bool: True if email sent successfully
         """
-        if not plunk_client:
-            print(f"[EMAIL] Would send invitation to {to_email} (Plunk not configured)")
-            return False
-
         try:
             subject = f"You're invited to join LearnTrack by {from_name}"
 
@@ -86,13 +181,18 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
-
-            print(f"[EMAIL] Invitation sent to {to_email}")
-            return True
+            result = EmailService._send_with_plunk(
+                to_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                category="invitation",
+            )
+            return result.delivered
 
         except Exception as e:
-            print(f"[EMAIL] Failed to send invitation to {to_email}: {str(e)}")
+            logger.error(
+                "Failed to build invitation email", recipient=to_email, error=str(e)
+            )
             return False
 
     @staticmethod
@@ -111,12 +211,6 @@ class EmailService:
         Returns:
             bool: True if email sent successfully
         """
-        if not plunk_client:
-            print(
-                f"[EMAIL] Would send welcome email to {to_email} (Plunk not configured)"
-            )
-            return False
-
         try:
             subject = "Welcome to LearnTrack! 🎉"
 
@@ -207,13 +301,18 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
-
-            print(f"[EMAIL] Welcome email sent to {to_email}")
-            return True
+            result = EmailService._send_with_plunk(
+                to_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                category="welcome",
+            )
+            return result.delivered
 
         except Exception as e:
-            print(f"[EMAIL] Failed to send welcome email to {to_email}: {str(e)}")
+            logger.error(
+                "Failed to build welcome email", recipient=to_email, error=str(e)
+            )
             return False
 
     @staticmethod
@@ -239,12 +338,6 @@ class EmailService:
         Returns:
             bool: True if email sent successfully
         """
-        if not plunk_client:
-            print(
-                f"[EMAIL] Would send assignment notification to {to_email} (Plunk not configured)"
-            )
-            return False
-
         try:
             subject = f"New Assignment: {assignment_title}"
             due_date_str = due_date.strftime("%B %d, %Y at %I:%M %p")
@@ -287,14 +380,19 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
-
-            print(f"[EMAIL] Assignment notification sent to {to_email}")
-            return True
+            result = EmailService._send_with_plunk(
+                to_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                category="assignment_notification",
+            )
+            return result.delivered
 
         except Exception as e:
-            print(
-                f"[EMAIL] Failed to send assignment notification to {to_email}: {str(e)}"
+            logger.error(
+                "Failed to build assignment notification email",
+                recipient=to_email,
+                error=str(e),
             )
             return False
 
@@ -308,12 +406,6 @@ class EmailService:
         hours_remaining: int,
     ) -> bool:
         """Send reminder about upcoming assignment deadline"""
-        if not plunk_client:
-            print(
-                f"[EMAIL] Would send deadline reminder to {to_email} (Plunk not configured)"
-            )
-            return False
-
         try:
             subject = f"Reminder: {assignment_title} due soon"
             due_date_str = due_date.strftime("%B %d, %Y at %I:%M %p")
@@ -364,13 +456,20 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
-
-            print(f"[EMAIL] Deadline reminder sent to {to_email}")
-            return True
+            result = EmailService._send_with_plunk(
+                to_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                category="deadline_reminder",
+            )
+            return result.delivered
 
         except Exception as e:
-            print(f"[EMAIL] Failed to send deadline reminder to {to_email}: {str(e)}")
+            logger.error(
+                "Failed to build deadline reminder email",
+                recipient=to_email,
+                error=str(e),
+            )
             return False
 
     @staticmethod
@@ -380,17 +479,8 @@ class EmailService:
         from_name: str,
         subject: str,
         content: str,
-    ) -> bool:
+    ) -> EmailDeliveryResult:
         """Send a direct tutor message over email and report delivery status."""
-        if not to_email:
-            return False
-
-        if not plunk_client:
-            print(
-                f"[EMAIL] Simulated direct message to {to_email} (Plunk not configured)"
-            )
-            return True
-
         try:
             safe_content = (content or "").replace("\n", "<br>")
             html_body = f"""
@@ -418,12 +508,23 @@ class EmailService:
             </html>
             """
 
-            plunk_client.emails.send(to=to_email, subject=subject, body=html_body)
-            print(f"[EMAIL] Direct message sent to {to_email}")
-            return True
+            return EmailService._send_with_plunk(
+                to_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                category="direct_message",
+            )
         except Exception as e:
-            print(f"[EMAIL] Failed to send direct message to {to_email}: {str(e)}")
-            return False
+            logger.error(
+                "Failed to build direct message email",
+                recipient=to_email,
+                error=str(e),
+            )
+            return EmailDeliveryResult(
+                delivered=False,
+                provider="plunk",
+                error=str(e),
+            )
 
 
 # Convenience functions

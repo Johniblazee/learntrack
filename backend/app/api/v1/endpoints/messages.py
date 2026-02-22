@@ -122,12 +122,33 @@ async def send_email_message(
         if not recipient or not recipient.get("email"):
             raise ValidationError("Recipient email not found")
 
-        delivered = EmailService.send_direct_message_email(
+        delivery_result = EmailService.send_direct_message_email(
             to_email=str(recipient.get("email")),
             to_name=str(recipient.get("name") or "Learner"),
             from_name=_sender_name(current_user),
             subject=email_data.subject,
             content=email_data.content,
+        )
+
+        if not delivery_result.delivered:
+            logger.warning(
+                "Email provider delivery failed",
+                recipient_id=email_data.recipient_id,
+                recipient_email=str(recipient.get("email") or ""),
+                provider=delivery_result.provider,
+                error=delivery_result.error,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=delivery_result.error or "Failed to deliver email via Plunk",
+            )
+
+        logger.info(
+            "Email provider delivery succeeded",
+            recipient_id=email_data.recipient_id,
+            recipient_email=str(recipient.get("email") or ""),
+            provider=delivery_result.provider,
+            provider_message_id=delivery_result.provider_message_id,
         )
 
         message_service = MessageService(db)
@@ -152,13 +173,9 @@ async def send_email_message(
             delivery_method=MessageDeliveryMethod.EMAIL.value,
         )
 
-        if not delivered:
-            logger.warning(
-                "Email provider delivery failed; message persisted",
-                recipient_id=email_data.recipient_id,
-            )
-
         return message
+    except HTTPException:
+        raise
     except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValidationError as e:
