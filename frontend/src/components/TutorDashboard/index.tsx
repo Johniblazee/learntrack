@@ -18,7 +18,6 @@ import ActiveAssignmentsView from "./views/ActiveAssignmentsView"
 import CreateAssignmentView from "./views/CreateAssignmentView"
 import AssignmentTemplatesView from "./views/AssignmentTemplatesView"
 import GradingView from "./views/GradingView"
-import MessagingView from "./views/MessagingView"
 import ConversationsView from "./views/ConversationsView"
 import StudentDetailsPage from "@/pages/StudentDetailsPage"
 import { useDashboardStats } from "@/hooks/useQueries"
@@ -97,7 +96,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       'all-students': '/dashboard/students',
       'invitations': '/dashboard/invitations',
       'groups': '/dashboard/groups',
-      'relationships': '/dashboard/relationships',
       'ai-generator': '/dashboard/content/generator',
       'review-questions': '/dashboard/content/review',
       'question-bank': '/dashboard/content/bank',
@@ -143,7 +141,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       "all-students": "All Students",
       "invitations": "Invitations",
       "groups": "Groups",
-      "relationships": "Relationships",
       "ai-generator": "Question Generator",
       "review-questions": "Review Questions",
       "question-bank": "Question Bank",
@@ -241,8 +238,8 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
             <Route path="assignments/grading" element={<GradingView />} />
 
             {/* Messages routes */}
-            <Route path="messages/chats" element={<ConversationsView />} />
-            <Route path="messages/emails" element={<MessagingView type="emails" />} />
+            <Route path="messages/chats" element={<ConversationsView routeMode="chats" />} />
+            <Route path="messages/emails" element={<ConversationsView routeMode="emails" />} />
 
             {/* 404 Catch-all for undefined dashboard routes */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

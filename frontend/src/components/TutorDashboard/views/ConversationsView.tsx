@@ -5,13 +5,12 @@
 import { useState, useEffect, useMemo, useRef } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   Search,
-  Plus,
-  Smile,
   Mail,
   MessageCircle,
 } from "lucide-react"
@@ -23,7 +22,9 @@ import { useVisibility } from "@/hooks/useVisibility"
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+interface ConversationsViewProps {
+  routeMode?: 'chats' | 'emails'
+}
 
 interface Message {
   _id: string
@@ -49,7 +50,7 @@ interface Conversation {
   unread_count: Record<string, number>
 }
 
-export default function ConversationsView() {
+export default function ConversationsView({ routeMode = 'chats' }: ConversationsViewProps) {
   const { getToken, userId } = useAuth()
   const client = useApiClient()
   const { visibleUserIds, loading: visibilityLoading } = useVisibility()
@@ -58,7 +59,9 @@ export default function ConversationsView() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState("")
-  const [deliveryMethod, setDeliveryMethod] = useState<'chat' | 'email'>('chat')
+  const [deliveryMethod, setDeliveryMethod] = useState<'chat' | 'email'>(
+    routeMode === 'emails' ? 'email' : 'chat'
+  )
   const [emailSubject, setEmailSubject] = useState("")
   const [sendingMessage, setSendingMessage] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
@@ -139,6 +142,11 @@ export default function ConversationsView() {
     setIsTyping(false)
   }, [deliveryMethod, selectedConversation])
 
+  useEffect(() => {
+    setDeliveryMethod(routeMode === 'emails' ? 'email' : 'chat')
+    setEmailSubject("")
+  }, [routeMode])
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
@@ -146,13 +154,19 @@ export default function ConversationsView() {
   const loadConversations = async () => {
     try {
       setLoading(true)
-      const token = await getToken()
-      const response = await fetch(`${API_BASE}/conversations`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await response.json()
+      const response = await client.get('/conversations')
+      if (response.error) {
+        throw new Error(response.error)
+      }
 
-      setConversations(data.conversations || [])
+      const payload = response.data as any
+      const nextConversations = Array.isArray(payload?.conversations)
+        ? payload.conversations
+        : Array.isArray(payload)
+          ? payload
+          : []
+
+      setConversations(nextConversations)
     } catch (error) {
       console.error("Failed to load conversations:", error)
     } finally {
@@ -190,12 +204,14 @@ export default function ConversationsView() {
   const loadMessages = async (conversationId: string) => {
     try {
       setMessagesLoading(true)
-      const token = await getToken()
-      const response = await fetch(
-        `${API_BASE}/messages/conversation/${conversationId}?page=1&page_size=50`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const response = await client.get(
+        `/messages/conversation/${conversationId}?page=1&page_size=50`
       )
-      const data = await response.json()
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const data = response.data as any
       setMessages(data.messages || [])
       socketClient.joinConversation(conversationId)
       markConversationAsRead(conversationId)
@@ -208,11 +224,10 @@ export default function ConversationsView() {
 
   const markConversationAsRead = async (conversationId: string) => {
     try {
-      const token = await getToken()
-      await fetch(`${API_BASE}/conversations/${conversationId}/read`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      const response = await client.put(`/conversations/${conversationId}/read`, {})
+      if (response.error) {
+        throw new Error(response.error)
+      }
       loadConversations()
     } catch (error) {
       console.error("Failed to mark as read:", error)
@@ -227,7 +242,7 @@ export default function ConversationsView() {
       clearTimeout(typingTimeoutRef.current)
       typingTimeoutRef.current = null
     }
-    setDeliveryMethod('chat')
+    setDeliveryMethod(routeMode === 'emails' ? 'email' : 'chat')
     setEmailSubject("")
     setSelectedConversation(conversation)
     loadMessages(conversation._id)
@@ -382,8 +397,24 @@ export default function ConversationsView() {
 
   const filteredConversations = visibleConversations.filter((conv) => {
     const { name } = getOtherParticipant(conv)
-    return name.toLowerCase().includes(searchQuery.toLowerCase())
+    const haystack = `${name} ${conv.last_message || ''}`.toLowerCase()
+    return haystack.includes(searchQuery.toLowerCase())
   })
+
+  const viewTitle = routeMode === 'emails' ? 'Emails' : 'Conversations'
+  const composerLabel = routeMode === 'emails' ? 'Email composer' : 'Chat composer'
+  const emptyConversationLabel =
+    routeMode === 'emails' ? 'No email threads yet' : 'No conversations yet'
+  const listEmptyIcon = routeMode === 'emails' ? Mail : MessageCircle
+  const ListEmptyIcon = listEmptyIcon
+
+  const visibleMessages = useMemo(() => {
+    if (routeMode === 'emails') {
+      return messages.filter((message) => message.delivery_method === 'email')
+    }
+
+    return messages.filter((message) => message.delivery_method !== 'email')
+  }, [messages, routeMode])
 
   const isConversationsLoading = loading || visibilityLoading
 
@@ -394,11 +425,11 @@ export default function ConversationsView() {
       <div className="w-80 border-r border-border flex flex-col bg-card">
         {/* Header */}
         <div className="p-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground mb-4">Conversations</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-4">{viewTitle}</h2>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search conversations..."
+              placeholder={routeMode === 'emails' ? 'Search people or subjects...' : 'Search conversations...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9 h-10 bg-background border-border"
@@ -432,8 +463,8 @@ export default function ConversationsView() {
               </div>
             ) : filteredConversations.length === 0 ? (
               <div className="text-center py-8">
-                <MessageCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">No conversations yet</p>
+                <ListEmptyIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">{emptyConversationLabel}</p>
               </div>
             ) : (
               filteredConversations.map((conv) => {
@@ -488,7 +519,11 @@ export default function ConversationsView() {
                           "text-xs mt-1 truncate",
                           hasUnread ? "text-accent font-medium" : "text-muted-foreground"
                         )}>
-                          {conv.last_delivery_method === 'email' ? `Email: ${conv.last_message}` : conv.last_message}
+                          {conv.last_delivery_method === 'email'
+                            ? `Email: ${conv.last_message}`
+                            : routeMode === 'emails'
+                              ? `Chat: ${conv.last_message}`
+                              : conv.last_message}
                         </p>
                       )}
                     </div>
@@ -515,7 +550,9 @@ export default function ConversationsView() {
                 <p className="font-semibold text-foreground">
                   {getOtherParticipant(selectedConversation).name} - {getRoleLabel(getOtherParticipant(selectedConversation).role)}
                 </p>
-                <p className="text-xs text-green-500 font-medium">Online</p>
+                <p className="text-xs text-muted-foreground font-medium">
+                  {routeMode === 'emails' ? 'Email thread' : 'Live chat'}
+                </p>
               </div>
             </div>
 
@@ -564,8 +601,26 @@ export default function ConversationsView() {
                       </div>
                     </div>
                   </>
+                ) : visibleMessages.length === 0 ? (
+                  <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-card/40 p-6 text-center">
+                    <div>
+                      {routeMode === 'emails' ? (
+                        <Mail className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+                      ) : (
+                        <MessageCircle className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+                      )}
+                      <p className="text-sm font-medium text-foreground">
+                        {routeMode === 'emails' ? 'No emails yet in this thread' : 'No chat messages yet in this thread'}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {routeMode === 'emails'
+                          ? 'Use the composer below to send the first email.'
+                          : 'Send a message to start the conversation.'}
+                      </p>
+                    </div>
+                  </div>
                 ) : (
-                  messages.map((message) => {
+                  visibleMessages.map((message) => {
                     const isOwnMessage = message.sender_id === userId
 
                     return (
@@ -610,7 +665,7 @@ export default function ConversationsView() {
                     )
                   })
                 )}
-                {isTyping && deliveryMethod === 'chat' && (
+                {isTyping && routeMode === 'chats' && deliveryMethod === 'chat' && (
                   <div className="flex justify-start">
                     <div className="bg-muted rounded-2xl px-4 py-2.5 rounded-bl-md">
                       <p className="text-sm text-muted-foreground italic">Typing...</p>
@@ -625,29 +680,12 @@ export default function ConversationsView() {
             <div className="p-4 border-t border-border bg-card">
               <div className="max-w-3xl mx-auto space-y-2.5">
                 <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant={deliveryMethod === 'chat' ? 'default' : 'outline'}
-                    className="h-8 px-3 text-xs"
-                    onClick={() => setDeliveryMethod('chat')}
-                    disabled={sendingMessage}
-                  >
-                    <MessageCircle className="h-3.5 w-3.5 mr-1.5" />
-                    Chat
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={deliveryMethod === 'email' ? 'default' : 'outline'}
-                    className="h-8 px-3 text-xs"
-                    onClick={() => setDeliveryMethod('email')}
-                    disabled={sendingMessage}
-                  >
-                    <Mail className="h-3.5 w-3.5 mr-1.5" />
-                    Email
-                  </Button>
+                  <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+                    {composerLabel}
+                  </span>
                 </div>
 
-                {deliveryMethod === 'email' && (
+                {routeMode === 'emails' && (
                   <Input
                     placeholder="Email subject"
                     value={emailSubject}
@@ -658,44 +696,44 @@ export default function ConversationsView() {
                   />
                 )}
 
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground"
-                    disabled={sendingMessage}
-                  >
-                    <Plus className="h-5 w-5" />
-                  </Button>
-                  <div className="flex-1 relative">
-                    <Input
-                      placeholder={deliveryMethod === 'email' ? 'Type your email message...' : 'Type your message here...'}
-                      value={newMessage}
-                      onChange={handleTyping}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          void handleSendMessage()
-                        }
-                      }}
-                      className="h-11 pr-10 bg-background border-border rounded-full"
-                      disabled={sendingMessage}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
-                      disabled={sendingMessage}
-                    >
-                      <Smile className="h-5 w-5" />
-                    </Button>
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    {routeMode === 'emails' ? (
+                      <Textarea
+                        placeholder="Write your email message..."
+                        value={newMessage}
+                        onChange={(event) => setNewMessage(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                            event.preventDefault()
+                            void handleSendMessage()
+                          }
+                        }}
+                        className="min-h-[96px] bg-background border-border"
+                        disabled={sendingMessage}
+                      />
+                    ) : (
+                      <Input
+                        placeholder="Type your message here..."
+                        value={newMessage}
+                        onChange={handleTyping}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault()
+                            void handleSendMessage()
+                          }
+                        }}
+                        className="h-11 bg-background border-border rounded-full"
+                        disabled={sendingMessage}
+                      />
+                    )}
                   </div>
                   <Button
                     onClick={() => void handleSendMessage()}
                     disabled={
                       !newMessage.trim() ||
                       sendingMessage ||
-                      (deliveryMethod === 'email' && !emailSubject.trim())
+                      (routeMode === 'emails' && !emailSubject.trim())
                     }
                     className="h-10 px-6 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground"
                   >
@@ -704,9 +742,14 @@ export default function ConversationsView() {
                         <LoadingSpinner size="sm" className="mr-2 text-accent-foreground" />
                         Sending...
                       </>
-                    ) : deliveryMethod === 'email' ? 'Send Email' : 'Send'}
+                    ) : routeMode === 'emails' ? 'Send Email' : 'Send'}
                   </Button>
                 </div>
+                {routeMode === 'emails' && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Tip: use Ctrl+Enter (Cmd+Enter on Mac) to send email quickly.
+                  </p>
+                )}
               </div>
             </div>
           </>
@@ -714,10 +757,16 @@ export default function ConversationsView() {
           /* Empty State */
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <MessageCircle className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+              {routeMode === 'emails' ? (
+                <Mail className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+              ) : (
+                <MessageCircle className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+              )}
               <h3 className="text-lg font-semibold text-foreground mb-2">No conversation selected</h3>
               <p className="text-sm text-muted-foreground">
-                Select a conversation from the list to start chatting
+                {routeMode === 'emails'
+                  ? 'Select a conversation from the list to send an email thread message.'
+                  : 'Select a conversation from the list to start chatting.'}
               </p>
             </div>
           </div>
