@@ -15,6 +15,7 @@ from app.core.enhanced_auth import (
     require_admin_permission,
     ClerkUserContext,
 )
+from app.models.user import AdminPermission
 from app.models.audit_log import (
     AuditLog,
     AuditLogFilter,
@@ -50,14 +51,14 @@ async def get_activity_logs(
         30, ge=1, le=90, description="Number of days to look back (default: 30)"
     ),
     current_user: ClerkUserContext = Depends(
-        require_admin_permission("view_system_logs")
+        require_admin_permission(AdminPermission.VIEW_AUDIT_LOGS)
     ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Get paginated activity logs with optional filters.
 
-    - Requires 'view_system_logs' permission
+    - Requires 'view_audit_logs' permission
     - Data retention: 30 days (automatic cleanup)
     """
     try:
@@ -112,7 +113,7 @@ async def get_activity_logs(
 async def get_activity_summary(
     days: int = Query(7, ge=1, le=30, description="Number of days to summarize"),
     current_user: ClerkUserContext = Depends(
-        require_admin_permission("view_system_logs")
+        require_admin_permission(AdminPermission.VIEW_AUDIT_LOGS)
     ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
@@ -157,7 +158,7 @@ async def get_user_activity(
     ),
     days: int = Query(30, ge=1, le=90, description="Number of days to look back"),
     current_user: ClerkUserContext = Depends(
-        require_admin_permission("view_system_logs")
+        require_admin_permission(AdminPermission.VIEW_AUDIT_LOGS)
     ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):

@@ -121,13 +121,62 @@ function App() {
                   </AdminProtectedRoute>
                 }
               >
-                <Route index element={<AdminDashboardPage />} />
-                <Route path="tenants" element={<TenantsPage />} />
-                <Route path="tenants/:tenantId" element={<TenantDetailsPage />} />
-                <Route path="tenants/:tenantId/ai-config" element={<TenantAIConfigPage />} />
-                <Route path="users" element={<UsersPage />} />
-                <Route path="settings" element={<AdminSettingsPage />} />
-                <Route path="activity" element={<ActivityPage />} />
+                <Route
+                  index
+                  element={
+                    <AdminProtectedRoute requiredPermission="view_analytics">
+                      <AdminDashboardPage />
+                    </AdminProtectedRoute>
+                  }
+                />
+                <Route
+                  path="tenants"
+                  element={
+                    <AdminProtectedRoute requiredPermission="view_all_tenants">
+                      <TenantsPage />
+                    </AdminProtectedRoute>
+                  }
+                />
+                <Route
+                  path="tenants/:tenantId"
+                  element={
+                    <AdminProtectedRoute requiredPermission="view_all_tenants">
+                      <TenantDetailsPage />
+                    </AdminProtectedRoute>
+                  }
+                />
+                <Route
+                  path="tenants/:tenantId/ai-config"
+                  element={
+                    <AdminProtectedRoute requiredPermission="manage_ai_providers">
+                      <TenantAIConfigPage />
+                    </AdminProtectedRoute>
+                  }
+                />
+                <Route
+                  path="users"
+                  element={
+                    <AdminProtectedRoute requiredPermission="view_all_users">
+                      <UsersPage />
+                    </AdminProtectedRoute>
+                  }
+                />
+                <Route
+                  path="settings"
+                  element={
+                    <AdminProtectedRoute requiredPermission="manage_system_settings">
+                      <AdminSettingsPage />
+                    </AdminProtectedRoute>
+                  }
+                />
+                <Route
+                  path="activity"
+                  element={
+                    <AdminProtectedRoute requiredPermission="view_audit_logs">
+                      <ActivityPage />
+                    </AdminProtectedRoute>
+                  }
+                />
                 {/* 404 Catch-all for undefined admin routes */}
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

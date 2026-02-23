@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useAuth } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
 import { AdminMetrics } from '../../components/admin/AdminMetrics'
 import { Activity, AlertTriangle, DollarSign, RefreshCw, Server, Sparkles } from 'lucide-react'
-import { API_BASE_URL } from '@/lib/config'
+import { useApiClient } from '@/lib/api-client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -84,6 +83,24 @@ interface AdminUsageSummary {
   quota_health: QuotaHealth
 }
 
+interface AdminAuditLog {
+  id?: string
+  _id?: string
+  admin_email: string
+  action: string
+  target_type: string
+  target_id?: string
+  timestamp: string
+  details?: Record<string, unknown>
+}
+
+interface AuditLogListResponse {
+  logs: AdminAuditLog[]
+  total: number
+  page: number
+  per_page: number
+}
+
 const numberFormatter = new Intl.NumberFormat()
 const compactNumberFormatter = new Intl.NumberFormat(undefined, {
   notation: 'compact',
@@ -114,8 +131,14 @@ function formatDateTime(value?: string): string {
   return date.toLocaleString()
 }
 
+function formatAuditAction(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 export function AdminDashboardPage() {
-  const { getToken } = useAuth()
+  const client = useApiClient()
   const navigate = useNavigate()
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null)
   const [usageSummary, setUsageSummary] = useState<AdminUsageSummary | null>(null)
@@ -124,71 +147,70 @@ export function AdminDashboardPage() {
   const [isUsageLoading, setIsUsageLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [usageError, setUsageError] = useState<string | null>(null)
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([])
+  const [auditLoading, setAuditLoading] = useState(true)
+  const [auditError, setAuditError] = useState<string | null>(null)
 
   const fetchMetrics = useCallback(async () => {
     try {
       setIsLoading(true)
       setError(null)
-      const token = await getToken()
-
-      if (!token) {
-        throw new Error('Unable to get authentication token')
-      }
-      
-      const response = await fetch(`${API_BASE_URL}/admin/dashboard/metrics`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch metrics: ${response.status}`)
+      const response = await client.get<SystemMetrics>('/admin/dashboard/metrics')
+      if (response.error) {
+        throw new Error(response.error)
       }
 
-      const data = await response.json()
-      setMetrics(data)
+      setMetrics(response.data || null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setIsLoading(false)
     }
-  }, [getToken])
+  }, [client])
 
   const fetchUsageSummary = useCallback(async (days: number) => {
     try {
       setIsUsageLoading(true)
       setUsageError(null)
 
-      const token = await getToken()
-      if (!token) {
-        throw new Error('Unable to get authentication token')
+      const response = await client.get<AdminUsageSummary>(
+        `/cost-tracking/admin/usage-summary?days=${days}`
+      )
+
+      if (response.error) {
+        throw new Error(response.error)
       }
 
-      const response = await fetch(`${API_BASE_URL}/cost-tracking/admin/usage-summary?days=${days}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch usage summary: ${response.status}`)
-      }
-
-      const data = await response.json()
-      setUsageSummary(data)
+      setUsageSummary(response.data || null)
     } catch (err) {
       setUsageError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setIsUsageLoading(false)
     }
-  }, [getToken])
+  }, [client])
+
+  const fetchAuditLogs = useCallback(async () => {
+    try {
+      setAuditLoading(true)
+      setAuditError(null)
+
+      const response = await client.get<AuditLogListResponse>('/admin/dashboard/audit-logs?page=1&per_page=5')
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      setAuditLogs(response.data?.logs || [])
+    } catch (err) {
+      setAuditError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setAuditLoading(false)
+    }
+  }, [client])
 
   const refreshAll = useCallback(async () => {
     const days = Number(usageWindowDays)
-    await Promise.all([fetchMetrics(), fetchUsageSummary(days)])
-  }, [fetchMetrics, fetchUsageSummary, usageWindowDays])
+    await Promise.all([fetchMetrics(), fetchUsageSummary(days), fetchAuditLogs()])
+  }, [fetchMetrics, fetchUsageSummary, fetchAuditLogs, usageWindowDays])
 
   useEffect(() => {
     fetchMetrics()
@@ -198,7 +220,11 @@ export function AdminDashboardPage() {
     fetchUsageSummary(Number(usageWindowDays))
   }, [fetchUsageSummary, usageWindowDays])
 
-  const isRefreshing = isLoading || isUsageLoading
+  useEffect(() => {
+    fetchAuditLogs()
+  }, [fetchAuditLogs])
+
+  const isRefreshing = isLoading || isUsageLoading || auditLoading
 
   return (
     <div className="space-y-6">
@@ -434,15 +460,54 @@ export function AdminDashboardPage() {
         </CardContent>
       </Card>
 
-      {/* Recent Activity Section */}
-      <div className="bg-card rounded-xl p-6 shadow-sm border border-border">
-        <h3 className="text-lg font-semibold text-foreground mb-4">Recent Admin Activity</h3>
-        <div className="text-center py-8 text-muted-foreground">
-          <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>Activity log will be displayed here</p>
-          <p className="text-sm">View the Audit Logs section for detailed activity</p>
-        </div>
-      </div>
+      <Card className="border border-border">
+        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>Recent Admin Activity</CardTitle>
+            <CardDescription>Latest admin actions across tenants and users.</CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => navigate('/admin/activity')}>
+            View Audit Logs
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {auditLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-14 w-full" />
+              ))}
+            </div>
+          ) : auditError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
+              {auditError}
+            </div>
+          ) : auditLogs.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground">
+              <Activity className="w-10 h-10 mx-auto mb-3 opacity-50" />
+              <p>No admin activity yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {auditLogs.map((log) => {
+                const logId = log.id || log._id || `${log.admin_email}-${log.timestamp}`
+                return (
+                  <div key={logId} className="flex flex-col gap-2 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{formatAuditAction(log.action)}</p>
+                    <p className="text-xs text-muted-foreground">{log.admin_email}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="outline">{log.target_type}</Badge>
+                    {log.target_id && <span className="text-xs">{log.target_id}</span>}
+                    <span className="text-xs">{formatDateTime(log.timestamp)}</span>
+                  </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

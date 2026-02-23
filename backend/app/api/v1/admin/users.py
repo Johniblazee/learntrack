@@ -4,7 +4,7 @@ Provides cross-tenant user management for super admins
 """
 
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, EmailStr
@@ -43,6 +43,7 @@ class AdminUserInfo(BaseModel):
     tutor_id: Optional[str] = None
     is_active: bool = True
     is_super_admin: bool = False
+    admin_permissions: List[AdminPermission] = []
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
@@ -65,7 +66,7 @@ class CreateTutorRequest(BaseModel):
     name: str
     clerk_id: str
     is_super_admin: bool = False
-    admin_permissions: List[str] = []
+    admin_permissions: List[AdminPermission] = []
 
 
 class UpdateUserRequest(BaseModel):
@@ -74,7 +75,7 @@ class UpdateUserRequest(BaseModel):
     name: Optional[str] = None
     is_active: Optional[bool] = None
     is_super_admin: Optional[bool] = None
-    admin_permissions: Optional[List[str]] = None
+    admin_permissions: Optional[List[AdminPermission]] = None
 
 
 @router.get("/", response_model=AdminUserListResponse)
@@ -136,6 +137,7 @@ async def list_all_users(
                     tutor_id=user.get("tutor_id"),
                     is_active=user.get("is_active", True),
                     is_super_admin=user.get("is_super_admin", False),
+                    admin_permissions=user.get("admin_permissions", []),
                     created_at=user.get("created_at", datetime.now(timezone.utc)),
                     updated_at=user.get("updated_at"),
                     last_login=user.get("last_login"),
@@ -203,6 +205,7 @@ async def get_user_details(
                     tutor_id=user.get("tutor_id"),
                     is_active=user.get("is_active", True),
                     is_super_admin=user.get("is_super_admin", False),
+                    admin_permissions=user.get("admin_permissions", []),
                     created_at=user.get("created_at", datetime.now(timezone.utc)),
                     updated_at=user.get("updated_at"),
                     last_login=user.get("last_login"),
@@ -281,6 +284,9 @@ async def create_tutor(
             tutor_id=request.clerk_id,
             is_active=True,
             is_super_admin=request.is_super_admin,
+            admin_permissions=[
+                AdminPermission(permission) for permission in request.admin_permissions
+            ],
             created_at=now,
             updated_at=now,
         )
@@ -302,7 +308,7 @@ async def update_user(
 ):
     """Update any user's details (admin only)"""
     try:
-        update_data = {"updated_at": datetime.now(timezone.utc)}
+        update_data: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
 
         if request.name is not None:
             update_data["name"] = request.name
@@ -385,6 +391,9 @@ async def batch_user_operations(
                         )
                     )
                     failed += 1
+                    continue
+
+                if user_collection is None or user_doc is None:
                     continue
 
                 # Prevent operations on super admins
