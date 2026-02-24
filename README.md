@@ -42,8 +42,9 @@ This application has been **migrated from Next.js to React SPA** for improved fl
 
 ### Prerequisites
 
-- **Node.js 18+** and npm/yarn/pnpm
-- **Python 3.8+**
+- **Node.js 18+** and **pnpm**
+- **Python 3.11+**
+- **uv** (Python package manager)
 - **MongoDB** (local or cloud)
 
 ### 📁 Project Structure
@@ -66,7 +67,8 @@ learntrack-mvp/
 │   │   ├── models/        # Pydantic models
 │   │   ├── services/      # Business logic
 │   │   └── main.py        # FastAPI app
-│   └── requirements.txt
+│   ├── pyproject.toml
+│   └── uv.lock
 └── docs/                  # Documentation
 ```
 
@@ -83,52 +85,60 @@ learntrack-mvp/
    ```env
    # Clerk Authentication
    VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+   VITE_CLERK_TOKEN_TEMPLATE=fastapi
 
    # API Configuration
    VITE_API_BASE_URL=http://localhost:8000
+
+   # Optional: UploadThing
+   VITE_UPLOADTHING_APP_ID=your_uploadthing_app_id
    ```
 
 3. **Backend Environment**
-   Create `backend/.env`:
+   Create `backend/.env` (or repo root `.env`):
    ```env
    # Database
    MONGODB_URL=mongodb://localhost:27017
-   DATABASE_NAME=learntrack
+   DATABASE_NAME=learntrack_mvp
 
-   # Authentication
+   # App Security
+   SECRET_KEY=change-me-in-production
+
+   # Authentication (Clerk)
    CLERK_SECRET_KEY=your_clerk_secret_key
+   CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
    CLERK_WEBHOOK_SECRET=your_clerk_webhook_secret
+   CLERK_JWT_ISSUER=https://clerk.your-app.clerk.accounts.dev
+   CLERK_JWT_AUDIENCE=fastapi
 
    # LLM Providers
    OPENAI_API_KEY=your_openai_api_key
    ANTHROPIC_API_KEY=your_anthropic_api_key
    GOOGLE_API_KEY=your_google_api_key
+   GROQ_API_KEY=your_groq_api_key
+   GEMINI_API_KEY=your_gemini_api_key
+
+   # Email Provider (Plunk)
+   PLUNK_API_KEY=your_plunk_api_key
 
    # UploadThing
    UPLOADTHING_SECRET=your_uploadthing_secret
    UPLOADTHING_APP_ID=your_uploadthing_app_id
    ```
+   Note: `CLERK_JWT_AUDIENCE` should match `VITE_CLERK_TOKEN_TEMPLATE`.
 
 ### 🏃‍♂️ Installation and Running
 
 1. **Install Frontend Dependencies**
    ```bash
    cd frontend
-   npm install
+   pnpm install
    ```
 
 2. **Install Backend Dependencies**
    ```bash
    cd backend
-   python -m venv .venv
-
-   # On Windows (Git Bash/WSL)
-   source .venv/Scripts/activate
-
-   # On macOS/Linux
-   source .venv/bin/activate
-
-   pip install -r requirements.txt
+   uv sync --dev
    ```
 
 3. **Start MongoDB**
@@ -139,15 +149,13 @@ learntrack-mvp/
    **Terminal 1 - Backend (FastAPI):**
    ```bash
    cd backend
-   source .venv/Scripts/activate  # Windows Git Bash
-   # source .venv/bin/activate    # macOS/Linux
-   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   uv run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
    **Terminal 2 - Frontend (React):**
    ```bash
    cd frontend
-   npm run dev
+   pnpm run dev
    ```
 
 5. **Access the Application**
@@ -199,24 +207,24 @@ This application was successfully migrated from **Next.js** to **React SPA**:
 ## 🧪 Development
 
 ### Code Style
-- **Frontend**: ESLint + Prettier
-- **Backend**: Black + isort
+- **Frontend**: ESLint (no Prettier)
+- **Backend**: Black + isort + flake8
 
 ### Testing
 ```bash
 # Frontend tests
 cd frontend
-npm run test
+pnpm run test
 
 # Backend tests
 cd backend
-pytest
+uv run pytest
 ```
 
 ## 🚀 Deployment
 
 ### Frontend (Vercel/Netlify)
-1. Build the React app: `cd frontend && npm run build`
+1. Build the React app: `cd frontend && pnpm run build`
 2. Deploy the `dist` folder
 3. Set environment variables in hosting platform
 
