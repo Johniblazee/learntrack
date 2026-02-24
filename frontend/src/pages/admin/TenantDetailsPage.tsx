@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useAuth } from '@clerk/clerk-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -13,12 +12,26 @@ import {
   Users,
 } from 'lucide-react'
 
-import { API_BASE_URL } from '@/lib/config'
+import { useSuperAdmin } from '@/contexts/UserContext'
+import { toast } from '@/contexts/ToastContext'
+import { useApiClient } from '@/lib/api-client'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 
 interface TenantDetails {
   _id: string
@@ -56,12 +69,20 @@ function formatDate(value?: string): string {
 
 export function TenantDetailsPage() {
   const { tenantId } = useParams<{ tenantId: string }>()
-  const { getToken } = useAuth()
+  const client = useApiClient()
   const navigate = useNavigate()
+  const { hasAdminPermission, hasFullAdminAccess } = useSuperAdmin()
+  const canSuspendTenants = hasFullAdminAccess || hasAdminPermission('suspend_tenants')
+  const canManageTenants = hasFullAdminAccess || hasAdminPermission('manage_tenants')
+  const canManageAIProviders = hasFullAdminAccess || hasAdminPermission('manage_ai_providers')
 
   const [tenant, setTenant] = useState<TenantDetails | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionDialog, setActionDialog] = useState<'suspend' | 'activate' | null>(null)
+  const [actionReason, setActionReason] = useState('')
+  const [notifyUsers, setNotifyUsers] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
 
   const fetchTenantDetails = useCallback(async () => {
     if (!tenantId) {
@@ -74,34 +95,75 @@ export function TenantDetailsPage() {
       setIsLoading(true)
       setError(null)
 
-      const token = await getToken()
-      if (!token) {
-        throw new Error('Unable to get authentication token')
+      const response = await client.get<TenantDetails>(`/admin/tenants/${tenantId}`)
+      if (response.error) {
+        throw new Error(response.error)
       }
 
-      const response = await fetch(`${API_BASE_URL}/admin/tenants/${tenantId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch tenant details: ${response.status}`)
-      }
-
-      const data = await response.json()
-      setTenant(data)
+      setTenant(response.data || null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setIsLoading(false)
     }
-  }, [getToken, tenantId])
+  }, [client, tenantId])
 
   useEffect(() => {
     fetchTenantDetails()
   }, [fetchTenantDetails])
+
+  const openTenantActionDialog = (type: 'suspend' | 'activate') => {
+    if (type === 'suspend' && !canSuspendTenants) {
+      toast.error('You do not have permission to suspend tenants.')
+      return
+    }
+    if (type === 'activate' && !canManageTenants) {
+      toast.error('You do not have permission to activate tenants.')
+      return
+    }
+
+    setActionReason('')
+    setNotifyUsers(true)
+    setActionDialog(type)
+  }
+
+  const handleConfirmTenantAction = async () => {
+    if (!tenant || !actionDialog) {
+      return
+    }
+
+    if (actionDialog === 'suspend' && !actionReason.trim()) {
+      toast.error('Suspension reason is required.')
+      return
+    }
+
+    try {
+      setActionLoading(true)
+      const endpoint = actionDialog === 'suspend'
+        ? `/admin/tenants/${tenant.clerk_id}/suspend`
+        : `/admin/tenants/${tenant.clerk_id}/activate`
+      const payload = actionDialog === 'suspend'
+        ? { reason: actionReason.trim(), notify_users: notifyUsers }
+        : { reason: actionReason.trim() || undefined, notify_users: notifyUsers }
+
+      const response = await client.post(endpoint, payload)
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      toast.success(
+        actionDialog === 'suspend'
+          ? 'Tenant suspended successfully.'
+          : 'Tenant activated successfully.'
+      )
+      setActionDialog(null)
+      fetchTenantDetails()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update tenant status')
+    } finally {
+      setActionLoading(false)
+    }
+  }
 
   const storageUsed = tenant?.storage_used_mb ?? 0
   const storageLimit = tenant?.storage_limit_mb ?? 500
@@ -132,12 +194,11 @@ export function TenantDetailsPage() {
             Back to Tenants
           </Button>
         </div>
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-red-600 dark:text-red-400">Failed to load tenant details: {error || 'Tenant not found'}</p>
-            <Button className="mt-4" onClick={fetchTenantDetails}>Retry</Button>
-          </CardContent>
-        </Card>
+        <Alert variant="destructive">
+          <AlertTitle>Failed to load tenant details</AlertTitle>
+          <AlertDescription>{error || 'Tenant not found'}</AlertDescription>
+        </Alert>
+        <Button onClick={fetchTenantDetails}>Retry</Button>
       </div>
     )
   }
@@ -156,15 +217,30 @@ export function TenantDetailsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge className={statusVariant[tenant.status]}>{tenant.status}</Badge>
-          <Button
-            variant="outline"
-            onClick={() => navigate(`/admin/tenants/${tenant.clerk_id}/ai-config`)}
-          >
-            <Cpu className="mr-2 h-4 w-4" />
-            AI Config
-          </Button>
+          {canManageAIProviders && (
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/admin/tenants/${tenant.clerk_id}/ai-config`)}
+            >
+              <Cpu className="mr-2 h-4 w-4" />
+              AI Config
+            </Button>
+          )}
+          {tenant.status === 'active' ? (
+            canSuspendTenants && (
+              <Button variant="destructive" onClick={() => openTenantActionDialog('suspend')}>
+                Suspend Tenant
+              </Button>
+            )
+          ) : (
+            canManageTenants && (
+              <Button variant="outline" onClick={() => openTenantActionDialog('activate')}>
+                Activate Tenant
+              </Button>
+            )
+          )}
         </div>
       </div>
 
@@ -275,6 +351,61 @@ export function TenantDetailsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(actionDialog)} onOpenChange={(open) => !open && setActionDialog(null)}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>
+              {actionDialog === 'suspend' ? 'Suspend Tenant' : 'Activate Tenant'}
+            </DialogTitle>
+            <DialogDescription>
+              {actionDialog === 'suspend'
+                ? 'Suspending a tenant blocks access for all associated users.'
+                : 'Reactivating a tenant restores access for all associated users.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <p className="font-medium text-foreground">{tenant.name}</p>
+              <p className="text-muted-foreground">{tenant.email}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="tenant-detail-reason">
+                Reason {actionDialog === 'suspend' ? '(required)' : '(optional)'}
+              </Label>
+              <Input
+                id="tenant-detail-reason"
+                value={actionReason}
+                onChange={(event) => setActionReason(event.target.value)}
+                placeholder={actionDialog === 'suspend' ? 'Provide a suspension reason' : 'Optional note'}
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Notify users</p>
+                <p className="text-xs text-muted-foreground">Send an email notification to affected users.</p>
+              </div>
+              <Switch checked={notifyUsers} onCheckedChange={setNotifyUsers} />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setActionDialog(null)} disabled={actionLoading}>
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmTenantAction} disabled={actionLoading}>
+              {actionLoading
+                ? 'Updating...'
+                : actionDialog === 'suspend'
+                  ? 'Suspend Tenant'
+                  : 'Activate Tenant'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -189,6 +189,9 @@ async def get_tenant_details(
             subjects_count=subjects_count,
             questions_count=questions_count,
             assignments_count=assignments_count,
+            subscription_tier=tutor.get("subscription_tier", "free"),
+            storage_used_mb=tutor.get("storage_used_mb", 0.0),
+            storage_limit_mb=tutor.get("storage_limit_mb", 500.0),
         )
     except HTTPException:
         raise

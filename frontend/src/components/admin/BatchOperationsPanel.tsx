@@ -1,6 +1,17 @@
 import { useState } from 'react'
-import { CheckSquare, Square, Power, PowerOff, Trash2, AlertTriangle } from 'lucide-react'
+import { AlertTriangle, CheckSquare, Power, PowerOff, Square, Trash2 } from 'lucide-react'
+
 import { LoadingSpinner } from '@/components/ui/loading-state'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 
 export type BatchOperationType = 'activate' | 'deactivate' | 'delete' | 'suspend'
 
@@ -61,111 +72,118 @@ export function BatchOperationsPanel({
             <span className="font-medium text-primary">
               {selectedIds.length} of {totalItems} selected
             </span>
-            <button
+            <Button
+              variant="link"
+              size="sm"
               onClick={selectedIds.length === totalItems ? onClearSelection : onSelectAll}
-              className="text-sm text-primary hover:underline"
             >
               {selectedIds.length === totalItems ? 'Clear selection' : 'Select all'}
-            </button>
+            </Button>
           </div>
 
           <div className="flex items-center gap-2">
             {/* Activate Button */}
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => handleOperation('activate')}
               disabled={isLoading}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50 transition-colors"
+              className="text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 border-green-200 dark:border-green-900/50 hover:bg-green-200 dark:hover:bg-green-900/50"
             >
               <Power className="w-4 h-4" />
               Activate
-            </button>
+            </Button>
 
             {/* Deactivate Button */}
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => handleOperation('deactivate')}
               disabled={isLoading}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-900/50 disabled:opacity-50 transition-colors"
+              className="text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30 border-orange-200 dark:border-orange-900/50 hover:bg-orange-200 dark:hover:bg-orange-900/50"
             >
               <PowerOff className="w-4 h-4" />
               {entityType === 'tenants' ? 'Suspend' : 'Deactivate'}
-            </button>
+            </Button>
 
             {/* Delete Button (Users only) */}
             {entityType === 'users' && (
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => handleOperation('delete')}
                 disabled={isLoading}
-                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50 transition-colors"
+                className="text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-900/50 hover:bg-red-200 dark:hover:bg-red-900/50"
               >
                 <Trash2 className="w-4 h-4" />
                 Delete
-              </button>
+              </Button>
             )}
 
             {/* Clear Selection */}
-            <button
-              onClick={onClearSelection}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-foreground bg-muted rounded-lg hover:bg-muted/80 transition-colors"
-            >
+            <Button variant="ghost" size="sm" onClick={onClearSelection}>
               <Square className="w-4 h-4" />
               Clear
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Confirmation Modal */}
-      {showConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
-                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
-              </div>
-              <h3 className="text-lg font-semibold text-foreground">
-                Confirm {operationLabels[showConfirm]}
-              </h3>
-            </div>
-
-            <p className="text-muted-foreground mb-4">
+      <Dialog
+        open={Boolean(showConfirm)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowConfirm(null)
+            setReason('')
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              Confirm {showConfirm ? operationLabels[showConfirm] : ''}
+            </DialogTitle>
+            <DialogDescription>
               Are you sure you want to {showConfirm} {selectedIds.length} {entityType}?
               {showConfirm === 'delete' && ' This action cannot be undone.'}
-            </p>
+            </DialogDescription>
+          </DialogHeader>
 
-            {(showConfirm === 'suspend' || showConfirm === 'deactivate') && (
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-foreground mb-1">
-                  Reason (optional)
-                </label>
-                <input
-                  type="text"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="Enter reason for this action..."
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-primary/40"
-                />
-              </div>
-            )}
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => { setShowConfirm(null); setReason('') }}
-                className="px-4 py-2 text-sm font-medium text-foreground bg-muted rounded-lg hover:bg-muted/80"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmOperation}
-                disabled={isLoading}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
-              >
-                {isLoading && <LoadingSpinner size="sm" className="text-white" />}
-                Confirm {operationLabels[showConfirm]}
-              </button>
+          {(showConfirm === 'suspend' || showConfirm === 'deactivate') && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">
+                Reason (optional)
+              </label>
+              <Input
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Enter reason for this action..."
+              />
             </div>
-          </div>
-        </div>
-      )}
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowConfirm(null)
+                setReason('')
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmOperation}
+              disabled={isLoading}
+            >
+              {isLoading && <LoadingSpinner size="sm" className="text-white" />}
+              Confirm {showConfirm ? operationLabels[showConfirm] : ''}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

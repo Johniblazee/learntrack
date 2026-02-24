@@ -8,6 +8,7 @@ import {
   Database,
   Activity
 } from 'lucide-react'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 interface SystemMetrics {
   total_tutors: number
@@ -92,9 +93,10 @@ export function AdminMetrics({ metrics, isLoading, error }: AdminMetricsProps) {
 
   if (error) {
     return (
-      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
-        <p className="text-red-600 dark:text-red-400">Failed to load metrics: {error}</p>
-      </div>
+      <Alert variant="destructive">
+        <AlertTitle>Failed to load metrics</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
     )
   }
 

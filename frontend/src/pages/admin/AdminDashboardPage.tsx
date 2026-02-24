@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { AdminMetrics } from '../../components/admin/AdminMetrics'
 import { Activity, AlertTriangle, DollarSign, RefreshCw, Server, Sparkles } from 'lucide-react'
 import { useApiClient } from '@/lib/api-client'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -83,6 +84,13 @@ interface AdminUsageSummary {
   quota_health: QuotaHealth
 }
 
+interface AdminHealth {
+  status: string
+  database: string
+  admin_user: string
+  timestamp: string
+}
+
 interface AdminAuditLog {
   id?: string
   _id?: string
@@ -147,6 +155,9 @@ export function AdminDashboardPage() {
   const [isUsageLoading, setIsUsageLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [usageError, setUsageError] = useState<string | null>(null)
+  const [health, setHealth] = useState<AdminHealth | null>(null)
+  const [healthLoading, setHealthLoading] = useState(true)
+  const [healthError, setHealthError] = useState<string | null>(null)
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([])
   const [auditLoading, setAuditLoading] = useState(true)
   const [auditError, setAuditError] = useState<string | null>(null)
@@ -189,6 +200,24 @@ export function AdminDashboardPage() {
     }
   }, [client])
 
+  const fetchHealth = useCallback(async () => {
+    try {
+      setHealthLoading(true)
+      setHealthError(null)
+
+      const response = await client.get<AdminHealth>('/admin/dashboard/health')
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      setHealth(response.data || null)
+    } catch (err) {
+      setHealthError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setHealthLoading(false)
+    }
+  }, [client])
+
   const fetchAuditLogs = useCallback(async () => {
     try {
       setAuditLoading(true)
@@ -209,8 +238,8 @@ export function AdminDashboardPage() {
 
   const refreshAll = useCallback(async () => {
     const days = Number(usageWindowDays)
-    await Promise.all([fetchMetrics(), fetchUsageSummary(days), fetchAuditLogs()])
-  }, [fetchMetrics, fetchUsageSummary, fetchAuditLogs, usageWindowDays])
+    await Promise.all([fetchMetrics(), fetchUsageSummary(days), fetchAuditLogs(), fetchHealth()])
+  }, [fetchMetrics, fetchUsageSummary, fetchAuditLogs, fetchHealth, usageWindowDays])
 
   useEffect(() => {
     fetchMetrics()
@@ -224,7 +253,20 @@ export function AdminDashboardPage() {
     fetchAuditLogs()
   }, [fetchAuditLogs])
 
-  const isRefreshing = isLoading || isUsageLoading || auditLoading
+  useEffect(() => {
+    fetchHealth()
+  }, [fetchHealth])
+
+  const isRefreshing = isLoading || isUsageLoading || auditLoading || healthLoading
+  const healthStatus = health?.status || (healthError ? 'degraded' : 'unknown')
+  const healthBannerClass =
+    healthStatus === 'healthy'
+      ? 'bg-primary'
+      : healthStatus === 'degraded'
+        ? 'bg-amber-500'
+        : 'bg-muted'
+  const healthTextClass = healthStatus === 'unknown' ? 'text-foreground' : 'text-white'
+  const healthSubTextClass = healthStatus === 'unknown' ? 'text-muted-foreground' : 'text-white/80'
 
   return (
     <div className="space-y-6">
@@ -250,15 +292,24 @@ export function AdminDashboardPage() {
         </Button>
       </div>
 
-      {/* Quick Stats Banner */}
-      <div className="bg-primary rounded-xl p-6 text-white">
-        <div className="flex items-center gap-4">
+      <div className={`${healthBannerClass} rounded-xl p-6 ${healthTextClass}`}>
+        <div className="flex flex-wrap items-center gap-4">
           <div className="p-3 bg-white/20 rounded-lg">
             <Activity className="w-8 h-8" />
           </div>
           <div>
-            <h2 className="text-xl font-semibold">System Status: Healthy</h2>
-            <p className="text-white/80">All services are running normally</p>
+            <h2 className="text-xl font-semibold">
+              System Status: {healthStatus.charAt(0).toUpperCase() + healthStatus.slice(1)}
+            </h2>
+            {health ? (
+              <p className={healthSubTextClass}>
+                Database: {health.database} • Checked {formatDateTime(health.timestamp)}
+              </p>
+            ) : healthError ? (
+              <p className={healthSubTextClass}>Health check failed: {healthError}</p>
+            ) : (
+              <p className={healthSubTextClass}>Health status unavailable</p>
+            )}
           </div>
         </div>
       </div>
@@ -306,9 +357,10 @@ export function AdminDashboardPage() {
               <Skeleton className="h-60 w-full" />
             </div>
           ) : usageError ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
-              Failed to load AI usage summary: {usageError}
-            </div>
+            <Alert variant="destructive">
+              <AlertTitle>Failed to load AI usage summary</AlertTitle>
+              <AlertDescription>{usageError}</AlertDescription>
+            </Alert>
           ) : usageSummary ? (
             <div className="space-y-6">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
