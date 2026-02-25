@@ -204,17 +204,6 @@ export function useUserContext() {
   return context
 }
 
-// Convenience hooks for common use cases
-export function useCurrentRole() {
-  const { role, isTutor, isStudent, isParent, isSuperAdmin } = useUserContext()
-  return { role, isTutor, isStudent, isParent, isSuperAdmin }
-}
-
-export function useTutorId() {
-  const { tutorId } = useUserContext()
-  return tutorId
-}
-
 export function useSuperAdmin() {
   const { isSuperAdmin, adminPermissions, hasAdminPermission, hasFullAdminAccess } = useUserContext()
   return { isSuperAdmin, adminPermissions, hasAdminPermission, hasFullAdminAccess }

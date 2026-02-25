@@ -246,14 +246,3 @@ def get_all_active_models_for_dropdown() -> Dict[str, List[Dict]]:
         for provider in ALL_PROVIDER_MODELS.keys()
     }
 
-
-def get_model_prefixes(provider: str) -> List[str]:
-    """Get model ID prefixes for dynamic discovery filtering"""
-    prefixes = {
-        "groq": ["llama-3", "llama-4", "mixtral"],
-        "openai": ["gpt-4", "gpt-5", "o1", "o3", "o4"],
-        "gemini": ["gemini-3", "gemini-2.5", "gemini-2.0"],
-        "anthropic": ["claude-3", "claude-4"],
-    }
-    return prefixes.get(provider, [])
-

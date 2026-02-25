@@ -207,37 +207,3 @@ export function useApiClient() {
   return useMemo(() => new ApiClient(memoizedGetToken), [memoizedGetToken])
 }
 
-// Utility functions for common API operations
-export const apiUtils = {
-  // Students
-  getStudents: (client: ApiClient) => client.get('/students/'),
-  getStudent: (client: ApiClient, id: string) => client.get(`/students/${id}`),
-  createStudent: (client: ApiClient, data: any) => client.post('/students/', data),
-  updateStudent: (client: ApiClient, id: string, data: any) => client.put(`/students/${id}`, data),
-  deleteStudent: (client: ApiClient, id: string) => client.delete(`/students/${id}`),
-
-  // Groups
-  getGroups: (client: ApiClient) => client.get('/groups/'),
-  getGroup: (client: ApiClient, id: string) => client.get(`/groups/${id}`),
-  createGroup: (client: ApiClient, data: any) => client.post('/groups/', data),
-  updateGroup: (client: ApiClient, id: string, data: any) => client.put(`/groups/${id}`, data),
-  deleteGroup: (client: ApiClient, id: string) => client.delete(`/groups/${id}`),
-
-  // Assignments
-  getAssignments: (client: ApiClient) => client.get('/assignments/'),
-  getAssignment: (client: ApiClient, id: string) => client.get(`/assignments/${id}`),
-  createAssignment: (client: ApiClient, data: any) => client.post('/assignments/', data),
-  updateAssignment: (client: ApiClient, id: string, data: any) => client.put(`/assignments/${id}`, data),
-  deleteAssignment: (client: ApiClient, id: string) => client.delete(`/assignments/${id}`),
-
-  // Questions
-  getQuestions: (client: ApiClient) => client.get('/questions/'),
-
-  // Progress
-  getProgress: (client: ApiClient) => client.get('/progress/'),
-  getStudentProgress: (client: ApiClient, studentId: string) => client.get(`/progress/student/${studentId}`),
-
-  // User Profile
-  getProfile: (client: ApiClient) => client.get('/users/me'),
-  updateProfile: (client: ApiClient, data: any) => client.put('/users/me', data),
-}

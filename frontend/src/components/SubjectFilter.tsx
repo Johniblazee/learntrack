@@ -1,16 +1,13 @@
-import { useState, useEffect } from 'react'
-import { useAuth } from '@clerk/clerk-react'
+import { useMemo, useEffect } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { BookOpen } from 'lucide-react'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+import { useSubjects, useStudents } from '@/hooks/useQueries'
 
 interface Subject {
   _id: string
   name: string
   description?: string
-  studentCount?: number
 }
 
 interface SubjectFilterProps {
@@ -20,82 +17,37 @@ interface SubjectFilterProps {
   showStudentCount?: boolean
 }
 
-export default function SubjectFilter({ 
-  selectedSubject, 
-  onChange, 
+export default function SubjectFilter({
+  selectedSubject,
+  onChange,
   onStudentCountChange,
-  showStudentCount = true 
+  showStudentCount = true
 }: SubjectFilterProps) {
-  const { getToken } = useAuth()
-  const [subjects, setSubjects] = useState<Subject[]>([])
-  const [loading, setLoading] = useState(true)
-  const [studentCounts, setStudentCounts] = useState<Record<string, number>>({})
+  const { data: subjectsData, isLoading } = useSubjects()
+  const { data: studentsData } = useStudents(1, 200)
+
+  const subjects: Subject[] = Array.isArray(subjectsData) ? subjectsData : []
+
+  const studentCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    const items = studentsData?.items || []
+    items.forEach((student: any) => {
+      if (student.subjects && Array.isArray(student.subjects)) {
+        student.subjects.forEach((subjectId: string) => {
+          counts[subjectId] = (counts[subjectId] || 0) + 1
+        })
+      }
+    })
+    return counts
+  }, [studentsData])
 
   useEffect(() => {
-    fetchSubjects()
-    if (showStudentCount) {
-      fetchStudentCounts()
-    }
-  }, [])
-
-  useEffect(() => {
-    // Update student count when selection changes
     if (selectedSubject && studentCounts[selectedSubject] !== undefined) {
       onStudentCountChange?.(studentCounts[selectedSubject])
     } else {
       onStudentCountChange?.(0)
     }
   }, [selectedSubject, studentCounts])
-
-  const fetchSubjects = async () => {
-    try {
-      setLoading(true)
-      const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/subjects/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setSubjects(data)
-      }
-    } catch (error) {
-      console.error('Failed to fetch subjects:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchStudentCounts = async () => {
-    try {
-      const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/students/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (response.ok) {
-        const students = await response.json()
-        
-        // Count students per subject
-        const counts: Record<string, number> = {}
-        students.forEach((student: any) => {
-          if (student.subjects && Array.isArray(student.subjects)) {
-            student.subjects.forEach((subjectId: string) => {
-              counts[subjectId] = (counts[subjectId] || 0) + 1
-            })
-          }
-        })
-        
-        setStudentCounts(counts)
-      }
-    } catch (error) {
-      console.error('Failed to fetch student counts:', error)
-    }
-  }
 
   const selectedSubjectData = subjects.find(s => s._id === selectedSubject)
 
@@ -115,9 +67,9 @@ export default function SubjectFilter({
         )}
       </div>
 
-      <Select value={selectedSubject} onValueChange={onChange} disabled={loading}>
+      <Select value={selectedSubject} onValueChange={onChange} disabled={isLoading}>
         <SelectTrigger className="w-full">
-          <SelectValue placeholder={loading ? "Loading subjects..." : "Select a subject"} />
+          <SelectValue placeholder={isLoading ? "Loading subjects..." : "Select a subject"} />
         </SelectTrigger>
         <SelectContent>
           {subjects.map((subject) => (
@@ -159,7 +111,7 @@ export default function SubjectFilter({
         </div>
       )}
 
-      {!loading && subjects.length === 0 && (
+      {!isLoading && subjects.length === 0 && (
         <div className="text-center py-4 text-gray-500 dark:text-slate-400">
           <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p className="text-sm">No subjects found</p>
@@ -168,4 +120,3 @@ export default function SubjectFilter({
     </div>
   )
 }
-

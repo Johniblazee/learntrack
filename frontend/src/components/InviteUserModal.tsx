@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,14 +10,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { LoadingSpinner } from '@/components/ui/loading-state'
 import { toast } from '@/contexts/ToastContext'
 import { UserPlus, Mail, MessageSquare, Users } from 'lucide-react'
-import { useAuth } from '@clerk/clerk-react'
-
-interface Student {
-  id: string
-  clerk_id: string
-  name: string
-  email: string
-}
+import { useApiClient } from '@/lib/api-client'
+import { useStudents } from '@/hooks/useQueries'
 
 interface Invitation {
   id: string
@@ -33,28 +28,27 @@ interface InviteUserModalProps {
   onSuccess?: () => void
   editMode?: boolean
   invitation?: Invitation
-  role?: 'student' | 'parent'  // Add role prop for pre-selecting role
+  role?: 'student' | 'parent'
 }
 
 export default function InviteUserModal({ open, onOpenChange, onSuccess, editMode = false, invitation, role }: InviteUserModalProps) {
-  const { getToken } = useAuth()
-  const [loading, setLoading] = useState(false)
-  const [students, setStudents] = useState<Student[]>([])
-  const [loadingStudents, setLoadingStudents] = useState(false)
+  const client = useApiClient()
+  const queryClient = useQueryClient()
   const [formData, setFormData] = useState({
     invitee_email: '',
     invitee_name: '',
-    role: role || 'student',  // Use role prop if provided
+    role: role || 'student',
     message: '',
     student_ids: [] as string[]
   })
 
-  // Load students when modal opens and role is parent
-  useEffect(() => {
-    if (open && formData.role === 'parent') {
-      loadStudents()
-    }
-  }, [open, formData.role])
+  const { data: studentsData, isLoading: loadingStudents } = useStudents(1, 200)
+  const students = (studentsData?.items || []).map((s: any) => ({
+    id: s._id || s.id,
+    clerk_id: s.clerk_id,
+    name: s.name,
+    email: s.email,
+  }))
 
   // Populate form when editing
   useEffect(() => {
@@ -78,87 +72,56 @@ export default function InviteUserModal({ open, onOpenChange, onSuccess, editMod
     }
   }, [editMode, invitation, open])
 
-  const loadStudents = async () => {
-    try {
-      setLoadingStudents(true)
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-
-      const response = await fetch(`${API_BASE}/students/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+  const createInvitationMutation = useMutation({
+    mutationFn: async (data: typeof formData) => {
+      const response = await client.post('/invitations/', data)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      toast.success('Invitation sent!', {
+        description: `An invitation has been sent to ${variables.invitee_email}`
       })
-
-      if (!response.ok) throw new Error('Failed to load students')
-
-      const data = await response.json()
-      setStudents(data.students || [])
-    } catch (error) {
-      console.error('Failed to load students:', error)
-      toast.error('Failed to load students')
-    } finally {
-      setLoadingStudents(false)
-    }
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-
-    try {
-      const token = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-
-      if (editMode && invitation) {
-        // Update invitation (re-send with new details)
-        const response = await fetch(`${API_BASE}/invitations/${invitation.id}/resend`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(formData)
-        })
-
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.detail || 'Failed to update invitation')
-        }
-
-        toast.success('Invitation updated!', {
-          description: `The invitation has been updated`
-        })
-      } else {
-        // Create new invitation
-        const response = await fetch(`${API_BASE}/invitations/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(formData)
-        })
-
-        if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.detail || 'Failed to send invitation')
-        }
-
-        toast.success('Invitation sent!', {
-          description: `An invitation has been sent to ${formData.invitee_email}`
-        })
-      }
-
       onOpenChange(false)
       onSuccess?.()
-    } catch (error: any) {
-      console.error('Failed to send invitation:', error)
-      toast.error(editMode ? 'Failed to update invitation' : 'Failed to send invitation', {
+    },
+    onError: (error: any) => {
+      toast.error('Failed to send invitation', {
         description: error.message || 'Please try again later'
       })
-    } finally {
-      setLoading(false)
+    },
+  })
+
+  const resendInvitationMutation = useMutation({
+    mutationFn: async ({ invitationId, data }: { invitationId: string; data: typeof formData }) => {
+      const response = await client.post(`/invitations/${invitationId}/resend`, data)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      toast.success('Invitation updated!', {
+        description: `The invitation has been updated`
+      })
+      onOpenChange(false)
+      onSuccess?.()
+    },
+    onError: (error: any) => {
+      toast.error('Failed to update invitation', {
+        description: error.message || 'Please try again later'
+      })
+    },
+  })
+
+  const loading = createInvitationMutation.isPending || resendInvitationMutation.isPending
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (editMode && invitation) {
+      resendInvitationMutation.mutate({ invitationId: invitation.id, data: formData })
+    } else {
+      createInvitationMutation.mutate(formData)
     }
   }
 
@@ -340,4 +303,3 @@ export default function InviteUserModal({ open, onOpenChange, onSuccess, editMod
     </Dialog>
   )
 }
-

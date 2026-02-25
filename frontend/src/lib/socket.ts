@@ -2,9 +2,9 @@
  * Socket.IO client wrapper for real-time chat
  */
 import { io, Socket } from 'socket.io-client';
+import { API_HOST } from '@/lib/config';
 
-const RAW_API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-const RAW_SOCKET_BASE = import.meta.env.VITE_WS_URL || RAW_API_URL
+const RAW_SOCKET_BASE = import.meta.env.VITE_WS_URL || API_HOST
 const SOCKET_URL = RAW_SOCKET_BASE.replace(/\/api\/v\d+$/, '').replace(/\/+$/, '')
 
 class SocketClient {

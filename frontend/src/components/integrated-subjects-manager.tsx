@@ -13,8 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/contexts/ToastContext'
 import { useSubjects } from '@/hooks/useQueries'
 import { BookOpen, Edit, Plus, Search, Tag, Trash2 } from 'lucide-react'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+import { API_BASE_URL } from '@/lib/config'
 
 interface SubjectRecord {
   _id: string

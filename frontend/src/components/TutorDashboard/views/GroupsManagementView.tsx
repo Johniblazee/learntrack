@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useCallback } from 'react'
+import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Search, Plus, Pencil, Trash2, Users, BookOpen, RefreshCw, X } from 'lucide-react'
-import { useAuth } from '@clerk/clerk-react'
 import { toast } from '@/contexts/ToastContext'
 import { CreateGroupModal } from '@/components/modals/CreateGroupModal'
 import { EditGroupModal } from '@/components/modals/EditGroupModal'
@@ -12,6 +12,7 @@ import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal'
 import { Badge } from '@/components/ui/badge'
 import { useApiClient } from '@/lib/api-client'
 import { LoadingSpinner } from '@/components/ui/loading-state'
+import { useGroups } from '@/hooks/useQueries'
 
 interface StudentGroup {
   _id: string
@@ -25,88 +26,59 @@ interface StudentGroup {
 }
 
 export default function GroupsManagementView() {
-  const { getToken } = useAuth()
   const client = useApiClient()
-  const [groups, setGroups] = useState<StudentGroup[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const { data: groupsData, isLoading } = useGroups()
   const [searchTerm, setSearchTerm] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
-  const [deleting, setDeleting] = useState(false)
   const [regeneratingImage, setRegeneratingImage] = useState<string | null>(null)
   const [removingImage, setRemovingImage] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadGroups()
-  }, [])
+  const groups: StudentGroup[] = Array.isArray(groupsData) ? groupsData : []
 
-  const loadGroups = async () => {
-    try {
-      setLoading(true)
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-      const token = await getToken()
+  const invalidateGroups = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['groups'] })
+  }, [queryClient])
 
-      const response = await fetch(`${API_BASE}/groups/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (!response.ok) throw new Error('Failed to load groups')
-
-      const data = await response.json()
-      setGroups(data || [])
-    } catch (error) {
-      console.error('Failed to load groups:', error)
-      toast.error('Failed to load groups')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleDeleteGroup = async () => {
-    if (!selectedGroup) return
-
-    try {
-      setDeleting(true)
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-      const token = await getToken()
-
-      const response = await fetch(`${API_BASE}/groups/${selectedGroup._id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (!response.ok) throw new Error('Failed to delete group')
-
+  const deleteGroupMutation = useMutation({
+    mutationFn: async (groupId: string) => {
+      const response = await client.delete(`/groups/${groupId}`)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: () => {
+      invalidateGroups()
       toast.success('Group deleted successfully')
       setShowDeleteModal(false)
       setSelectedGroup(null)
-      loadGroups()
-    } catch (error) {
-      console.error('Failed to delete group:', error)
-      toast.error('Failed to delete group')
-    } finally {
-      setDeleting(false)
-    }
+    },
+    onError: (error: any) => {
+      toast.error('Failed to delete group', {
+        description: error.message || 'Please try again'
+      })
+    },
+  })
+
+  const handleDeleteGroup = async () => {
+    if (!selectedGroup) return
+    deleteGroupMutation.mutate(selectedGroup._id)
   }
 
   const handleRegenerateImage = async (group: StudentGroup) => {
     try {
       setRegeneratingImage(group._id)
       const response = await client.post(`/groups/${group._id}/regenerate-image`, {})
-      
+
       if (response.error) {
         throw new Error(response.error)
       }
 
       toast.success('Cover image updated!')
-      loadGroups()
+      invalidateGroups()
     } catch (error: any) {
       console.error('Failed to regenerate image:', error)
       toast.error('Failed to update image', {
@@ -121,13 +93,13 @@ export default function GroupsManagementView() {
     try {
       setRemovingImage(group._id)
       const response = await client.delete(`/groups/${group._id}/image`)
-      
+
       if (response.error) {
         throw new Error(response.error)
       }
 
       toast.success('Cover image removed')
-      loadGroups()
+      invalidateGroups()
     } catch (error: any) {
       console.error('Failed to remove image:', error)
       toast.error('Failed to remove image', {
@@ -213,7 +185,7 @@ export default function GroupsManagementView() {
       </div>
 
       {/* Groups Grid */}
-      {loading ? (
+      {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, index) => (
             <Card key={index} className="border shadow-sm bg-card overflow-hidden">
@@ -239,7 +211,7 @@ export default function GroupsManagementView() {
                 No groups found
               </h3>
               <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
-                {searchTerm 
+                {searchTerm
                   ? "Try adjusting your search terms to find what you're looking for."
                   : "Create your first group to start organizing your students and tracking their progress together."
                 }
@@ -259,8 +231,8 @@ export default function GroupsManagementView() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredGroups.map((group) => (
-            <Card 
-              key={group._id} 
+            <Card
+              key={group._id}
               className="border shadow-sm bg-card hover:shadow-md transition-shadow overflow-hidden group"
             >
               {/* Image Section - Smaller 16:9 aspect ratio */}
@@ -398,21 +370,21 @@ export default function GroupsManagementView() {
       <CreateGroupModal
         open={showCreateModal}
         onOpenChange={setShowCreateModal}
-        onGroupCreated={loadGroups}
+        onGroupCreated={invalidateGroups}
       />
 
       <EditGroupModal
         open={showEditModal}
         onOpenChange={setShowEditModal}
         group={selectedGroup}
-        onGroupUpdated={loadGroups}
+        onGroupUpdated={invalidateGroups}
       />
 
       <ViewGroupDetailsModal
         open={showViewModal}
         onOpenChange={setShowViewModal}
         group={selectedGroup}
-        onGroupUpdated={loadGroups}
+        onGroupUpdated={invalidateGroups}
       />
 
       <ConfirmDeleteModal
@@ -422,7 +394,7 @@ export default function GroupsManagementView() {
         title="Delete Group?"
         description="Are you sure you want to delete this group? This action cannot be undone."
         itemName={selectedGroup?.name}
-        loading={deleting}
+        loading={deleteGroupMutation.isPending}
       />
     </div>
   )

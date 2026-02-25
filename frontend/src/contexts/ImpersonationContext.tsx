@@ -4,8 +4,7 @@ import {
   IMPERSONATION_SESSION_CHANGED_EVENT,
   IMPERSONATION_STORAGE_KEY,
 } from '@/lib/api-client'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+import { API_BASE_URL } from '@/lib/config'
 
 function emitImpersonationSessionChangedEvent() {
   if (typeof window === 'undefined') {

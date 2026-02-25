@@ -12,7 +12,7 @@ interface ErrorScreenProps {
   showDetails?: boolean
 }
 
-export function ErrorScreen({
+function ErrorScreen({
   title = 'Something went wrong',
   message = 'An unexpected error occurred. Please try again.',
   error,
@@ -101,27 +101,6 @@ export function ErrorScreen({
   )
 }
 
-// Specific error screens
-export function NotFoundError({ onGoHome }: { onGoHome?: () => void }) {
-  return (
-    <ErrorScreen
-      title="Page Not Found"
-      message="The page you're looking for doesn't exist or has been moved."
-      onGoHome={onGoHome}
-    />
-  )
-}
-
-export function NetworkError({ onRetry }: { onRetry?: () => void }) {
-  return (
-    <ErrorScreen
-      title="Connection Error"
-      message="Unable to connect to the server. Please check your internet connection."
-      onRetry={onRetry}
-    />
-  )
-}
-
 export function ServerError({ onRetry, error }: { onRetry?: () => void; error?: Error | string }) {
   return (
     <ErrorScreen
@@ -130,26 +109,6 @@ export function ServerError({ onRetry, error }: { onRetry?: () => void; error?: 
       error={error}
       onRetry={onRetry}
       showDetails={true}
-    />
-  )
-}
-
-export function UnauthorizedError({ onGoHome }: { onGoHome?: () => void }) {
-  return (
-    <ErrorScreen
-      title="Access Denied"
-      message="You don't have permission to access this resource."
-      onGoHome={onGoHome}
-    />
-  )
-}
-
-export function ValidationError({ message, onGoBack }: { message?: string; onGoBack?: () => void }) {
-  return (
-    <ErrorScreen
-      title="Invalid Request"
-      message={message || "The request contains invalid data. Please check and try again."}
-      onGoBack={onGoBack}
     />
   )
 }

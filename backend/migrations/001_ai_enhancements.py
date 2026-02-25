@@ -47,56 +47,64 @@ async def create_cost_tracking_collections(db: AsyncIOMotorDatabase):
 
 
 async def create_default_quotas(db: AsyncIOMotorDatabase):
-    """Create default quotas for existing tenants"""
+    """Create default quotas for existing tenants.
 
-    # Get existing users to create quotas for
-    users_collection = db.users
-    cursor = users_collection.find({"role": {"$in": ["TUTOR", "STUDENT", "PARENT"]}})
+    Queries the role-specific collections (tutors, students, parents) introduced
+    after the user-collection split migration. Uses clerk_id as tenant_id to match
+    the convention used throughout the rest of the application.
+    """
 
     quota_collection = db.cost_quotas
     quotas_created = 0
 
-    async for user in cursor:
-        tenant_id = str(user["_id"])
+    # Each collection maps to a quota tier
+    collection_tiers = [
+        (db.tutors, "pro", Decimal("100.00"), Decimal("10.00")),
+        (db.students, "free", Decimal("10.00"), Decimal("1.00")),
+        (db.parents, "free", Decimal("10.00"), Decimal("1.00")),
+    ]
 
-        # Check if quota already exists
-        existing = await quota_collection.find_one({"tenant_id": tenant_id})
-        if existing:
-            continue
+    for collection, tier, monthly_limit, daily_limit in collection_tiers:
+        cursor = collection.find({}, {"clerk_id": 1})
 
-        # Determine tier based on role
-        if user.get("role") == "TUTOR":
-            tier = "pro"
-            monthly_limit = Decimal("100.00")
-            daily_limit = Decimal("10.00")
-        else:
-            tier = "free"
-            monthly_limit = Decimal("10.00")
-            daily_limit = Decimal("1.00")
+        async for user in cursor:
+            clerk_id = user.get("clerk_id")
+            if not clerk_id:
+                logger.warning(
+                    "Skipping user missing clerk_id during quota creation",
+                    user_id=str(user.get("_id")),
+                )
+                continue
+            tenant_id = clerk_id
 
-        # Create default quota
-        quota = {
-            "tenant_id": tenant_id,
-            "tier": tier,
-            # Store numeric limits as Decimal128 for MongoDB
-            "monthly_limit": Decimal128(str(monthly_limit)),
-            "daily_limit": Decimal128(str(daily_limit)),
-            "alert_threshold": Decimal128(str(Decimal("0.8"))),
-            "current_monthly_usage": Decimal128(str(Decimal("0"))),
-            "current_daily_usage": Decimal128(str(Decimal("0"))),
-            "last_monthly_reset": datetime.now(timezone.utc),
-            "last_daily_reset": datetime.now(timezone.utc),
-            "is_active": True,
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": None,
-        }
+            # Check if quota already exists
+            existing = await quota_collection.find_one({"tenant_id": tenant_id})
+            if existing:
+                continue
 
-        # Upsert to avoid duplicates
-        result = await quota_collection.update_one(
-            {"tenant_id": tenant_id}, {"$setOnInsert": quota}, upsert=True
-        )
-        if result.upserted_id is not None:
-            quotas_created += 1
+            # Create default quota
+            quota = {
+                "tenant_id": tenant_id,
+                "tier": tier,
+                # Store numeric limits as Decimal128 for MongoDB
+                "monthly_limit": Decimal128(str(monthly_limit)),
+                "daily_limit": Decimal128(str(daily_limit)),
+                "alert_threshold": Decimal128(str(Decimal("0.8"))),
+                "current_monthly_usage": Decimal128(str(Decimal("0"))),
+                "current_daily_usage": Decimal128(str(Decimal("0"))),
+                "last_monthly_reset": datetime.now(timezone.utc),
+                "last_daily_reset": datetime.now(timezone.utc),
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": None,
+            }
+
+            # Upsert to avoid duplicates
+            result = await quota_collection.update_one(
+                {"tenant_id": tenant_id}, {"$setOnInsert": quota}, upsert=True
+            )
+            if result.upserted_id is not None:
+                quotas_created += 1
 
     logger.info(f"Created default quotas for {quotas_created} tenants")
 

@@ -758,23 +758,6 @@ async def require_parent(
     return current_user
 
 
-async def require_role(allowed_roles: List[UserRole]):
-    """Factory function to require specific roles"""
-
-    async def role_checker(
-        request: Request,
-        current_user: ClerkUserContext = Depends(get_current_user),
-    ) -> ClerkUserContext:
-        if current_user.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied. Required roles: {[r.value for r in allowed_roles]}",
-            )
-        return current_user
-
-    return role_checker
-
-
 # Super Admin Dependencies
 async def require_super_admin(
     current_user: ClerkUserContext = Depends(get_current_user),
@@ -803,13 +786,3 @@ def require_admin_permission(permission: AdminPermission):
     return permission_checker
 
 
-async def require_tutor_or_super_admin(
-    current_user: ClerkUserContext = Depends(get_current_user),
-) -> ClerkUserContext:
-    """Require tutor role or super admin"""
-    if current_user.role != UserRole.TUTOR and not current_user.is_super_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tutor or super admin access required",
-        )
-    return current_user

@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { LoadingState } from '@/components/ui/loading-state'
 import { toast } from '@/contexts/ToastContext'
 import { CheckCircle, XCircle, UserPlus, Mail } from 'lucide-react'
+import { useApiClient } from '@/lib/api-client'
 
 interface InvitationDetails {
   valid: boolean
@@ -25,7 +26,8 @@ interface InvitationDetails {
 export default function AcceptInvitationPage() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { isSignedIn, getToken, userId } = useAuth()
+  const { isSignedIn, userId } = useAuth()
+  const client = useApiClient()
   const { user } = useUser()
   
   const [loading, setLoading] = useState(true)
@@ -49,13 +51,12 @@ export default function AcceptInvitationPage() {
   const verifyInvitation = async () => {
     try {
       setLoading(true)
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
 
-      const response = await fetch(`${API_BASE}/invitations/verify/${token}`)
-      
-      if (!response.ok) throw new Error('Failed to verify invitation')
+      const response = await client.get(`/invitations/verify/${token}`)
 
-      const data = await response.json()
+      if (response.error) throw new Error(response.error)
+
+      const data = response.data
       setInvitationDetails(data)
 
       if (!data.valid) {
@@ -83,29 +84,15 @@ export default function AcceptInvitationPage() {
 
     try {
       setAccepting(true)
-      const authToken = await getToken()
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
 
-      const response = await fetch(`${API_BASE}/invitations/accept`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({
-          token,
-          clerk_id: userId,
-          email: user.primaryEmailAddress?.emailAddress || '',
-          name: user.fullName || user.firstName || 'User'
-        })
+      const response = await client.post('/invitations/accept', {
+        token,
+        clerk_id: userId,
+        email: user.primaryEmailAddress?.emailAddress || '',
+        name: user.fullName || user.firstName || 'User'
       })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Failed to accept invitation')
-      }
-
-      await response.json()
+      if (response.error) throw new Error(response.error)
 
       toast.success('Invitation Accepted!', {
         description: 'Your account has been created successfully'
