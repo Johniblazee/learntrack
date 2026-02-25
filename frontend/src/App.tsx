@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { UserProvider } from './contexts/UserContext'
@@ -5,33 +6,33 @@ import { ToastProvider } from './contexts/ToastContext'
 import { ImpersonationProvider } from './contexts/ImpersonationContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import ProtectedRoute from './components/ProtectedRoute'
-import HomePage from './pages/HomePage'
-import GetStartedPage from './pages/GetStartedPage'
-import SignInPage from './pages/SignInPage'
-import SignUpPage from './pages/SignUpPage'
-import DashboardPage from './pages/DashboardPage'
-import RoleSetupPage from './pages/RoleSetupPage'
-import AcceptInvitationPage from './pages/AcceptInvitationPage'
-import TeacherOnboarding from './components/onboarding/TeacherOnboarding'
-import StudentOnboarding from './components/onboarding/StudentOnboarding'
-import ParentOnboarding from './components/onboarding/ParentOnboarding'
-import SettingsPage from './pages/SettingsPage'
-import NotFoundPage from './pages/NotFoundPage'
-import AccessDeniedPage from './pages/AccessDeniedPage'
-
-// Admin imports
-import { AdminLayout } from './components/admin/AdminLayout'
-import {
-  ActivityPage,
-  AdminDashboardPage,
-  AdminSettingsPage,
-  TenantAIConfigPage,
-  TenantDetailsPage,
-  TenantsPage,
-  UsersPage,
-} from './pages/admin'
 import { AdminProtectedRoute } from './components/admin/AdminProtectedRoute'
 import { ImpersonationBanner } from './components/admin/ImpersonationBanner'
+
+// Lazy-load all page-level components
+const HomePage             = lazy(() => import('./pages/HomePage'))
+const GetStartedPage       = lazy(() => import('./pages/GetStartedPage'))
+const SignInPage            = lazy(() => import('./pages/SignInPage'))
+const SignUpPage            = lazy(() => import('./pages/SignUpPage'))
+const DashboardPage         = lazy(() => import('./pages/DashboardPage'))
+const RoleSetupPage         = lazy(() => import('./pages/RoleSetupPage'))
+const AcceptInvitationPage  = lazy(() => import('./pages/AcceptInvitationPage'))
+const TeacherOnboarding     = lazy(() => import('./components/onboarding/TeacherOnboarding'))
+const StudentOnboarding     = lazy(() => import('./components/onboarding/StudentOnboarding'))
+const ParentOnboarding      = lazy(() => import('./components/onboarding/ParentOnboarding'))
+const SettingsPage          = lazy(() => import('./pages/SettingsPage'))
+const NotFoundPage          = lazy(() => import('./pages/NotFoundPage'))
+const AccessDeniedPage      = lazy(() => import('./pages/AccessDeniedPage'))
+const AdminLayout           = lazy(() => import('./components/admin/AdminLayout').then(m => ({ default: m.AdminLayout })))
+
+// Admin pages (named exports)
+const ActivityPage          = lazy(() => import('./pages/admin').then(m => ({ default: m.ActivityPage })))
+const AdminDashboardPage    = lazy(() => import('./pages/admin').then(m => ({ default: m.AdminDashboardPage })))
+const AdminSettingsPage     = lazy(() => import('./pages/admin').then(m => ({ default: m.AdminSettingsPage })))
+const TenantAIConfigPage    = lazy(() => import('./pages/admin').then(m => ({ default: m.TenantAIConfigPage })))
+const TenantDetailsPage     = lazy(() => import('./pages/admin').then(m => ({ default: m.TenantDetailsPage })))
+const TenantsPage           = lazy(() => import('./pages/admin').then(m => ({ default: m.TenantsPage })))
+const UsersPage             = lazy(() => import('./pages/admin').then(m => ({ default: m.UsersPage })))
 
 function App() {
   return (
@@ -45,6 +46,7 @@ function App() {
                 className="min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300"
                 style={{ paddingTop: 'var(--lt-impersonation-offset, 0px)' }}
               >
+                <Suspense fallback={null}>
                 <Routes>
               {/* Public routes */}
               <Route path="/" element={<HomePage />} />
@@ -187,6 +189,7 @@ function App() {
               {/* 404 Catch-all route - must be last */}
               <Route path="*" element={<NotFoundPage />} />
                 </Routes>
+                </Suspense>
               </div>
             </ErrorBoundary>
           </ToastProvider>

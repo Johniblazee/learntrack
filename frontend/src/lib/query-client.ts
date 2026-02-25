@@ -22,7 +22,7 @@ export const queryClient = new QueryClient({
       retryDelay: 1000,
 
       // Refetch on window focus
-      refetchOnWindowFocus: true,
+      refetchOnWindowFocus: false,
 
       // Refetch on reconnect
       refetchOnReconnect: true,

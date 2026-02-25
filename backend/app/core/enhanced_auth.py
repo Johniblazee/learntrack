@@ -36,6 +36,10 @@ IMPERSONATION_SESSION_STATE_KEY = "impersonation_session_id"
 # TTL of 5 minutes means we'll re-sync at most once every 5 minutes per user
 _user_sync_cache: TTLCache = TTLCache(maxsize=10000, ttl=300)
 
+# Cache for DB user lookup - avoids hitting DB on every request
+# TTL of 60 seconds: user data is refreshed at most once per minute
+_user_db_cache: TTLCache = TTLCache(maxsize=10000, ttl=60)
+
 # Cache for failed Clerk API calls to avoid spamming logs
 # Key: user_id, Value: (failure_count, last_failure_time)
 # After 5 failures, we stop trying for 1 hour
@@ -383,7 +387,7 @@ class EnhancedClerkJWTBearer:
                 logger.debug("Filled missing user data from database", user_id=user_id)
 
             # Only call Clerk API if still missing data
-            if not email or not name or not metadata:
+            if not email or not name or metadata is None:
                 logger.info("Fetching user data from Clerk API", user_id=user_id)
                 user_data = await self._fetch_user_from_clerk(user_id)
 
@@ -535,18 +539,18 @@ class EnhancedClerkJWTBearer:
 
     async def _get_user_from_database(self, clerk_id: str) -> Optional[dict]:
         """Get user from database by clerk_id to check for super admin status"""
+        if clerk_id in _user_db_cache:
+            return _user_db_cache[clerk_id]
         try:
             db = await get_database()
-
-            # Check all role collections for the user
-            collections = ["tutors", "students", "parents"]
-            for collection_name in collections:
-                collection = db[collection_name]
-                user = await collection.find_one({"clerk_id": clerk_id})
-                if user:
-                    return user
-
-            return None
+            results = await asyncio.gather(
+                db["tutors"].find_one({"clerk_id": clerk_id}),
+                db["students"].find_one({"clerk_id": clerk_id}),
+                db["parents"].find_one({"clerk_id": clerk_id}),
+            )
+            user = next((r for r in results if r), None)
+            _user_db_cache[clerk_id] = user
+            return user
         except Exception as e:
             logger.error(
                 "Failed to get user from database", error=str(e), clerk_id=clerk_id
