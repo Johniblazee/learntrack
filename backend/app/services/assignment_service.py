@@ -162,21 +162,27 @@ class AssignmentService:
                 )
                 assignment_id_str = str(result.inserted_id)
 
-                # Send to each student
+                # Fetch all student docs in one query for email + activity data
+                student_docs_list = await self.db.students.find(
+                    {"clerk_id": {"$in": list(student_ids)}}
+                ).to_list(length=None)
+                student_docs_map = {
+                    doc["clerk_id"]: doc for doc in student_docs_list if doc.get("clerk_id")
+                }
+
+                notification_due_date = (
+                    assignment_data.due_date
+                    if assignment_data.due_date is not None
+                    else datetime.now(timezone.utc)
+                )
+
+                # Build all notifications and send emails in one pass
+                bulk_notifications = []
                 for student_id in student_ids:
                     try:
-                        notification_due_date = (
-                            assignment_data.due_date
-                            if assignment_data.due_date is not None
-                            else datetime.now(timezone.utc)
-                        )
-                        student = await self.db.students.find_one(
-                            {"clerk_id": student_id}
-                        )
+                        student = student_docs_map.get(student_id)
                         student_name = (
-                            student.get("name", "Student")
-                            if isinstance(student, dict)
-                            else "Student"
+                            student.get("name", "Student") if isinstance(student, dict) else "Student"
                         )
 
                         if student and student.get("email"):
@@ -189,7 +195,7 @@ class AssignmentService:
                                 assignment_link=assignment_link,
                             )
 
-                        await notification_service.create_notification(
+                        bulk_notifications.append(
                             NotificationCreate(
                                 title="New assignment assigned",
                                 message=f"{assignment_data.title} was assigned by {tutor_name}",
@@ -221,10 +227,17 @@ class AssignmentService:
                         )
                     except Exception as e:
                         logger.warning(
-                            "Failed to send assignment notification",
+                            "Failed to prepare assignment notification",
                             student_id=student_id,
                             error=str(e),
                         )
+
+                # Bulk insert all notifications in a single DB round-trip
+                if bulk_notifications:
+                    try:
+                        await notification_service.bulk_create_notifications(bulk_notifications)
+                    except Exception as e:
+                        logger.warning("Failed to bulk create notifications", error=str(e))
             except Exception as e:
                 logger.warning("Failed to send assignment notifications", error=str(e))
 
@@ -280,10 +293,14 @@ class AssignmentService:
             cursor = await _maybe_await(self.collection.find(query))
 
             if page is None or per_page is None:
+                # Cap at 200 to prevent unbounded collection scans
+                max_docs = 200
                 assignment_docs = []
                 if hasattr(cursor, "to_list"):
-                    assignment_docs = await _maybe_await(cursor.to_list(length=None))
+                    assignment_docs = await _maybe_await(cursor.to_list(length=max_docs))
                 return [_convert_doc_to_assignment(doc) for doc in assignment_docs]
+
+            per_page = min(per_page, 200)
 
             if hasattr(cursor, "sort"):
                 cursor = await _maybe_await(cursor.sort("created_at", -1))

@@ -112,29 +112,56 @@ async def list_students_for_tutor(
             tutor_id=current_user.clerk_id, skip=pagination.skip, limit=pagination.limit
         )
 
-        # Enrich students with parent information
-        enriched_students = []
+        # Batch-fetch parents for all students with a single $in query (avoids N+1)
+        student_identifier_map: Dict[str, set] = {}
         for student in students:
-            student_dict = student.model_dump()
+            identifiers = {s for s in (str(student.clerk_id or ""), str(student.id or "")) if s}
+            student_identifier_map[str(student.id)] = identifiers
 
-            # Find parents linked to this student (supports legacy + current relation fields)
-            student_identifiers = list(
-                {
-                    str(student.clerk_id or ""),
-                    str(student.id or ""),
-                }
-            )
-            parent_link_criteria = _build_parent_link_criteria(student_identifiers)
+        # Collect all expanded values across all students for a single query
+        all_expanded: List[Any] = []
+        seen_keys: set = set()
+        for identifiers in student_identifier_map.values():
+            for val in _expand_student_identifier_values(list(identifiers)):
+                key = str(val)
+                if key not in seen_keys:
+                    all_expanded.append(val)
+                    seen_keys.add(key)
+
+        parents_by_student: Dict[str, List[Dict[str, Any]]] = {
+            str(s.id): [] for s in students
+        }
+        if all_expanded:
             parent_cursor = db.parents.find(
                 {
-                    "$or": parent_link_criteria,
+                    "$or": [
+                        {"student_ids": {"$in": all_expanded}},
+                        {"parent_children": {"$in": all_expanded}},
+                    ],
                     "tutor_id": current_user.clerk_id,
                     "is_active": {"$ne": False},
                 }
             )
-            parents = await parent_cursor.to_list(length=10)
+            all_parents = await parent_cursor.to_list(length=None)
+            seen_parent_ids: Dict[str, set] = {str(s.id): set() for s in students}
+            for parent in all_parents:
+                parent_id = str(parent.get("_id", ""))
+                parent_refs = {
+                    str(sid)
+                    for sid in parent.get("student_ids", []) + parent.get("parent_children", [])
+                    if sid
+                }
+                for student in students:
+                    student_id_str = str(student.id)
+                    if student_identifier_map[student_id_str] & parent_refs:
+                        if parent_id not in seen_parent_ids[student_id_str]:
+                            seen_parent_ids[student_id_str].add(parent_id)
+                            parents_by_student[student_id_str].append(parent)
 
-            # Add parent names to student data
+        enriched_students = []
+        for student in students:
+            student_dict = student.model_dump()
+            parents = parents_by_student[str(student.id)]
             if parents:
                 parent_names = [p.get("name", "Unknown") for p in parents]
                 student_dict["parent_name"] = ", ".join(parent_names)
@@ -142,7 +169,6 @@ async def list_students_for_tutor(
             else:
                 student_dict["parent_name"] = None
                 student_dict["parent_ids"] = []
-
             enriched_students.append(student_dict)
 
         # Return paginated response

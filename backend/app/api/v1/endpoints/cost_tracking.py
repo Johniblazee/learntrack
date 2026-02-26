@@ -337,76 +337,71 @@ async def get_admin_usage_summary(
 
     base_match_stage = {"$match": {"timestamp": {"$gte": period_start}}}
 
-    overall_pipeline = [
+    # Single $facet pipeline replaces 4 separate aggregation calls (M4)
+    facet_pipeline = [
         base_match_stage,
         {
-            "$group": {
-                "_id": None,
-                "total_cost": {"$sum": "$total_cost"},
-                "total_input_tokens": {"$sum": "$input_tokens"},
-                "total_output_tokens": {"$sum": "$output_tokens"},
-                "total_requests": {"$sum": 1},
+            "$facet": {
+                "overall": [
+                    {
+                        "$group": {
+                            "_id": None,
+                            "total_cost": {"$sum": "$total_cost"},
+                            "total_input_tokens": {"$sum": "$input_tokens"},
+                            "total_output_tokens": {"$sum": "$output_tokens"},
+                            "total_requests": {"$sum": 1},
+                        }
+                    }
+                ],
+                "by_provider": [
+                    {
+                        "$group": {
+                            "_id": "$provider",
+                            "total_cost": {"$sum": "$total_cost"},
+                            "total_input_tokens": {"$sum": "$input_tokens"},
+                            "total_output_tokens": {"$sum": "$output_tokens"},
+                            "request_count": {"$sum": 1},
+                        }
+                    },
+                    {"$sort": {"total_cost": -1, "request_count": -1}},
+                ],
+                "by_operation": [
+                    {
+                        "$group": {
+                            "_id": "$operation",
+                            "total_cost": {"$sum": "$total_cost"},
+                            "total_input_tokens": {"$sum": "$input_tokens"},
+                            "total_output_tokens": {"$sum": "$output_tokens"},
+                            "request_count": {"$sum": 1},
+                        }
+                    },
+                    {"$sort": {"total_cost": -1, "request_count": -1}},
+                    {"$limit": 10},
+                ],
+                "top_tenants": [
+                    {
+                        "$group": {
+                            "_id": "$tenant_id",
+                            "total_cost": {"$sum": "$total_cost"},
+                            "total_input_tokens": {"$sum": "$input_tokens"},
+                            "total_output_tokens": {"$sum": "$output_tokens"},
+                            "request_count": {"$sum": 1},
+                            "last_request_at": {"$max": "$timestamp"},
+                        }
+                    },
+                    {"$sort": {"total_cost": -1, "request_count": -1}},
+                    {"$limit": 10},
+                ],
             }
         },
     ]
 
-    provider_pipeline = [
-        base_match_stage,
-        {
-            "$group": {
-                "_id": "$provider",
-                "total_cost": {"$sum": "$total_cost"},
-                "total_input_tokens": {"$sum": "$input_tokens"},
-                "total_output_tokens": {"$sum": "$output_tokens"},
-                "request_count": {"$sum": 1},
-            }
-        },
-        {"$sort": {"total_cost": -1, "request_count": -1}},
-    ]
-
-    operation_pipeline = [
-        base_match_stage,
-        {
-            "$group": {
-                "_id": "$operation",
-                "total_cost": {"$sum": "$total_cost"},
-                "total_input_tokens": {"$sum": "$input_tokens"},
-                "total_output_tokens": {"$sum": "$output_tokens"},
-                "request_count": {"$sum": 1},
-            }
-        },
-        {"$sort": {"total_cost": -1, "request_count": -1}},
-        {"$limit": 10},
-    ]
-
-    top_tenants_pipeline = [
-        base_match_stage,
-        {
-            "$group": {
-                "_id": "$tenant_id",
-                "total_cost": {"$sum": "$total_cost"},
-                "total_input_tokens": {"$sum": "$input_tokens"},
-                "total_output_tokens": {"$sum": "$output_tokens"},
-                "request_count": {"$sum": 1},
-                "last_request_at": {"$max": "$timestamp"},
-            }
-        },
-        {"$sort": {"total_cost": -1, "request_count": -1}},
-        {"$limit": 10},
-    ]
-
-    overall_result = await db.cost_tracking.aggregate(overall_pipeline).to_list(
-        length=1
-    )
-    provider_breakdown = await db.cost_tracking.aggregate(provider_pipeline).to_list(
-        length=20
-    )
-    operation_breakdown = await db.cost_tracking.aggregate(operation_pipeline).to_list(
-        length=10
-    )
-    top_tenants_raw = await db.cost_tracking.aggregate(top_tenants_pipeline).to_list(
-        length=10
-    )
+    facet_result = await db.cost_tracking.aggregate(facet_pipeline).to_list(length=1)
+    facet_data = facet_result[0] if facet_result else {}
+    overall_result = facet_data.get("overall", [])
+    provider_breakdown = facet_data.get("by_provider", [])
+    operation_breakdown = facet_data.get("by_operation", [])
+    top_tenants_raw = facet_data.get("top_tenants", [])
 
     usage_tenant_ids = await db.cost_tracking.distinct(
         "tenant_id", {"timestamp": {"$gte": period_start}}

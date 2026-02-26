@@ -54,6 +54,46 @@ class NotificationService:
             logger.error("Failed to create notification", error=str(e))
             raise
     
+    async def bulk_create_notifications(
+        self,
+        notifications_data: List[NotificationCreate]
+    ) -> int:
+        """Create multiple notifications in a single DB round-trip using insert_many."""
+        if not notifications_data:
+            return 0
+        try:
+            now = datetime.now(timezone.utc)
+            docs = []
+            for notification_data in notifications_data:
+                doc = notification_data.model_dump()
+                doc["is_read"] = False
+                doc["created_at"] = now
+                doc["read_at"] = None
+                docs.append(doc)
+
+            result = await self.collection.insert_many(docs, ordered=False)
+            inserted_count = len(result.inserted_ids)
+
+            # Fire WebSocket notifications concurrently (best-effort)
+            try:
+                from app.api.v1.endpoints.websocket import send_notification_via_websocket
+                import asyncio
+                ws_tasks = []
+                for doc, inserted_id in zip(docs, result.inserted_ids):
+                    doc_copy = dict(doc)
+                    doc_copy["_id"] = str(inserted_id)
+                    ws_tasks.append(
+                        send_notification_via_websocket(doc["recipient_id"], doc_copy)
+                    )
+                await asyncio.gather(*ws_tasks, return_exceptions=True)
+            except Exception as ws_error:
+                logger.warning("Failed to send bulk WebSocket notifications", error=str(ws_error))
+
+            return inserted_count
+        except Exception as e:
+            logger.error("Failed to bulk create notifications", error=str(e))
+            raise
+
     async def get_user_notifications(
         self,
         user_id: str,

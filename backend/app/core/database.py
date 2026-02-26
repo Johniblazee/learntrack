@@ -95,6 +95,12 @@ class Database:
             await self.database.assignments.create_index("student_ids")
             await self.database.assignments.create_index("due_date")
             await self.database.assignments.create_index("status")
+            await self.database.assignments.create_index(
+                [("tutor_id", 1), ("status", 1)]
+            )
+            await self.database.assignments.create_index(
+                [("tutor_id", 1), ("created_at", -1)]
+            )
 
             # Progress collection indexes
             await self.database.progress.create_index(
@@ -189,6 +195,24 @@ class Database:
             )
             await self.database.invitations.create_index(
                 [("tutor_id", 1), ("created_at", -1)]
+            )
+
+            # Notifications collection indexes
+            await self.database.notifications.create_index("recipient_id")
+            await self.database.notifications.create_index("is_read")
+            await self.database.notifications.create_index(
+                [("recipient_id", 1), ("is_read", 1)]
+            )
+            await self.database.notifications.create_index(
+                [("recipient_id", 1), ("created_at", -1)]
+            )
+
+            # Text search indexes
+            await self.database.questions.create_index(
+                [("question_text", "text"), ("topic", "text")]
+            )
+            await self.database.materials.create_index(
+                [("title", "text"), ("description", "text")]
             )
 
             # Assignment templates collection indexes

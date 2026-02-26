@@ -2,7 +2,8 @@
  * Conversations View - Real-time chat interface
  * Design: Split panel with conversation list (left) and chat area (right)
  */
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useAuth } from "@clerk/clerk-react"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -69,6 +70,8 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
   const [messagesLoading, setMessagesLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Scroll container for the conversation list — used by the virtualizer (H8)
+  const convListRef = useRef<HTMLDivElement>(null)
 
   // Initialize socket connection
   useEffect(() => {
@@ -418,6 +421,78 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
 
   const isConversationsLoading = loading || visibilityLoading
 
+  // Virtualizer for the conversation list — only renders visible rows (H8)
+  const convVirtualizer = useVirtualizer({
+    count: filteredConversations.length,
+    getScrollElement: () => convListRef.current,
+    estimateSize: () => 76,
+    overscan: 5,
+  })
+
+  const renderConversationItem = useCallback((index: number) => {
+    const conv = filteredConversations[index]
+    const { name } = getOtherParticipant(conv)
+    const isSelected = selectedConversation?._id === conv._id
+    const unreadCount = conv.unread_count[userId || ""] || 0
+    const hasUnread = unreadCount > 0
+
+    return (
+      <div
+        key={conv._id}
+        onClick={() => handleSelectConversation(conv)}
+        className={cn(
+          "flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200 mb-1",
+          isSelected
+            ? "bg-accent/20 border border-accent/30"
+            : "hover:bg-muted/50 border border-transparent"
+        )}
+      >
+        {/* Avatar with online indicator */}
+        <div className="relative shrink-0">
+          <Avatar className="h-10 w-10">
+            <AvatarFallback className={cn(
+              "text-sm font-medium",
+              isSelected ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"
+            )}>
+              {getInitials(name)}
+            </AvatarFallback>
+          </Avatar>
+          <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-card" />
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className={cn(
+                "text-sm truncate",
+                hasUnread ? "font-semibold text-foreground" : "font-medium text-foreground"
+              )}>
+                {name}
+              </p>
+              <p className="text-xs text-muted-foreground">{formatConversationTime(conv.last_message_at)}</p>
+            </div>
+            {hasUnread && (
+              <span className="h-2.5 w-2.5 rounded-full bg-accent shrink-0 mt-1" />
+            )}
+          </div>
+          {conv.last_message && (
+            <p className={cn(
+              "text-xs mt-1 truncate",
+              hasUnread ? "text-accent font-medium" : "text-muted-foreground"
+            )}>
+              {conv.last_delivery_method === 'email'
+                ? `Email: ${conv.last_message}`
+                : routeMode === 'emails'
+                  ? `Chat: ${conv.last_message}`
+                  : conv.last_message}
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }, [filteredConversations, getOtherParticipant, handleSelectConversation, selectedConversation, userId, routeMode])
+
 
   return (
     <div className="flex h-[calc(100vh-8rem)] bg-background rounded-lg overflow-hidden border border-border">
@@ -437,8 +512,11 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
           </div>
         </div>
 
-        {/* Conversations List */}
-        <ScrollArea className="flex-1">
+        {/* Conversations List — virtualized to handle large lists without DOM bloat (H8) */}
+        <div
+          ref={convListRef}
+          className="flex-1 overflow-y-auto"
+        >
           <div className="p-2">
             {isConversationsLoading ? (
               /* Conversation List Skeleton */
@@ -448,9 +526,7 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
                     key={i}
                     className="flex items-start gap-3 p-3 rounded-lg"
                   >
-                    {/* Avatar skeleton */}
                     <Skeleton className="h-10 w-10 rounded-full shrink-0" />
-                    {/* Content skeleton */}
                     <div className="flex-1 space-y-2">
                       <div className="flex items-center justify-between">
                         <Skeleton className="h-4 w-28" />
@@ -467,72 +543,30 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
                 <p className="text-sm text-muted-foreground">{emptyConversationLabel}</p>
               </div>
             ) : (
-              filteredConversations.map((conv) => {
-                const { name } = getOtherParticipant(conv)
-                const isSelected = selectedConversation?._id === conv._id
-                const unreadCount = conv.unread_count[userId || ""] || 0
-                const hasUnread = unreadCount > 0
-
-                return (
+              <div
+                style={{
+                  height: `${convVirtualizer.getTotalSize()}px`,
+                  position: 'relative',
+                }}
+              >
+                {convVirtualizer.getVirtualItems().map((virtualItem) => (
                   <div
-                    key={conv._id}
-                    onClick={() => handleSelectConversation(conv)}
-                    className={cn(
-                      "flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200 mb-1",
-                      isSelected
-                        ? "bg-accent/20 border border-accent/30"
-                        : "hover:bg-muted/50 border border-transparent"
-                    )}
+                    key={virtualItem.key}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
                   >
-                    {/* Avatar with online indicator */}
-                    <div className="relative shrink-0">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className={cn(
-                          "text-sm font-medium",
-                          isSelected ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"
-                        )}>
-                          {getInitials(name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      {/* Online indicator */}
-                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-card" />
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className={cn(
-                            "text-sm truncate",
-                            hasUnread ? "font-semibold text-foreground" : "font-medium text-foreground"
-                          )}>
-                            {name}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{formatConversationTime(conv.last_message_at)}</p>
-                        </div>
-                        {hasUnread && (
-                          <span className="h-2.5 w-2.5 rounded-full bg-accent shrink-0 mt-1" />
-                        )}
-                      </div>
-                      {conv.last_message && (
-                        <p className={cn(
-                          "text-xs mt-1 truncate",
-                          hasUnread ? "text-accent font-medium" : "text-muted-foreground"
-                        )}>
-                          {conv.last_delivery_method === 'email'
-                            ? `Email: ${conv.last_message}`
-                            : routeMode === 'emails'
-                              ? `Chat: ${conv.last_message}`
-                              : conv.last_message}
-                        </p>
-                      )}
-                    </div>
+                    {renderConversationItem(virtualItem.index)}
                   </div>
-                )
-              })
+                ))}
+              </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
       </div>
 
       {/* Right Panel - Chat Area */}

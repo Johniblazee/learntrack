@@ -48,6 +48,7 @@
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@tanstack/react-query": "^5.90.8",
     "@tanstack/react-query-devtools": "^5.90.2",
+    "@tanstack/react-virtual": "^3.13.19",
     "@uploadthing/react": "^7.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

@@ -9,8 +9,11 @@ const SOCKET_URL = RAW_SOCKET_BASE.replace(/\/api\/v\d+$/, '').replace(/\/+$/, '
 
 class SocketClient {
   private socket: Socket | null = null;
+  /** Reference count — socket is only torn down when this reaches zero (M1). */
+  private _refCount: number = 0;
 
   connect(token: string) {
+    this._refCount++;
     if (this.socket?.connected) {
       return this.socket;
     }
@@ -40,6 +43,17 @@ class SocketClient {
   }
 
   disconnect() {
+    this._refCount = Math.max(0, this._refCount - 1);
+    // Only close the underlying socket when no consumers remain (M1).
+    if (this._refCount === 0 && this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+  }
+
+  /** Force-close regardless of reference count (e.g. logout). */
+  forceDisconnect() {
+    this._refCount = 0;
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;

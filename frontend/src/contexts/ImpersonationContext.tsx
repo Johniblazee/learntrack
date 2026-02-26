@@ -1,10 +1,17 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import {
   IMPERSONATION_SESSION_CHANGED_EVENT,
   IMPERSONATION_STORAGE_KEY,
 } from '@/lib/api-client'
 import { API_BASE_URL } from '@/lib/config'
+
+// localStorage key that tracks when any tab last validated the session.
+// Used so other tabs can skip redundant API calls (M5).
+const LAST_VALIDATED_KEY = `${IMPERSONATION_STORAGE_KEY}_last_validated`
+
+// BroadcastChannel name shared across tabs for the same origin.
+const BC_CHANNEL_NAME = 'learntrack_impersonation'
 
 function emitImpersonationSessionChangedEvent() {
   if (typeof window === 'undefined') {
@@ -28,6 +35,10 @@ interface ImpersonationSession {
   targetUser: ImpersonatedUser
   expiresInMinutes: number
 }
+
+type BcMessage =
+  | { type: 'session_validated'; session: ImpersonationSession }
+  | { type: 'session_cleared' }
 
 interface ImpersonationContextType {
   isImpersonating: boolean
@@ -86,11 +97,37 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // BroadcastChannel for cross-tab coordination (M5)
+  const bcRef = useRef<BroadcastChannel | null>(null)
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return
+    const bc = new BroadcastChannel(BC_CHANNEL_NAME)
+    bcRef.current = bc
+
+    bc.onmessage = (event: MessageEvent<BcMessage>) => {
+      if (event.data.type === 'session_validated') {
+        // Another tab validated — adopt its result without an API call
+        setSession(event.data.session)
+      } else if (event.data.type === 'session_cleared') {
+        setSession(null)
+      }
+    }
+
+    return () => {
+      bc.close()
+      bcRef.current = null
+    }
+  }, [])
+
   const persistSession = useCallback((nextSession: ImpersonationSession) => {
     setSession(nextSession)
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
+      window.localStorage.setItem(LAST_VALIDATED_KEY, Date.now().toString())
       emitImpersonationSessionChangedEvent()
+      // Broadcast to other tabs so they don't need to hit the API (M5)
+      bcRef.current?.postMessage({ type: 'session_validated', session: nextSession } satisfies BcMessage)
     }
   }, [])
 
@@ -98,15 +135,25 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
     setSession(null)
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(STORAGE_KEY)
+      window.localStorage.removeItem(LAST_VALIDATED_KEY)
       emitImpersonationSessionChangedEvent()
+      bcRef.current?.postMessage({ type: 'session_cleared' } satisfies BcMessage)
     }
   }, [])
 
-  const validateSession = useCallback(async (sessionId: string) => {
+  const validateSession = useCallback(async (sessionId: string, force = false) => {
     const normalizedSessionId = sessionId.trim()
     if (!normalizedSessionId) {
       clearSession()
       return false
+    }
+
+    // Skip API call if another tab validated within the last 55 seconds (M5)
+    if (!force && typeof window !== 'undefined') {
+      const lastValidated = parseInt(window.localStorage.getItem(LAST_VALIDATED_KEY) || '0', 10)
+      if (Date.now() - lastValidated < 55_000) {
+        return true
+      }
     }
 
     try {

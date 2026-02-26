@@ -201,7 +201,7 @@ export function useNotifications(
     },
     staleTime: 15 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 20 * 1000,
+    // refetchInterval removed — backend WebSocket events invalidate this query (C3)
   })
 }
 
@@ -210,7 +210,7 @@ export function useNotifications(
  */
 export function useUnreadNotificationCount() {
   const client = useApiClient()
-  
+
   return useQuery({
     queryKey: ['notifications', 'unread-count'],
     queryFn: async () => {
@@ -220,7 +220,7 @@ export function useUnreadNotificationCount() {
     },
     staleTime: 10 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 15 * 1000,
+    // refetchInterval removed — backend WebSocket events invalidate this query (C3)
   })
 }
 
@@ -332,7 +332,7 @@ export function useRecentActivity(limit: number = 10) {
     },
     staleTime: 15 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 20 * 1000,
+    // refetchInterval removed — backend WebSocket events invalidate this query (C3)
   })
 }
 
@@ -658,7 +658,7 @@ export function useAnnouncements() {
     },
     staleTime: 15 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 20 * 1000,
+    // refetchInterval removed — backend WebSocket events invalidate this query (C3)
   })
 }
 
@@ -735,7 +735,7 @@ export function useMyActivities(limit: number = 20) {
     },
     staleTime: 20 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 20 * 1000,
+    // refetchInterval removed — backend WebSocket events invalidate this query (C3)
   })
 }
 

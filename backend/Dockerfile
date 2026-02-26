@@ -49,4 +49,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 
 # Command to run the application
 # Render provides PORT environment variable, so we use that
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn app.main:app --workers 4 --host 0.0.0.0 --port ${PORT:-8000}

@@ -3,6 +3,7 @@ Audit logging middleware for automatic activity tracking.
 Logs all API requests with user context for admin monitoring.
 """
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from typing import Optional, List, Set
@@ -95,10 +96,12 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
             # Calculate duration
             duration_ms = int((time.time() - start_time) * 1000)
 
-            # Only log if we have a user context (authenticated requests)
+            # Only log if we have a user context (authenticated requests).
+            # Fire-and-forget via asyncio.ensure_future so the DB write happens
+            # after the response is returned (M3 — removes audit write from hot path).
             if user_id:
-                try:
-                    await self._log_request(
+                asyncio.ensure_future(
+                    self._log_request(
                         request=request,
                         status_code=status_code,
                         duration_ms=duration_ms,
@@ -112,9 +115,7 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
                         resource=resource,
                         resource_id=resource_id,
                     )
-                except Exception as e:
-                    # Log failure shouldn't break the request
-                    logger.warning("Failed to create audit log", error=str(e))
+                )
 
         return response
 

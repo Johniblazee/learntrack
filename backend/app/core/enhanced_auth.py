@@ -21,6 +21,9 @@ from app.core.database import get_database
 
 logger = structlog.get_logger()
 
+# Shared httpx client — reuses connection pool across requests (M2)
+_clerk_http_client = httpx.AsyncClient(timeout=10.0)
+
 # Header containing active admin impersonation session ID.
 IMPERSONATION_SESSION_HEADER = "x-learntrack-impersonation-session"
 
@@ -291,28 +294,26 @@ class EnhancedClerkJWTBearer:
 
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"https://api.clerk.com/v1/users/{user_id}",
-                        headers={
-                            "Authorization": f"Bearer {self.clerk_secret}",
-                            "Content-Type": "application/json",
-                        },
-                        timeout=10.0,
-                    )
+                response = await _clerk_http_client.get(
+                    f"https://api.clerk.com/v1/users/{user_id}",
+                    headers={
+                        "Authorization": f"Bearer {self.clerk_secret}",
+                        "Content-Type": "application/json",
+                    },
+                )
 
-                    if response.status_code == 200:
-                        # Success! Clear any failure cache
-                        if user_id in _clerk_api_failure_cache:
-                            del _clerk_api_failure_cache[user_id]
-                        return response.json()
-                    else:
-                        logger.warning(
-                            "Failed to fetch user from Clerk",
-                            status=response.status_code,
-                            user_id=user_id,
-                        )
-                        return {}
+                if response.status_code == 200:
+                    # Success! Clear any failure cache
+                    if user_id in _clerk_api_failure_cache:
+                        del _clerk_api_failure_cache[user_id]
+                    return response.json()
+                else:
+                    logger.warning(
+                        "Failed to fetch user from Clerk",
+                        status=response.status_code,
+                        user_id=user_id,
+                    )
+                    return {}
 
             except httpx.NetworkError as e:
                 # Network errors (DNS, connection issues) - retry with backoff
@@ -506,8 +507,8 @@ class EnhancedClerkJWTBearer:
                 admin_permissions=admin_permissions,
             )
 
-            # Sync user with database
-            await self._sync_user_to_database(user_context)
+            # Sync user with database — pass db_user to avoid a redundant re-query (H2)
+            await self._sync_user_to_database(user_context, db_user=db_user)
 
             return user_context
 
@@ -558,7 +559,10 @@ class EnhancedClerkJWTBearer:
             return None
 
     async def _sync_user_to_database(
-        self, user_context: ClerkUserContext, force: bool = False
+        self,
+        user_context: ClerkUserContext,
+        force: bool = False,
+        db_user: Optional[dict] = None,
     ):
         """Sync user information to database with caching to avoid syncing on every request"""
         try:
@@ -576,10 +580,15 @@ class EnhancedClerkJWTBearer:
             db = await get_database()
             user_service = UserService(db)
 
-            # Check if user exists
-            existing_user = await user_service.get_user_by_clerk_id(
-                user_context.clerk_id
-            )
+            # Reuse the already-fetched db_user when available to avoid a redundant
+            # triple-collection query (H2). Fall back to a fresh lookup only if needed.
+            existing_user: Any
+            if db_user is not None:
+                existing_user = db_user  # already fetched in _extract_user_context
+            else:
+                existing_user = await user_service.get_user_by_clerk_id(
+                    user_context.clerk_id
+                )
 
             if not existing_user:
                 # Create new user - always sync new users
