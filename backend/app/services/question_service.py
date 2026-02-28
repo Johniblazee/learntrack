@@ -23,7 +23,7 @@ from app.core.exceptions import (
     AuthorizationError,
     ValidationError,
 )
-from app.core.utils import to_object_id, escape_regex
+from app.core.utils import to_object_id
 
 logger = structlog.get_logger()
 
@@ -201,10 +201,7 @@ class QuestionService:
             if question_type:
                 query["question_type"] = question_type
             if search:
-                query["question_text"] = {
-                    "$regex": escape_regex(search),
-                    "$options": "i",
-                }
+                query["$text"] = {"$search": search}
 
             # Get total count
             total = await self.collection.count_documents(query)

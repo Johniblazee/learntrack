@@ -142,11 +142,17 @@ async def websocket_endpoint(
 
 # Helper function to send notifications via WebSocket
 async def send_notification_via_websocket(user_id: str, notification: dict):
-    """Send a notification to a user via WebSocket"""
+    """Send a notification to a user via WebSocket (raw WS) and Socket.IO."""
+    from app.websocket.socket_manager import sio
+    from app.websocket.auth import get_user_room
+
     message = {
         "type": "notification",
         "data": notification,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+    # Raw WebSocket delivery (for clients connected via /api/v1/ws)
     await manager.send_personal_message(message, user_id)
+    # Socket.IO delivery (for clients connected via /ws/socket.io)
+    await sio.emit("notification", message, room=get_user_room(user_id))
 

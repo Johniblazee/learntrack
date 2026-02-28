@@ -3,5 +3,6 @@
     "allow": [
       "Bash(cd:*)"
     ]
-  }
+  },
+  "outputStyle": "Explanatory"
 }

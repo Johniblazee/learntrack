@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from app.core.database import database
 from app.core.config import settings
+from app.core.enhanced_auth import _clerk_http_client
 from app.models.responses import HealthResponse
 from app.core.exceptions import (
     LearnTrackException,
@@ -157,6 +158,7 @@ async def shutdown_event():
     """Close database connection on shutdown"""
     try:
         await database.close_database_connection()
+        await _clerk_http_client.aclose()
         logger.info("FastAPI application shutdown successfully")
     except Exception as e:
         logger.error("Error during FastAPI application shutdown", error=str(e))

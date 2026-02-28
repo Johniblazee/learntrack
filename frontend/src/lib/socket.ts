@@ -121,6 +121,14 @@ class SocketClient {
   offMessageRead(callback: (data: any) => void) {
     this.socket?.off('message_read_receipt', callback);
   }
+
+  onNotification(callback: (data: any) => void) {
+    this.socket?.on('notification', callback);
+  }
+
+  offNotification(callback: (data: any) => void) {
+    this.socket?.off('notification', callback);
+  }
 }
 
 export const socketClient = new SocketClient();

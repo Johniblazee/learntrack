@@ -8,6 +8,7 @@ import ParentDashboard from '@/components/ParentDashboard'
 import { LoadingState } from '@/components/ui/loading-state'
 import { useImpersonation } from '@/contexts/ImpersonationContext'
 import { useUserContext } from '@/contexts/UserContext'
+import { useNotificationSocket } from '@/hooks/useNotificationSocket'
 
 type DashboardView = 'tutor' | 'student' | 'parent'
 
@@ -20,6 +21,9 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const { role: backendRole, isBackendLoaded } = useUserContext()
   const { isImpersonating, impersonatedUser } = useImpersonation()
+
+  // Bridge Socket.IO notification events → TanStack Query invalidation (C3-GAP)
+  useNotificationSocket()
 
   const clerkRole = (user?.publicMetadata?.role || user?.unsafeMetadata?.role) as string | undefined
 
