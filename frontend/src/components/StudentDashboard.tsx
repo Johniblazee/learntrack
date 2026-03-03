@@ -584,17 +584,8 @@ export default function StudentDashboard() {
       })
     }
 
-    if (recentSubmissions.length > 0) {
-      return recentSubmissions.slice(0, 4).map((submission) => ({
-        title: "Assignment Submitted",
-        detail: `${submission.assignmentTitle} (${submission.subject})`,
-        stamp: formatTimestamp(submission.submittedAt),
-        tone: "success",
-      }))
-    }
-
     return []
-  }, [activityFeed, recentSubmissions])
+  }, [activityFeed])
 
   const announcementItems = useMemo(() => {
     if (!Array.isArray(announcements)) {

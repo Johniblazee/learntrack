@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { MathText } from '@/components/ui/math-text'
+import { Checkbox } from '@/components/ui/checkbox'
 import { API_BASE_URL } from '@/lib/config'
 
 interface Question {
@@ -678,22 +679,7 @@ export default function QuestionReviewer() {
             Review and approve AI-generated questions for quality assurance
           </p>
         </div>
-        {selectedQuestions.size > 0 && (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">
-              {selectedQuestions.size} selected
-            </span>
-            <Button
-              onClick={handleBulkApprove}
-              size="sm"
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              <ThumbsUp className="w-4 h-4 mr-2" />
-              Approve Selected
-            </Button>
-          </div>
-        )}
-      </div>
+        </div>
 
       {/* Stats Cards - Responsive grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
@@ -859,6 +845,57 @@ export default function QuestionReviewer() {
             </CardContent>
           </Card>
 
+          {/* Bulk-action / select-all bar — only shown when there are pending questions */}
+          {!loading && filteredQuestions.length > 0 && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <Checkbox
+                  checked={
+                    filteredQuestions.filter((q) => q.status === 'pending').length > 0 &&
+                    filteredQuestions
+                      .filter((q) => q.status === 'pending')
+                      .every((q) => selectedQuestions.has(q.id))
+                  }
+                  onCheckedChange={(checked) => {
+                    const pendingIds = filteredQuestions
+                      .filter((q) => q.status === 'pending')
+                      .map((q) => q.id)
+                    if (checked) {
+                      setSelectedQuestions(new Set(pendingIds))
+                    } else {
+                      setSelectedQuestions(new Set())
+                    }
+                  }}
+                />
+                <span className="text-sm text-muted-foreground">
+                  {selectedQuestions.size > 0
+                    ? `${selectedQuestions.size} selected`
+                    : 'Select all pending'}
+                </span>
+              </label>
+              {selectedQuestions.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleBulkApprove}
+                    className="bg-green-600 hover:bg-green-700 text-white h-8"
+                  >
+                    <ThumbsUp className="w-3.5 h-3.5 mr-1.5" />
+                    Approve {selectedQuestions.size}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSelectedQuestions(new Set())}
+                    className="h-8 text-muted-foreground"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Questions List */}
           <Card className="border-border shadow-sm bg-card overflow-visible">
             <CardHeader className="border-b border-border">
@@ -943,11 +980,11 @@ export default function QuestionReviewer() {
                         <div className="flex items-center justify-between gap-4 px-6 py-4 bg-muted/30 border-b border-border">
                           <div className="flex items-center gap-3 flex-wrap">
                             {question.status === 'pending' && (
-                              <input
-                                type="checkbox"
+                              <Checkbox
                                 checked={selectedQuestions.has(question.id)}
-                                onChange={() => toggleQuestionSelection(question.id)}
-                                className="w-5 h-5 accent-primary rounded focus:ring-primary"
+                                onCheckedChange={() => toggleQuestionSelection(question.id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-5 h-5"
                               />
                             )}
                             <Badge className={`border-0 ${getStatusColor(question.status)}`}>
@@ -1172,34 +1209,111 @@ export default function QuestionReviewer() {
                   <p className="text-muted-foreground">No approved questions found.</p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {filteredApprovedQuestions.map((question) => (
-                    <div key={question.id} className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className="bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border-0">
-                            Approved
-                          </Badge>
-                          <Badge variant="outline" className="border-border">
-                            {question.subject}
-                          </Badge>
-                          <Badge variant="outline" className="border-border capitalize">
-                            {question.difficulty}
-                          </Badge>
+                    <Card key={question.id} className="border-border overflow-hidden">
+                      <CardContent className="p-0">
+                        {/* Header */}
+                        <div className="flex items-center justify-between gap-4 px-6 py-4 bg-muted/30 border-b border-border">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <Badge className="bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border-0">
+                              <div className="flex items-center gap-1">
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                Approved
+                              </div>
+                            </Badge>
+                            <Badge className={getDifficultyColor(question.difficulty)}>
+                              <span className="capitalize">{question.difficulty}</span>
+                            </Badge>
+                            <Badge variant="outline" className="border-border bg-background">
+                              {question.type}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-muted-foreground">{question.points} pts</span>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(question.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
                         </div>
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(question.createdAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="text-foreground font-medium leading-relaxed">
-                        <MathText>{question.text}</MathText>
-                      </div>
-                      {question.explanation && (
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {question.explanation}
-                        </p>
-                      )}
-                    </div>
+
+                        {/* Question text */}
+                        <div className="px-6 py-6">
+                          <div className="text-lg font-medium text-foreground leading-relaxed">
+                            <MathText className="text-lg">{question.text}</MathText>
+                          </div>
+                        </div>
+
+                        {/* Options */}
+                        {question.options && (
+                          <div className="px-6 pb-6">
+                            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                              Answer Options
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {question.options.map((option, optIndex) => (
+                                <div
+                                  key={optIndex}
+                                  className={`p-4 rounded-lg border-2 transition-all ${
+                                    option === question.correctAnswer
+                                      ? 'bg-green-50 dark:bg-green-950/30 border-green-500 dark:border-green-700'
+                                      : 'bg-background border-border'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <span className="font-bold text-foreground text-lg flex-shrink-0">
+                                      {String.fromCharCode(65 + optIndex)}.
+                                    </span>
+                                    <span className="text-foreground flex-1">
+                                      <MathText className="text-inherit">{option}</MathText>
+                                    </span>
+                                    {option === question.correctAnswer && (
+                                      <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-500 flex-shrink-0" />
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Info row */}
+                        <div className="px-6 pb-6">
+                          <div className="bg-muted/50 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                                Subject & Topic
+                              </p>
+                              <p className="text-sm font-medium text-foreground">
+                                {question.subject}{question.topic ? ` — ${question.topic}` : ''}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                                Correct Answer
+                              </p>
+                              <div className="text-sm font-semibold text-green-700 dark:text-green-400">
+                                <MathText className="text-inherit text-sm">{question.correctAnswer}</MathText>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Explanation */}
+                        {question.explanation && (
+                          <div className="px-6 pb-6">
+                            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                              Explanation
+                            </h4>
+                            <div className="bg-primary/5 border-l-4 border-primary rounded-r-lg p-4">
+                              <div className="text-foreground leading-relaxed">
+                                <MathText className="text-inherit">{question.explanation}</MathText>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                   ))}
                 </div>
               )}
@@ -1238,34 +1352,132 @@ export default function QuestionReviewer() {
                   <p className="text-muted-foreground">No rejected questions found.</p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {filteredRejectedQuestions.map((question) => (
-                    <div key={question.id} className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className="bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 border-0">
-                            Rejected
-                          </Badge>
-                          <Badge variant="outline" className="border-border">
-                            {question.subject}
-                          </Badge>
-                          <Badge variant="outline" className="border-border capitalize">
-                            {question.difficulty}
-                          </Badge>
+                    <Card key={question.id} className="border-border overflow-hidden">
+                      <CardContent className="p-0">
+                        {/* Header */}
+                        <div className="flex items-center justify-between gap-4 px-6 py-4 bg-muted/30 border-b border-border">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <Badge className="bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 border-0">
+                              <div className="flex items-center gap-1">
+                                <XCircle className="w-3.5 h-3.5" />
+                                Rejected
+                              </div>
+                            </Badge>
+                            <Badge className={getDifficultyColor(question.difficulty)}>
+                              <span className="capitalize">{question.difficulty}</span>
+                            </Badge>
+                            <Badge variant="outline" className="border-border bg-background">
+                              {question.type}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-muted-foreground">{question.points} pts</span>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(question.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
                         </div>
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(question.createdAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="text-foreground font-medium leading-relaxed">
-                        <MathText>{question.text}</MathText>
-                      </div>
-                      {question.reviewComments && (
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {question.reviewComments}
-                        </p>
-                      )}
-                    </div>
+
+                        {/* Question text */}
+                        <div className="px-6 py-6">
+                          <div className="text-lg font-medium text-foreground leading-relaxed">
+                            <MathText className="text-lg">{question.text}</MathText>
+                          </div>
+                        </div>
+
+                        {/* Options */}
+                        {question.options && (
+                          <div className="px-6 pb-6">
+                            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                              Answer Options
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {question.options.map((option, optIndex) => (
+                                <div
+                                  key={optIndex}
+                                  className={`p-4 rounded-lg border-2 ${
+                                    option === question.correctAnswer
+                                      ? 'bg-green-50 dark:bg-green-950/30 border-green-500 dark:border-green-700'
+                                      : 'bg-background border-border'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <span className="font-bold text-foreground text-lg flex-shrink-0">
+                                      {String.fromCharCode(65 + optIndex)}.
+                                    </span>
+                                    <span className="text-foreground flex-1">
+                                      <MathText className="text-inherit">{option}</MathText>
+                                    </span>
+                                    {option === question.correctAnswer && (
+                                      <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-500 flex-shrink-0" />
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Info row */}
+                        <div className="px-6 pb-6">
+                          <div className="bg-muted/50 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                                Subject & Topic
+                              </p>
+                              <p className="text-sm font-medium text-foreground">
+                                {question.subject}{question.topic ? ` — ${question.topic}` : ''}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                                Correct Answer
+                              </p>
+                              <div className="text-sm font-semibold text-green-700 dark:text-green-400">
+                                <MathText className="text-inherit text-sm">{question.correctAnswer}</MathText>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Explanation */}
+                        {question.explanation && (
+                          <div className="px-6 pb-6">
+                            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                              Explanation
+                            </h4>
+                            <div className="bg-primary/5 border-l-4 border-primary rounded-r-lg p-4">
+                              <div className="text-foreground leading-relaxed">
+                                <MathText className="text-inherit">{question.explanation}</MathText>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Review comments */}
+                        {question.reviewComments && (
+                          <div className="px-6 pb-6">
+                            <div className="bg-red-50 dark:bg-red-950/20 p-4 rounded-lg border border-red-200 dark:border-red-800">
+                              <h4 className="font-semibold text-foreground mb-2 flex items-center">
+                                <MessageSquare className="w-4 h-4 mr-2 text-red-600 dark:text-red-500" />
+                                Rejection Reason
+                              </h4>
+                              <div className="text-foreground text-sm leading-relaxed">
+                                <MathText className="text-inherit text-sm">{question.reviewComments}</MathText>
+                              </div>
+                              {question.reviewedBy && (
+                                <p className="text-xs text-muted-foreground mt-3 pt-3 border-t border-red-200 dark:border-red-800">
+                                  Reviewed by {question.reviewedBy}
+                                  {question.reviewedAt && ` · ${new Date(question.reviewedAt).toLocaleDateString()}`}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                   ))}
                 </div>
               )}

@@ -20,7 +20,7 @@ sio = socketio.AsyncServer(
 # Create ASGI app
 socket_app = socketio.ASGIApp(
     sio,
-    socketio_path='/socket.io'
+    socketio_path='socket.io'
 )
 
 # Store connected users: {sid: {user_id, user_context}}
