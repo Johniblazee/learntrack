@@ -5,7 +5,7 @@ Reference Material models and schemas
 from datetime import datetime, timezone
 from typing import List, Optional
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from bson import ObjectId
 
 from app.models.user import PyObjectId
@@ -90,6 +90,13 @@ class MaterialInDB(MaterialBase):
     # Access control
     shared_with_students: bool = True  # Whether students can access
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_object_id(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
+
     model_config = ConfigDict(
         populate_by_name=True,
         arbitrary_types_allowed=True,
@@ -140,6 +147,13 @@ class MaterialFolderInDB(MaterialFolderBase):
     path: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_object_id(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
 
     model_config = ConfigDict(
         populate_by_name=True,

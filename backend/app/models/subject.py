@@ -4,7 +4,7 @@ Subject models and schemas
 
 from datetime import datetime, timezone
 from typing import List, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from bson import ObjectId
 
 from app.models.user import PyObjectId
@@ -41,6 +41,13 @@ class SubjectInDB(SubjectBase):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     question_count: int = 0
     is_active: bool = True
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_object_id(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
 
     model_config = ConfigDict(
         populate_by_name=True,
