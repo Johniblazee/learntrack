@@ -182,7 +182,7 @@ class AssignmentService:
                     try:
                         student = student_docs_map.get(student_id)
                         student_name = (
-                            student.get("name", "Student") if isinstance(student, dict) else "Student"
+                            student.get("name", "") if isinstance(student, dict) else ""
                         )
 
                         if student and student.get("email"):

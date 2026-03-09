@@ -363,8 +363,13 @@ async def get_recent_activity(
             activity_type = str(doc.get("activity_type") or "").lower()
             metadata = doc.get("metadata") or {}
 
+            GENERIC_NAME_SENTINELS = {"a student", "student", "learner", "unknown"}
+
             actor_id = str(doc.get("user_id") or "")
             actor_name = str(metadata.get("student_name") or "").strip()
+            if actor_name.lower() in GENERIC_NAME_SENTINELS:
+                actor_name = ""          # force DB lookup for old records with generic names
+
             if not actor_name:
                 if actor_id == current_user.clerk_id:
                     actor_name = "You"

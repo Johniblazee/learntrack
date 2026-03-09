@@ -759,7 +759,7 @@ async def submit_answer(
         tutor_id = str(
             assignment.get("tutor_id") or current_user.tutor_id or current_user.clerk_id
         )
-        student_name = current_user.name or "A student"
+        student_name = current_user.name or ""   # empty → dashboard falls through to DB lookup
 
         await _record_activity_event(
             database,
