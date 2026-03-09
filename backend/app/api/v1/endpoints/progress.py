@@ -759,7 +759,15 @@ async def submit_answer(
         tutor_id = str(
             assignment.get("tutor_id") or current_user.tutor_id or current_user.clerk_id
         )
-        student_name = current_user.name or ""   # empty → dashboard falls through to DB lookup
+        student_name = current_user.name or ""
+        if not student_name and current_user.email:
+            # Tutor-created student docs have name+email but no clerk_id; look up by email
+            student_doc = await database.students.find_one(
+                {"email": current_user.email, "tutor_id": tutor_id},
+                {"name": 1},
+            )
+            if student_doc:
+                student_name = str(student_doc.get("name") or "")
 
         await _record_activity_event(
             database,

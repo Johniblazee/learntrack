@@ -260,6 +260,25 @@ class UserService:
                 )
                 return existing_user
 
+            # For non-tutor roles: try to find an existing doc created by the tutor
+            # (tutor-created student docs have name+email but no clerk_id field yet)
+            if user_context.role == UserRole.STUDENT and user_context.email:
+                unlinked = await self.students_collection.find_one(
+                    {"email": user_context.email, "clerk_id": {"$exists": False}},
+                )
+                if unlinked:
+                    await self.students_collection.update_one(
+                        {"_id": unlinked["_id"]},
+                        {"$set": {"clerk_id": user_context.clerk_id, "updated_at": datetime.now(timezone.utc)}},
+                    )
+                    logger.info(
+                        "Linked existing student doc to Clerk ID",
+                        clerk_id=user_context.clerk_id,
+                        student_id=str(unlinked["_id"]),
+                    )
+                    # Merge clerk_id + role (required by User model, absent from StudentInDB docs)
+                    return User(**{**unlinked, "clerk_id": user_context.clerk_id, "role": user_context.role})
+
             # Determine tutor_id based on role
             if user_context.role in [UserRole.TUTOR, UserRole.SUPER_ADMIN]:
                 tutor_id = (

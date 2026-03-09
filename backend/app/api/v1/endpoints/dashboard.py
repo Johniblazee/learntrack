@@ -376,6 +376,7 @@ async def get_recent_activity(
                 else:
                     actor_name = students_by_id.get(actor_id, "Learner")
 
+
             related_assignment_id = str(doc.get("related_entity_id") or "")
             if not related_assignment_id:
                 related_assignment_id = str(metadata.get("assignment_id") or "")
