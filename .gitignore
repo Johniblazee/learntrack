@@ -71,5 +71,6 @@ AGENTS.md
 
 # Claude Code guidelines (local file)
 CLAUDE.md
-
+.claude/
+.ruff_cache
 pencil
