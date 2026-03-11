@@ -30,13 +30,13 @@ export function UpcomingDeadlines() {
 
         // Map backend response to frontend format
         const deadlinesData = ((response.data as any[]) || []).map((item: any) => ({
-          id: item.id,
+          id: String(item.id || item._id || item.title || crypto.randomUUID()),
           title: item.title,
-          subject: item.subject_name || 'General',
-          dueDate: item.date_label,  // Backend provides "Today", "Tomorrow", "Dec 28"
-          urgency: item.urgency,      // Backend provides "high", "medium", "low"
-          completed: item.completion_count || 0,
-          total: item.student_count || 0
+          subject: item.subject || item.subject_name || 'General',
+          dueDate: item.dueDate || item.date_label || 'TBD',
+          urgency: item.urgency || 'low',
+          completed: Number(item.completed ?? item.completion_count ?? 0),
+          total: Number(item.total ?? item.student_count ?? 0),
         }))
 
         setDeadlines(deadlinesData)

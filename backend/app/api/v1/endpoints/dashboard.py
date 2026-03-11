@@ -16,6 +16,7 @@ from app.core.enhanced_auth import (
     ClerkUserContext,
 )
 from pydantic import BaseModel
+from app.services.progress_service import _is_completed_status
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -53,6 +54,18 @@ class SubjectPerformance(BaseModel):
     subject: str
     avgScore: float
     completionRate: float
+
+
+def _grade_label(score: float) -> str:
+    if score >= 90:
+        return "A"
+    if score >= 85:
+        return "B+"
+    if score >= 80:
+        return "B"
+    if score >= 70:
+        return "C"
+    return "Needs support"
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -141,7 +154,7 @@ async def get_top_performers(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Get top performing students - calculated from real submissions"""
+    """Get top performing students from real graded/submitted progress."""
     try:
         pipeline = [
             {
@@ -151,11 +164,22 @@ async def get_top_performers(
                     "score": {"$ne": None},
                 }
             },
+            {"$sort": {"submitted_at": -1, "updated_at": -1}},
             {
                 "$group": {
-                    "_id": "$student_id",
-                    "avg_score": {"$avg": "$score"},
-                    "total_submissions": {"$sum": 1},
+                    "_id": {
+                        "student_id": "$student_id",
+                        "assignment_id": "$assignment_id",
+                    },
+                    "latest_score": {"$first": "$score"},
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$_id.student_id",
+                    "avg_score": {"$avg": "$latest_score"},
+                    "scores": {"$push": "$latest_score"},
+                    "latest_assignment_id": {"$first": "$_id.assignment_id"},
                 }
             },
             {"$sort": {"avg_score": -1}},
@@ -172,6 +196,8 @@ async def get_top_performers(
             {
                 "$project": {
                     "avg_score": 1,
+                    "scores": 1,
+                    "latest_assignment_id": 1,
                     "name": {"$ifNull": ["$student.name", "Unknown"]},
                 }
             },
@@ -182,16 +208,84 @@ async def get_top_performers(
         if not top_students:
             return []
 
-        performers = [
-            TopPerformer(
-                name=student_data.get("name", "Unknown"),
-                subject="General",
-                score=round(student_data.get("avg_score", 0), 1),
-                trend="up" if student_data.get("avg_score", 0) >= 90 else "down",
-                avatar=student_data.get("name", "U")[:2].upper(),
-            )
+        assignment_ids = [
+            str(student_data.get("latest_assignment_id") or "")
             for student_data in top_students
+            if student_data.get("latest_assignment_id")
         ]
+        assignment_object_ids = []
+        for assignment_id in assignment_ids:
+            try:
+                assignment_object_ids.append(ObjectId(assignment_id))
+            except Exception:
+                continue
+
+        assignments = []
+        if assignment_object_ids:
+            assignments = await database.assignments.find(
+                {"_id": {"$in": assignment_object_ids}},
+                {"subject_id": 1},
+            ).to_list(length=len(assignment_object_ids))
+        subject_ids = [
+            assignment.get("subject_id")
+            for assignment in assignments
+            if assignment.get("subject_id")
+        ]
+        subject_docs = []
+        if subject_ids:
+            subject_docs = await database.subjects.find(
+                {"_id": {"$in": subject_ids}},
+                {"_id": 1, "name": 1},
+            ).to_list(length=len(subject_ids))
+        subject_name_by_id = {
+            str(subject.get("_id")): str(subject.get("name") or "General")
+            for subject in subject_docs
+            if subject.get("_id")
+        }
+        subject_by_assignment_id = {
+            str(assignment.get("_id")): subject_name_by_id.get(
+                str(assignment.get("subject_id")),
+                "General",
+            )
+            for assignment in assignments
+            if assignment.get("_id")
+        }
+
+        performers = []
+        for student_data in top_students:
+            scores = [
+                float(score)
+                for score in student_data.get("scores", [])
+                if isinstance(score, (int, float))
+            ]
+            latest_score = scores[0] if scores else 0.0
+            historical_scores = scores[1:4]
+            baseline = (
+                sum(historical_scores) / len(historical_scores)
+                if historical_scores
+                else latest_score
+            )
+            trend_delta = round(latest_score - baseline, 1)
+            if trend_delta > 0.5:
+                trend = f"+{trend_delta:.1f}"
+            elif trend_delta < -0.5:
+                trend = f"{trend_delta:.1f}"
+            else:
+                trend = "steady"
+
+            name = str(student_data.get("name") or "Unknown")
+            performers.append(
+                TopPerformer(
+                    name=name,
+                    subject=subject_by_assignment_id.get(
+                        str(student_data.get("latest_assignment_id") or ""),
+                        "General",
+                    ),
+                    score=round(float(student_data.get("avg_score", 0) or 0), 1),
+                    trend=trend,
+                    avatar=name[:2].upper(),
+                )
+            )
 
         return performers
 
@@ -207,7 +301,7 @@ async def get_subject_performance(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Get subject performance data calculated from real submissions"""
+    """Get subject performance data calculated from real progress records."""
     try:
         subjects = await database.subjects.find(
             {"tutor_id": current_user.clerk_id}
@@ -215,61 +309,80 @@ async def get_subject_performance(
         if not subjects:
             return []
 
-        subject_ids = [
-            str(subject.get("_id")) for subject in subjects if subject.get("_id")
-        ]
+        subject_ids = [subject.get("_id") for subject in subjects if subject.get("_id")]
+        assignments = await database.assignments.find(
+            {
+                "tutor_id": current_user.clerk_id,
+                "subject_id": {"$in": subject_ids},
+            },
+            {"_id": 1, "subject_id": 1, "student_ids": 1},
+        ).to_list(length=1000)
 
-        submission_pipeline = [
-            {
-                "$match": {
-                    "tutor_id": current_user.clerk_id,
-                    "subject_id": {"$in": subject_ids},
-                }
-            },
-            {
-                "$group": {
-                    "_id": "$subject_id",
-                    "avg_score": {"$avg": "$score"},
-                    "total_submissions": {"$sum": 1},
-                }
-            },
+        assignment_ids = [
+            str(assignment.get("_id"))
+            for assignment in assignments
+            if assignment.get("_id")
         ]
-        submission_stats = await database.submissions.aggregate(
-            submission_pipeline
-        ).to_list(length=200)
-        submission_map = {item["_id"]: item for item in submission_stats}
+        progress_docs = []
+        if assignment_ids:
+            progress_docs = await database.progress.find(
+                {
+                    "tutor_id": current_user.clerk_id,
+                    "assignment_id": {"$in": assignment_ids},
+                },
+                {"assignment_id": 1, "score": 1, "status": 1},
+            ).to_list(length=5000)
 
-        assignment_pipeline = [
-            {
-                "$match": {
-                    "tutor_id": current_user.clerk_id,
-                    "subject_id": {"$in": subject_ids},
-                }
-            },
-            {"$group": {"_id": "$subject_id", "total_assignments": {"$sum": 1}}},
-        ]
-        assignment_stats = await database.assignments.aggregate(
-            assignment_pipeline
-        ).to_list(length=200)
-        assignment_map = {
-            item["_id"]: item.get("total_assignments", 0) for item in assignment_stats
-        }
+        assignments_by_subject: Dict[str, Dict[str, Any]] = {}
+        assignment_subject_map: Dict[str, str] = {}
+        for assignment in assignments:
+            subject_key = str(assignment.get("subject_id"))
+            assignment_id = str(assignment.get("_id"))
+            assignment_subject_map[assignment_id] = subject_key
+            bucket = assignments_by_subject.setdefault(
+                subject_key,
+                {"expected_submissions": 0},
+            )
+            bucket["expected_submissions"] += len(
+                assignment.get("student_ids", []) or []
+            )
+
+        progress_by_subject: Dict[str, Dict[str, Any]] = {}
+        for progress in progress_docs:
+            subject_key = assignment_subject_map.get(
+                str(progress.get("assignment_id") or "")
+            )
+            if not subject_key:
+                continue
+            bucket = progress_by_subject.setdefault(
+                subject_key,
+                {"completed": 0, "scores": []},
+            )
+            if _is_completed_status(str(progress.get("status") or "")):
+                bucket["completed"] += 1
+            score = progress.get("score")
+            if score is not None:
+                try:
+                    bucket["scores"].append(float(score))
+                except (TypeError, ValueError):
+                    continue
 
         subject_performance = []
         for subject in subjects:
             subject_id = str(subject.get("_id"))
-            submission = submission_map.get(subject_id)
-            if submission and submission.get("avg_score") is not None:
-                avg_score = round(submission.get("avg_score", 0), 1)
-                total_assignments = assignment_map.get(subject_id, 0)
-                completion_rate = round(
-                    (submission.get("total_submissions", 0) / max(total_assignments, 1))
-                    * 100,
-                    1,
-                )
-            else:
-                avg_score = 0.0
-                completion_rate = 0.0
+            progress_bucket = progress_by_subject.get(subject_id, {})
+            assignment_bucket = assignments_by_subject.get(subject_id, {})
+            scores = progress_bucket.get("scores", [])
+            avg_score = round(sum(scores) / len(scores), 1) if scores else 0.0
+            expected_submissions = int(
+                assignment_bucket.get("expected_submissions", 0) or 0
+            )
+            completed_submissions = int(progress_bucket.get("completed", 0) or 0)
+            completion_rate = (
+                round((completed_submissions / expected_submissions) * 100, 1)
+                if expected_submissions > 0
+                else 0.0
+            )
 
             subject_performance.append(
                 {
@@ -477,7 +590,7 @@ async def get_upcoming_deadlines(
                 {"_id": {"$in": subject_object_ids}}
             ).to_list(length=len(subject_object_ids))
         subject_map = {
-            doc.get("_id"): doc.get("name", "Unknown") for doc in subject_docs
+            str(doc.get("_id")): doc.get("name", "Unknown") for doc in subject_docs
         }
 
         submission_map = {}
@@ -527,7 +640,7 @@ async def get_upcoming_deadlines(
                 urgency = "low"
 
             subject_id = assignment.get("subject_id")
-            subject_name = subject_map.get(subject_id, "Unknown")
+            subject_name = subject_map.get(str(subject_id), "Unknown")
             assignment_id = str(assignment.get("_id"))
             submission_count = submission_map.get(assignment_id, 0)
             total_expected = (
@@ -536,6 +649,7 @@ async def get_upcoming_deadlines(
 
             deadlines.append(
                 {
+                    "id": assignment_id,
                     "title": assignment.get("title", "Untitled Assignment"),
                     "subject": subject_name,
                     "dueDate": date_label,
@@ -622,7 +736,7 @@ async def get_progress_chart(
     database: AsyncIOMotorDatabase = Depends(get_database),
     days: int = 30,
 ):
-    """Calculate weekly assignment progress chart data dynamically from assignments and submissions"""
+    """Calculate weekly assignment progress chart data from real assignments and progress."""
     try:
         from datetime import datetime, timedelta, timezone
 
@@ -657,11 +771,12 @@ async def get_progress_chart(
                     "$match": {
                         "tutor_id": current_user.clerk_id,
                         "assignment_id": {"$in": assignment_ids},
+                        "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     }
                 },
                 {"$group": {"_id": "$assignment_id", "count": {"$sum": 1}}},
             ]
-            submission_stats = await database.submissions.aggregate(
+            submission_stats = await database.progress.aggregate(
                 submission_pipeline
             ).to_list(length=len(assignment_ids))
             submission_map = {
@@ -677,18 +792,26 @@ async def get_progress_chart(
             date_str = created_date.strftime("%Y-%m-%d")
             subject_id = assignment.get("subject_id")
             subject_name = (
-                subject_map.get(subject_id, "Unknown").lower().replace(" ", "_")
+                subject_map.get(str(subject_id), "Unknown").lower().replace(" ", "_")
             )
 
             assignment_id = str(assignment.get("_id"))
             submission_count = submission_map.get(assignment_id, 0)
 
-            # Calculate completion rate (assuming 10 students per assignment as baseline)
-            expected_submissions = 10
+            expected_submissions = max(len(assignment.get("student_ids", []) or []), 1)
             completion_rate = min((submission_count / expected_submissions) * 100, 100)
 
             if date_str not in date_map:
-                date_map[date_str] = {"day": date_str[-2:]}
+                date_map[date_str] = {"day": date_str[-2:], "completionRate": 0.0}
+
+            existing_rate = float(date_map[date_str].get("completionRate", 0) or 0)
+            if existing_rate:
+                date_map[date_str]["completionRate"] = round(
+                    (existing_rate + completion_rate) / 2,
+                    1,
+                )
+            else:
+                date_map[date_str]["completionRate"] = round(completion_rate, 1)
 
             # Average if multiple assignments on same day
             if subject_name in date_map[date_str]:
@@ -727,9 +850,12 @@ async def get_student_dashboard_stats(
 
         # Calculate stats
         total_assignments = len(assignments)
-        completed_statuses = COMPLETED_PROGRESS_STATUSES
         completed = len(
-            [p for p in progress_records if p.get("status") in completed_statuses]
+            [
+                p
+                for p in progress_records
+                if _is_completed_status(str(p.get("status") or ""))
+            ]
         )
         pending = total_assignments - completed
 
@@ -737,7 +863,8 @@ async def get_student_dashboard_stats(
         completed_scores = [
             p.get("score", 0)
             for p in progress_records
-            if p.get("status") in completed_statuses and p.get("score") is not None
+            if _is_completed_status(str(p.get("status") or ""))
+            and p.get("score") is not None
         ]
         avg_score = (
             round(sum(completed_scores) / len(completed_scores), 1)
@@ -750,13 +877,7 @@ async def get_student_dashboard_stats(
             "completed": completed,
             "pending": pending,
             "overall_average": avg_score,
-            "current_grade": "A"
-            if avg_score >= 90
-            else "B+"
-            if avg_score >= 85
-            else "B"
-            if avg_score >= 80
-            else "C",
+            "current_grade": _grade_label(avg_score),
         }
     except Exception as e:
         logger.error("Failed to get student dashboard stats", error=str(e))
@@ -799,13 +920,7 @@ async def get_parent_dashboard_stats(
                     "name": view.child_name,
                     "grade": grade_by_child_id.get(view.child_id),
                     "overall_progress": round(avg_score, 1),
-                    "recent_grade": "A"
-                    if avg_score >= 90
-                    else "B+"
-                    if avg_score >= 85
-                    else "B"
-                    if avg_score >= 80
-                    else "C",
+                    "recent_grade": _grade_label(avg_score),
                     "assignments_due": len(view.upcoming_assignments),
                 }
             )

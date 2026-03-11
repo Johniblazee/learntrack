@@ -89,6 +89,7 @@ export function TopPerformers() {
         {performers.map((performer, index) => {
           const colors = avatarColors[index % avatarColors.length]
           const isUpTrend = performer.trend === "up" || performer.trend?.startsWith("+")
+          const isSteadyTrend = performer.trend === "steady"
 
           return (
             <Card key={index} className="border border-border bg-card hover:shadow-md transition-shadow">
@@ -108,12 +109,15 @@ export function TopPerformers() {
                   <span className="text-3xl font-bold text-foreground">{performer.score}%</span>
                   <Badge
                     variant="outline"
-                    className={isUpTrend
-                      ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-700"
-                      : "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-700"
+                    className={
+                      isUpTrend
+                        ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-700"
+                        : isSteadyTrend
+                          ? "bg-slate-50 dark:bg-slate-900/30 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                          : "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-700"
                     }
                   >
-                    {isUpTrend ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
+                    {isUpTrend ? <TrendingUp className="h-3 w-3 mr-1" /> : isSteadyTrend ? null : <TrendingDown className="h-3 w-3 mr-1" />}
                     {performer.trend}
                   </Badge>
                 </div>

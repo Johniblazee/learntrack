@@ -48,11 +48,14 @@ interface Submission {
   }
   answers: Array<{
     question_id: string
-    answer: string
-    is_correct?: boolean
+    answer?: string
+    selected_options?: string[]
+    answer_type?: 'correct' | 'incorrect' | 'partial' | 'unanswered'
+    points_earned?: number
+    points_possible?: number
   }>
   score?: number
-  status: 'pending' | 'graded' | 'reviewed'
+  status: 'pending' | 'graded'
   submitted_at: string
   graded_at?: string
   feedback?: string
@@ -182,7 +185,6 @@ export default function GradingView() {
             <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="graded">Graded</SelectItem>
-            <SelectItem value="reviewed">Reviewed</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -304,7 +306,7 @@ export default function GradingView() {
       <Dialog open={gradeModalOpen} onOpenChange={setGradeModalOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Grade Submission</DialogTitle>
+            <DialogTitle>{selectedSubmission?.status === 'pending' ? 'Grade Submission' : 'Review Submission'}</DialogTitle>
           </DialogHeader>
           {selectedSubmission && (
             <div className="space-y-4">
@@ -316,6 +318,43 @@ export default function GradingView() {
                 <div>
                   <p className="text-sm text-muted-foreground">Assignment</p>
                   <p className="font-medium">{selectedSubmission.assignment_id.title}</p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border p-4">
+                <p className="text-sm font-medium text-foreground">Answer Review</p>
+                <div className="mt-3 space-y-3">
+                  {selectedSubmission.answers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No answers were submitted.</p>
+                  ) : (
+                    selectedSubmission.answers.map((answer, index) => {
+                      const answerLabel = answer.answer?.trim() || answer.selected_options?.join(', ') || 'No response'
+                      const answerType = answer.answer_type || 'unanswered'
+                      const answerTone =
+                        answerType === 'correct'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : answerType === 'incorrect'
+                            ? 'text-red-600 dark:text-red-400'
+                            : answerType === 'partial'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-muted-foreground'
+
+                      return (
+                        <div key={`${answer.question_id}-${index}`} className="rounded-md bg-muted/40 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-medium text-foreground">Question {index + 1}</p>
+                            <Badge variant="outline" className={answerTone}>
+                              {answerType.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-sm text-foreground">{answerLabel}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {Number(answer.points_earned ?? 0)} / {Number(answer.points_possible ?? 0)} points
+                          </p>
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
               </div>
 
@@ -354,7 +393,7 @@ export default function GradingView() {
                   onClick={handleGrade}
                   disabled={grading || !score}
                 >
-                  {grading ? 'Saving...' : 'Save Grade'}
+                  {grading ? 'Saving...' : selectedSubmission.status === 'pending' ? 'Save Grade' : 'Update Grade'}
                 </Button>
               </div>
             </div>

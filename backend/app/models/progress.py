@@ -177,9 +177,9 @@ class StudentPerformanceData(BaseModel):
     """Student performance data for reports"""
 
     name: str
-    math: int
-    physics: int
-    chemistry: int
+    overall: int = 0
+    completed_assignments: int = 0
+    subject_scores: Dict[str, int] = Field(default_factory=dict)
 
 
 class StudentPerformanceInDB(BaseModel):

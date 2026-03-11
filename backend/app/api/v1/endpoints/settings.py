@@ -49,6 +49,7 @@ class UserPreferenceSettings(BaseModel):
     """User experience preferences"""
 
     default_student_tab: str = "dashboard"
+    default_parent_tab: str = "overview"
     show_weekend_schedule: bool = True
     compact_assignment_cards: bool = False
     auto_open_next_assignment: bool = False

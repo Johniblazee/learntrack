@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useClerk, useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -44,6 +44,7 @@ import ConversationsView from '@/components/TutorDashboard/views/ConversationsVi
 import {
   useParentDashboardStats,
   useParentProgress,
+  useUserSettings,
 } from '@/hooks/useQueries'
 import { useImpersonation } from '@/contexts/ImpersonationContext'
 import { useUserContext } from '@/contexts/UserContext'
@@ -75,9 +76,24 @@ export default function ParentDashboard() {
       .join('') || 'P'
   const showClerkAvatar = !isImpersonating || backendUser?.clerk_id === user?.id
   const [activeTab, setActiveTab] = useState<ParentTab>('overview')
+  const [hasAppliedPreferredTab, setHasAppliedPreferredTab] = useState(false)
 
   const { data: dashboardStats, isLoading: isLoadingStats } = useParentDashboardStats()
   const { data: parentProgressViews, isLoading: isLoadingProgress } = useParentProgress()
+  const { data: userSettings, isLoading: isLoadingSettings } = useUserSettings()
+
+  useEffect(() => {
+    if (isLoadingSettings || hasAppliedPreferredTab) {
+      return
+    }
+
+    const preferredTab = String(userSettings?.preferences?.default_parent_tab || '').toLowerCase()
+    if (preferredTab === 'overview' || preferredTab === 'children' || preferredTab === 'upcoming' || preferredTab === 'messages') {
+      setActiveTab(preferredTab)
+    }
+
+    setHasAppliedPreferredTab(true)
+  }, [hasAppliedPreferredTab, isLoadingSettings, userSettings?.preferences?.default_parent_tab])
 
   const children = dashboardStats?.children || []
 

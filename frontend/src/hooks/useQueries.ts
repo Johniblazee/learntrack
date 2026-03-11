@@ -760,6 +760,7 @@ export function useStudentMaterials(subjectId?: string) {
 
 export interface UserPreferenceSettings {
   default_student_tab: 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
+  default_parent_tab: 'overview' | 'children' | 'upcoming' | 'messages'
   show_weekend_schedule: boolean
   compact_assignment_cards: boolean
   auto_open_next_assignment: boolean

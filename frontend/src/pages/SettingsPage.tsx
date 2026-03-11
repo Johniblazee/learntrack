@@ -17,6 +17,7 @@ import { useUserContext } from '@/contexts/UserContext'
 import { useApiClient } from '../lib/api-client'
 
 type StudentDefaultTab = 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
+type ParentDefaultTab = 'overview' | 'children' | 'upcoming' | 'messages'
 
 interface SettingsState {
   displayName: string
@@ -30,6 +31,7 @@ interface SettingsState {
   showEmail: boolean
   showPhone: boolean
   defaultStudentTab: StudentDefaultTab
+  defaultParentTab: ParentDefaultTab
   showWeekendSchedule: boolean
   compactAssignmentCards: boolean
   autoOpenNextAssignment: boolean
@@ -47,6 +49,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   showEmail: false,
   showPhone: false,
   defaultStudentTab: 'dashboard',
+  defaultParentTab: 'overview',
   showWeekendSchedule: true,
   compactAssignmentCards: false,
   autoOpenNextAssignment: false,
@@ -64,6 +67,14 @@ function normalizeDefaultStudentTab(value: unknown): StudentDefaultTab {
   }
 
   return 'dashboard'
+}
+
+function normalizeDefaultParentTab(value: unknown): ParentDefaultTab {
+  if (value === 'overview' || value === 'children' || value === 'upcoming' || value === 'messages') {
+    return value
+  }
+
+  return 'overview'
 }
 
 export default function SettingsPage() {
@@ -110,6 +121,7 @@ export default function SettingsPage() {
           showEmail: data.privacy?.show_email ?? DEFAULT_SETTINGS.showEmail,
           showPhone: data.privacy?.show_phone ?? DEFAULT_SETTINGS.showPhone,
           defaultStudentTab: normalizeDefaultStudentTab(data.preferences?.default_student_tab),
+          defaultParentTab: normalizeDefaultParentTab(data.preferences?.default_parent_tab),
           showWeekendSchedule:
             data.preferences?.show_weekend_schedule ?? DEFAULT_SETTINGS.showWeekendSchedule,
           compactAssignmentCards:
@@ -148,6 +160,7 @@ export default function SettingsPage() {
         },
         preferences: {
           default_student_tab: settings.defaultStudentTab,
+          default_parent_tab: settings.defaultParentTab,
           show_weekend_schedule: settings.showWeekendSchedule,
           compact_assignment_cards: settings.compactAssignmentCards,
           auto_open_next_assignment: settings.autoOpenNextAssignment,
@@ -465,11 +478,34 @@ export default function SettingsPage() {
                       />
                     </div>
                   </>
+                ) : userRole === 'parent' ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="defaultParentTab">Default Parent Dashboard Tab</Label>
+                      <select
+                        id="defaultParentTab"
+                        value={settings.defaultParentTab}
+                        onChange={(event) =>
+                          setSettings({
+                            ...settings,
+                            defaultParentTab: normalizeDefaultParentTab(event.target.value),
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      >
+                        <option value="overview">Overview</option>
+                        <option value="children">Children</option>
+                        <option value="upcoming">Upcoming Work</option>
+                        <option value="messages">Messages</option>
+                      </select>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Choose which view opens first when you enter the parent dashboard.
+                      </p>
+                    </div>
+                  </>
                 ) : (
                   <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                    {userRole === 'parent'
-                      ? 'Your parent dashboard already uses the notification settings above for reminders and messages.'
-                      : 'Tutor-specific AI and system configuration is managed in the admin settings area. Personal controls here are handled through profile, notifications, privacy, and appearance.'}
+                    Tutor-specific AI and system configuration is managed in the admin settings area. Personal controls here are handled through profile, notifications, privacy, and appearance.
                   </div>
                 )}
               </CardContent>

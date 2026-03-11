@@ -30,6 +30,12 @@ from app.core.utils import to_object_id
 
 logger = structlog.get_logger()
 
+COMPLETED_PROGRESS_STATUS_VALUES = {
+    SubmissionStatus.SUBMITTED.value,
+    SubmissionStatus.GRADED.value,
+    "completed",
+}
+
 
 def _normalize_submission_status(status_value: Optional[str]) -> SubmissionStatus:
     """Normalize legacy/raw status values to SubmissionStatus enum."""
@@ -48,6 +54,142 @@ def _ensure_utc_datetime(value: Any, fallback: Optional[datetime] = None) -> dat
             return value.replace(tzinfo=timezone.utc)
         return value
     return fallback or datetime.now(timezone.utc)
+
+
+def _is_completed_status(status_value: Optional[str]) -> bool:
+    return (status_value or "").strip().lower() in COMPLETED_PROGRESS_STATUS_VALUES
+
+
+def _week_label(index: int, total: int) -> str:
+    return f"Week {total - index}"
+
+
+def _build_weekly_progress_rows(
+    progress_records: List[Dict[str, Any]],
+    *,
+    weeks: int = 4,
+    date_field: str = "created_at",
+) -> List[WeeklyProgressData]:
+    now = datetime.now(timezone.utc)
+    rows: List[WeeklyProgressData] = []
+
+    for week_index in range(weeks, 0, -1):
+        week_start = now - timedelta(weeks=week_index)
+        week_end = now - timedelta(weeks=week_index - 1)
+
+        week_records = []
+        for record in progress_records:
+            raw_date = record.get(date_field)
+            if raw_date is None:
+                continue
+            normalized_date = _ensure_utc_datetime(raw_date)
+            if week_start <= normalized_date < week_end:
+                week_records.append(record)
+        completed_count = sum(
+            1 for record in week_records if _is_completed_status(record.get("status"))
+        )
+
+        rows.append(
+            WeeklyProgressData(
+                week=_week_label(week_index, weeks + 1),
+                completed=completed_count,
+                assigned=len(week_records),
+            )
+        )
+
+    return rows
+
+
+def _build_subject_performance_rows(
+    progress_records: List[Dict[str, Any]],
+    subject_by_assignment_id: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    subject_data: Dict[str, Dict[str, Any]] = {}
+
+    for progress in progress_records:
+        assignment_id = str(progress.get("assignment_id") or "")
+        subject_name = subject_by_assignment_id.get(assignment_id, "General")
+        bucket = subject_data.setdefault(
+            subject_name,
+            {"scores": [], "assignments": 0, "completed": 0},
+        )
+        bucket["assignments"] += 1
+        if _is_completed_status(progress.get("status")):
+            bucket["completed"] += 1
+
+        score = progress.get("score")
+        if score is not None:
+            try:
+                bucket["scores"].append(float(score))
+            except (TypeError, ValueError):
+                continue
+
+    subject_rows = []
+    for subject_name, bucket in subject_data.items():
+        scores = bucket["scores"]
+        subject_rows.append(
+            {
+                "subject": subject_name,
+                "score": round(sum(scores) / len(scores), 1) if scores else 0,
+                "assignments": bucket["assignments"],
+                "completed": bucket["completed"],
+            }
+        )
+
+    subject_rows.sort(key=lambda row: row["subject"].lower())
+    return subject_rows
+
+
+def _build_student_performance_rows(
+    progress_records: List[Dict[str, Any]],
+    *,
+    student_names: Dict[str, str],
+    subject_by_assignment_id: Dict[str, str],
+) -> List[StudentPerformanceData]:
+    score_buckets: Dict[str, Dict[str, List[float]]] = {}
+    completion_counts: Dict[str, int] = {}
+
+    for progress in progress_records:
+        student_id = str(progress.get("student_id") or "")
+        if not student_id:
+            continue
+
+        assignment_id = str(progress.get("assignment_id") or "")
+        subject_name = subject_by_assignment_id.get(assignment_id, "General")
+        student_scores = score_buckets.setdefault(student_id, {})
+        student_scores.setdefault(subject_name, [])
+
+        score = progress.get("score")
+        if score is not None:
+            try:
+                student_scores[subject_name].append(float(score))
+            except (TypeError, ValueError):
+                pass
+
+        if _is_completed_status(progress.get("status")):
+            completion_counts[student_id] = completion_counts.get(student_id, 0) + 1
+
+    rows: List[StudentPerformanceData] = []
+    for student_id, subject_scores in score_buckets.items():
+        averaged_subject_scores = {
+            subject_name: int(round(sum(scores) / len(scores)))
+            for subject_name, scores in subject_scores.items()
+            if scores
+        }
+        all_scores = list(averaged_subject_scores.values())
+        rows.append(
+            StudentPerformanceData(
+                name=student_names.get(student_id, "Student"),
+                overall=int(round(sum(all_scores) / len(all_scores)))
+                if all_scores
+                else 0,
+                completed_assignments=completion_counts.get(student_id, 0),
+                subject_scores=averaged_subject_scores,
+            )
+        )
+
+    rows.sort(key=lambda row: row.name.lower())
+    return rows
 
 
 class ProgressService:
@@ -370,12 +512,15 @@ class ProgressService:
 
             # Calculate basic analytics from fetched records
             total_assignments = len(progress_records)
-            completed_statuses = {
-                SubmissionStatus.SUBMITTED.value,
-                SubmissionStatus.GRADED.value,
+            subject_by_assignment_id = {
+                str(progress.get("assignment_id") or ""): progress.get(
+                    "subject_name", "Unknown"
+                )
+                for progress in progress_records
+                if progress.get("assignment_id")
             }
             completed_assignments = len(
-                [p for p in progress_records if p.get("status") in completed_statuses]
+                [p for p in progress_records if _is_completed_status(p.get("status"))]
             )
             pending_assignments = total_assignments - completed_assignments
 
@@ -390,30 +535,10 @@ class ProgressService:
             # Calculate total time spent
             total_time = sum(p.get("time_spent", 0) or 0 for p in progress_records)
 
-            # Calculate subject performance from aggregated data (no additional queries needed)
-            subject_data: dict = {}
-            for progress in progress_records:
-                subject_name = progress.get("subject_name", "Unknown")
-                if subject_name not in subject_data:
-                    subject_data[subject_name] = {"scores": [], "count": 0}
-                if progress.get("score") is not None:
-                    subject_data[subject_name]["scores"].append(progress["score"])
-                subject_data[subject_name]["count"] += 1
-
-            subject_performance = []
-            for subject_name, data in subject_data.items():
-                avg_score = (
-                    round(sum(data["scores"]) / len(data["scores"]), 1)
-                    if data["scores"]
-                    else 0
-                )
-                subject_performance.append(
-                    {
-                        "subject": subject_name,
-                        "score": avg_score,
-                        "assignments": data["count"],
-                    }
-                )
+            subject_performance = _build_subject_performance_rows(
+                progress_records,
+                subject_by_assignment_id,
+            )
 
             # Helper function to ensure datetime is timezone-aware for comparison
             def ensure_tz_aware(dt) -> Optional[datetime]:
@@ -430,7 +555,7 @@ class ProgressService:
 
             # Get recent submissions (last 5 completed) - data already fetched
             completed_records = [
-                p for p in progress_records if p.get("status") in completed_statuses
+                p for p in progress_records if _is_completed_status(p.get("status"))
             ]
             completed_records.sort(
                 key=lambda x: ensure_tz_aware(x.get("submitted_at"))
@@ -452,31 +577,14 @@ class ProgressService:
                     }
                 )
 
-            # Calculate weekly progress (last 4 weeks)
-            weekly_progress = []
-            now = datetime.now(timezone.utc)
-
-            for week_num in range(4, 0, -1):
-                week_start = now - timedelta(weeks=week_num)
-                week_end = now - timedelta(weeks=week_num - 1)
-
-                week_records = [
-                    p
-                    for p in progress_records
-                    if (tz_dt := ensure_tz_aware(p.get("created_at")))
-                    and week_start <= tz_dt < week_end
-                ]
-                completed_in_week = len(
-                    [p for p in week_records if p.get("status") in completed_statuses]
+            weekly_progress = [
+                row.model_dump()
+                for row in _build_weekly_progress_rows(
+                    progress_records,
+                    weeks=4,
+                    date_field="created_at",
                 )
-
-                weekly_progress.append(
-                    {
-                        "week": f"Week {5 - week_num}",
-                        "completed": completed_in_week,
-                        "assigned": len(week_records),
-                    }
-                )
+            ]
 
             analytics = ProgressAnalytics(
                 total_assignments=total_assignments,
@@ -705,111 +813,116 @@ class ProgressService:
             )
             raise DatabaseException(f"Failed to get parent progress view: {str(e)}")
 
-    async def seed_student_performance_data(self) -> None:
-        """Seed the database with initial student performance data"""
+    async def get_progress_reports(self, tutor_id: str) -> ProgressReportsResponse:
+        """Get dynamic progress report data for a tutor."""
         try:
-            # Check if data already exists
-            existing_count = await self.performance_collection.count_documents({})
-            if existing_count > 0:
-                logger.info("Student performance data already exists, skipping seed")
-                return
+            students = await self.db.students.find(
+                {"tutor_id": tutor_id, "is_active": True},
+                {"clerk_id": 1, "name": 1},
+            ).to_list(length=500)
 
-            # Seed data matching the frontend structure
-            seed_data = [
-                {
-                    "student_id": "student_1",
-                    "student_name": "Sarah Johnson",
-                    "subject_scores": {"math": 85, "physics": 78, "chemistry": 92},
-                    "created_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                },
-                {
-                    "student_id": "student_2",
-                    "student_name": "Mike Chen",
-                    "subject_scores": {"math": 92, "physics": 88, "chemistry": 85},
-                    "created_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                },
-                {
-                    "student_id": "student_3",
-                    "student_name": "Emma Davis",
-                    "subject_scores": {"math": 78, "physics": 82, "chemistry": 89},
-                    "created_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                },
-                {
-                    "student_id": "student_4",
-                    "student_name": "John Smith",
-                    "subject_scores": {"math": 88, "physics": 95, "chemistry": 76},
-                    "created_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                },
-                {
-                    "student_id": "student_5",
-                    "student_name": "Lisa Wang",
-                    "subject_scores": {"math": 94, "physics": 87, "chemistry": 91},
-                    "created_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                },
+            student_ids = [
+                str(student.get("clerk_id"))
+                for student in students
+                if student.get("clerk_id")
             ]
+            student_names = {
+                str(student.get("clerk_id")): str(student.get("name") or "Student")
+                for student in students
+                if student.get("clerk_id")
+            }
 
-            await self.performance_collection.insert_many(seed_data)
-            logger.info(
-                "Student performance data seeded successfully", count=len(seed_data)
+            assignments = await self.db.assignments.find(
+                {"tutor_id": tutor_id},
+                {"_id": 1, "subject_id": 1},
+            ).to_list(length=5000)
+
+            subject_object_ids: List[ObjectId] = []
+            assignment_subject_lookup: Dict[str, str] = {}
+            for assignment in assignments:
+                assignment_id = str(assignment.get("_id") or "")
+                subject_raw = assignment.get("subject_id")
+                if isinstance(subject_raw, ObjectId):
+                    subject_object_ids.append(subject_raw)
+                    assignment_subject_lookup[assignment_id] = str(subject_raw)
+                elif isinstance(subject_raw, str):
+                    try:
+                        converted_subject_id = to_object_id(subject_raw)
+                        if isinstance(converted_subject_id, ObjectId):
+                            subject_object_ids.append(converted_subject_id)
+                        assignment_subject_lookup[assignment_id] = subject_raw
+                    except Exception:
+                        assignment_subject_lookup[assignment_id] = subject_raw
+
+            subject_docs = []
+            if subject_object_ids:
+                subject_docs = await self.db.subjects.find(
+                    {"_id": {"$in": list(set(subject_object_ids))}},
+                    {"_id": 1, "name": 1},
+                ).to_list(length=len(set(subject_object_ids)))
+
+            subject_name_by_id = {
+                str(subject.get("_id")): str(subject.get("name") or "General")
+                for subject in subject_docs
+                if subject.get("_id")
+            }
+            subject_by_assignment_id = {
+                assignment_id: subject_name_by_id.get(
+                    subject_ref, subject_ref or "General"
+                )
+                for assignment_id, subject_ref in assignment_subject_lookup.items()
+            }
+
+            progress_query: Dict[str, Any] = {"tutor_id": tutor_id}
+            if student_ids:
+                progress_query["student_id"] = {"$in": student_ids}
+
+            progress_docs = await self.collection.find(progress_query).to_list(
+                length=10000
             )
 
-        except Exception as e:
-            logger.error("Failed to seed student performance data", error=str(e))
-            raise DatabaseException(f"Failed to seed data: {str(e)}")
-
-    async def get_progress_reports(self) -> ProgressReportsResponse:
-        """Get progress reports data for the reports dashboard"""
-        try:
-            # Ensure data is seeded
-            await self.seed_student_performance_data()
-
-            # Get student performance data
-            cursor = self.performance_collection.find({})
-            student_performance = []
-
-            async for performance in cursor:
-                student_data = StudentPerformanceData(
-                    name=performance["student_name"],
-                    math=performance["subject_scores"].get("math", 0),
-                    physics=performance["subject_scores"].get("physics", 0),
-                    chemistry=performance["subject_scores"].get("chemistry", 0),
-                )
-                student_performance.append(student_data)
-
-            # Mock weekly progress data (in a real app, this would be calculated from actual progress)
-            weekly_progress = [
-                WeeklyProgressData(week="Week 1", completed=45, assigned=50),
-                WeeklyProgressData(week="Week 2", completed=52, assigned=55),
-                WeeklyProgressData(week="Week 3", completed=48, assigned=50),
-                WeeklyProgressData(week="Week 4", completed=58, assigned=60),
-            ]
+            student_performance = _build_student_performance_rows(
+                progress_docs,
+                student_names=student_names,
+                subject_by_assignment_id=subject_by_assignment_id,
+            )
+            weekly_progress = _build_weekly_progress_rows(
+                progress_docs,
+                weeks=4,
+                date_field="created_at",
+            )
 
             return ProgressReportsResponse(
-                student_performance=student_performance, weekly_progress=weekly_progress
+                student_performance=student_performance,
+                weekly_progress=weekly_progress,
             )
 
         except Exception as e:
-            logger.error("Failed to get progress reports", error=str(e))
+            logger.error(
+                "Failed to get progress reports",
+                tutor_id=tutor_id,
+                error=str(e),
+            )
             raise DatabaseException(f"Failed to get progress reports: {str(e)}")
 
     async def update_student_performance(
-        self, student_id: str, student_name: str, subject_scores: Dict[str, int]
+        self,
+        student_id: str,
+        student_name: str,
+        subject_scores: Dict[str, int],
+        tutor_id: str,
     ) -> StudentPerformanceInDB:
-        """Update or create student performance data"""
+        """Persist aggregated performance snapshots when needed."""
         try:
-            update_data = {
+            update_data: Dict[str, Any] = {
                 "student_name": student_name,
                 "subject_scores": subject_scores,
+                "tutor_id": tutor_id,
                 "updated_at": datetime.now(timezone.utc),
             }
 
-            result = await self.performance_collection.update_one(
-                {"student_id": student_id},
+            await self.performance_collection.update_one(
+                {"student_id": student_id, "tutor_id": tutor_id},
                 {
                     "$set": update_data,
                     "$setOnInsert": {
@@ -820,17 +933,24 @@ class ProgressService:
                 upsert=True,
             )
 
-            # Get the updated document
             performance = await self.performance_collection.find_one(
-                {"student_id": student_id}
+                {"student_id": student_id, "tutor_id": tutor_id}
             )
-            logger.info("Student performance updated", student_id=student_id)
+            if not performance:
+                raise DatabaseException("Failed to load updated performance snapshot")
+
+            logger.info(
+                "Student performance updated",
+                student_id=student_id,
+                tutor_id=tutor_id,
+            )
             return StudentPerformanceInDB(**performance)
 
         except Exception as e:
             logger.error(
                 "Failed to update student performance",
                 student_id=student_id,
+                tutor_id=tutor_id,
                 error=str(e),
             )
             raise DatabaseException(f"Failed to update student performance: {str(e)}")
