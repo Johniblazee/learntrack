@@ -27,11 +27,6 @@ from app.agents.graph.state import (
     SourceCitation,
 )
 from app.agents.streaming.sse_handler import SSEHandler
-from app.ai.services.ai_manager import get_tenant_ai_manager
-from app.services.tenant_ai_config_service import TenantAIConfigService
-from app.services.generation_session_service import GenerationSessionService
-from app.services.web_search_service import WebSearchService
-from app.services.question_service import QuestionService
 from app.models.generation_session import SessionStatus, QuestionStatus, StoredQuestion
 from app.models.generation_session import SessionChatMessage
 from app.models.question import (
@@ -67,9 +62,45 @@ def _get_question_generator_agent_class():
         )
 
 
+def _create_tenant_config_service(database: AsyncIOMotorDatabase):
+    from app.services.tenant_ai_config_service import TenantAIConfigService
+
+    return TenantAIConfigService(database)
+
+
+def _create_generation_session_service(database: AsyncIOMotorDatabase):
+    from app.services.generation_session_service import GenerationSessionService
+
+    return GenerationSessionService(database)
+
+
+def _create_web_search_service(database: AsyncIOMotorDatabase):
+    from app.services.web_search_service import WebSearchService
+
+    return WebSearchService(database)
+
+
+def _create_question_service(database: AsyncIOMotorDatabase):
+    from app.services.question_service import QuestionService
+
+    return QuestionService(database)
+
+
+async def _get_tenant_ai_manager(tenant_id: str, database: AsyncIOMotorDatabase):
+    from app.ai.services.ai_manager import get_tenant_ai_manager
+
+    return await get_tenant_ai_manager(tenant_id, database)
+
+
+def _create_default_ai_manager():
+    from app.ai.services.ai_manager import AIManager
+
+    return AIManager()
+
+
 async def get_session_service(db=Depends(get_database)):
     """Dependency for session service"""
-    return GenerationSessionService(db)
+    return _create_generation_session_service(db)
 
 
 def _stored_to_generated_question(stored: StoredQuestion) -> GeneratedQuestion:
@@ -246,7 +277,7 @@ async def chat_about_question_generation(
 ):
     """Fast chat endpoint for planning requirements before running generation."""
     try:
-        config_service = TenantAIConfigService(database)
+        config_service = _create_tenant_config_service(database)
         tenant_config = await config_service.get_or_create_default(
             current_user.tutor_id
         )
@@ -279,7 +310,7 @@ async def chat_about_question_generation(
                 detail=f"Model {model_name} is not enabled for provider {ai_provider}",
             )
 
-        ai_manager = await get_tenant_ai_manager(current_user.tutor_id, database)
+        ai_manager = await _get_tenant_ai_manager(current_user.tutor_id, database)
         provider = ai_manager.get_provider(ai_provider)
         if not provider:
             raise HTTPException(
@@ -303,7 +334,7 @@ async def chat_about_question_generation(
         if not planning_message:
             raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-        session_service = GenerationSessionService(database)
+        session_service = _create_generation_session_service(database)
         session = None
         if request.session_id:
             session = await session_service.get_session(
@@ -414,7 +445,7 @@ async def generate_questions(
     request: GenerateRequest,
     current_user: ClerkUserContext = Depends(require_tutor),
     rag_service=Depends(get_rag_service),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
@@ -485,7 +516,7 @@ async def generate_questions(
         )
 
         # Get LLM with tenant-aware configuration
-        config_service = TenantAIConfigService(database)
+        config_service = _create_tenant_config_service(database)
         tenant_config = await config_service.get_or_create_default(
             current_user.tutor_id
         )
@@ -519,7 +550,7 @@ async def generate_questions(
                 detail=f"Model {model_name} is not enabled for provider {ai_provider}",
             )
 
-        ai_manager = await get_tenant_ai_manager(current_user.tutor_id, database)
+        ai_manager = await _get_tenant_ai_manager(current_user.tutor_id, database)
         provider = ai_manager.get_provider(ai_provider)
 
         # Set specific model if provided
@@ -533,7 +564,7 @@ async def generate_questions(
         llm = provider.llm
 
         # Create agent with web search service for fallback
-        web_search_service = WebSearchService(database)
+        web_search_service = _create_web_search_service(database)
         question_generator_agent_class = _get_question_generator_agent_class()
         agent = question_generator_agent_class(
             llm=llm, rag_service=rag_service, web_search_service=web_search_service
@@ -752,7 +783,7 @@ async def edit_question(
     session_id: str = Query(..., description="Generation session ID"),
     current_user: ClerkUserContext = Depends(require_tutor),
     rag_service=Depends(get_rag_service),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Edit a question via LangGraph and stream progress as SSE events."""
@@ -793,13 +824,13 @@ async def edit_question(
             grade_level=config_data.get("grade_level"),
         )
 
-        config_service = TenantAIConfigService(database)
+        config_service = _create_tenant_config_service(database)
         tenant_config = await config_service.get_or_create_default(
             current_user.tutor_id
         )
         ai_provider = normalize_provider(tenant_config.default_provider)
 
-        ai_manager = await get_tenant_ai_manager(current_user.tutor_id, database)
+        ai_manager = await _get_tenant_ai_manager(current_user.tutor_id, database)
         provider = ai_manager.get_provider(ai_provider)
         llm = provider.llm
 
@@ -942,7 +973,7 @@ async def edit_question(
 async def get_session(
     session_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """
     Get a generation session by ID.
@@ -963,7 +994,7 @@ async def list_sessions(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """
     List generation sessions for the current user.
@@ -991,7 +1022,7 @@ async def get_pending_questions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """
     Get all pending questions across all sessions for the current tutor.
@@ -1015,7 +1046,7 @@ async def get_all_questions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """
     Get all questions across all sessions for the current tutor.
@@ -1039,7 +1070,7 @@ async def get_sessions_with_questions(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(10, ge=1, le=50, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """
     Get all generation sessions with their questions and status counts.
@@ -1060,7 +1091,7 @@ async def approve_question(
     session_id: str,
     question_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """Approve a generated question"""
     success = await session_service.update_question_status(
@@ -1081,7 +1112,7 @@ async def reject_question(
     session_id: str,
     question_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """Reject a generated question"""
     success = await session_service.update_question_status(
@@ -1158,8 +1189,8 @@ async def save_session_questions_to_bank(
     session_id: str,
     request: SaveToQuestionBankRequest,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
-    question_service: QuestionService = Depends(get_question_service),
+    session_service: Any = Depends(get_session_service),
+    question_service: Any = Depends(get_question_service),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Persist approved generated session questions into the tutor question bank."""
@@ -1266,7 +1297,7 @@ async def update_question(
     question_id: str,
     request: UpdateQuestionRequest,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """Manually update a question's content"""
     # Build update data from non-None fields
@@ -1300,7 +1331,7 @@ async def update_question(
 async def delete_session(
     session_id: str,
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """Delete a generation session and all its questions"""
     success = await session_service.delete_session(
@@ -1316,7 +1347,7 @@ async def delete_session(
 @router.get("/stats")
 async def get_generation_stats(
     current_user: ClerkUserContext = Depends(require_tutor),
-    session_service: GenerationSessionService = Depends(get_session_service),
+    session_service: Any = Depends(get_session_service),
 ):
     """
     Get generation statistics for the current user.
@@ -1366,7 +1397,7 @@ async def get_available_models(
     tenant_config = None
     enabled_providers = None
     try:
-        config_service = TenantAIConfigService(database)
+        config_service = _create_tenant_config_service(database)
         tenant_config = await config_service.get_config(current_user.clerk_id)
         if tenant_config:
             enabled_providers = tenant_config.enabled_providers

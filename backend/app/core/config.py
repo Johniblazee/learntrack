@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # Database
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "learntrack_mvp"
+    MONGODB_SERVER_SELECTION_TIMEOUT_MS: int = 500
+    MONGODB_CONNECT_TIMEOUT_MS: int = 500
+    MONGODB_SOCKET_TIMEOUT_MS: int = 2000
+    STARTUP_PING_DATABASE: bool = False
+    RUN_STARTUP_BOOTSTRAP: bool = False
 
     # Clerk Configuration - Enhanced for Backend-First Auth
     CLERK_SECRET_KEY: Optional[str] = None

@@ -15,10 +15,15 @@ from app.core.enhanced_auth import (
 )
 from app.models.student import StudentGroup, StudentGroupCreate, StudentGroupUpdate
 from app.services.student_service import StudentService
-from app.services.image_generation_service import generate_group_image
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+async def _generate_group_image(group_name: str, description: str = ""):
+    from app.services.image_generation_service import generate_group_image
+
+    return await generate_group_image(group_name=group_name, description=description)
 
 
 @router.get("/student/{student_id}", response_model=List[StudentGroup])
@@ -116,7 +121,7 @@ async def create_group(
 
         # Generate cover image if requested and not provided
         if generate_image and not group_data.imageUrl:
-            image_url = await generate_group_image(
+            image_url = await _generate_group_image(
                 group_name=group_data.name, description=group_data.description
             )
             if image_url:
@@ -163,7 +168,7 @@ async def regenerate_group_image(
             )
 
         # Generate new image
-        image_url = await generate_group_image(
+        image_url = await _generate_group_image(
             group_name=group.name, description=group.description
         )
 

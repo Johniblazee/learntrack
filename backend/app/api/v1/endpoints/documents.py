@@ -11,11 +11,16 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_authenticated_user, ClerkUserContext
-from app.services.document_governance_service import DocumentGovernanceService
 from app.models.file import EmbeddingStatus, SyncStatus
 from app.core.utils import to_object_id, escape_regex
 
 router = APIRouter()
+
+
+def _create_governance_service(db: AsyncIOMotorDatabase):
+    from app.services.document_governance_service import DocumentGovernanceService
+
+    return DocumentGovernanceService(db)
 
 
 # ==================== Request/Response Models ====================
@@ -326,7 +331,7 @@ async def batch_delete_documents(
     Delete multiple documents and their embeddings in batch.
     """
     tutor_id = current_user.tutor_id
-    governance_service = DocumentGovernanceService(db)
+    governance_service = _create_governance_service(db)
 
     result = await governance_service.batch_delete_files(
         file_ids=request.file_ids, tutor_id=tutor_id, hard_delete=request.hard_delete
@@ -346,7 +351,7 @@ async def batch_resync_documents(
     Re-sync multiple documents in batch (re-process and re-embed).
     """
     tutor_id = current_user.tutor_id
-    governance_service = DocumentGovernanceService(db)
+    governance_service = _create_governance_service(db)
 
     result = await governance_service.batch_resync_files(
         file_ids=request.file_ids, tutor_id=tutor_id, force=request.force
@@ -410,7 +415,7 @@ async def resync_single_document(
     Re-sync a single document.
     """
     tutor_id = current_user.tutor_id
-    governance_service = DocumentGovernanceService(db)
+    governance_service = _create_governance_service(db)
 
     result = await governance_service.resync_document(
         file_id=document_id, tutor_id=tutor_id, force=force
@@ -428,7 +433,7 @@ async def get_documents_needing_resync(
     Get list of documents that need re-syncing.
     """
     tutor_id = current_user.tutor_id
-    governance_service = DocumentGovernanceService(db)
+    governance_service = _create_governance_service(db)
 
     files = await governance_service.get_files_needing_resync(tutor_id)
 

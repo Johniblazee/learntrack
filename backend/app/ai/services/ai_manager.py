@@ -3,16 +3,14 @@ Consolidated AI Manager with Enhanced LangChain Integration
 Manages multiple AI providers with intelligent fallback and cost optimization
 """
 
-from typing import List, Dict, Any, Optional, Tuple
+from importlib import import_module
+from typing import List, Dict, Any, Optional, Tuple, Type
 from decimal import Decimal
 import structlog
 import asyncio
 
 from app.core.config import settings
 from app.ai.providers.base import BaseAIProvider, AIProvider
-from app.ai.providers.openai_provider import OpenAIProvider
-from app.ai.providers.groq_provider import GroqProvider
-from app.ai.providers.gemini_provider import GeminiProvider
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
 from app.core.exceptions import AIProviderError
 
@@ -24,6 +22,19 @@ _tenant_ai_managers: Dict[str, "AIManager"] = {}
 _tenant_cache_lock = asyncio.Lock()
 # Per-tenant creation futures to prevent concurrent construction
 _tenant_creation_futures: Dict[str, asyncio.Future] = {}
+
+PROVIDER_CLASS_PATHS: Dict[AIProvider, Tuple[str, str]] = {
+    AIProvider.OPENAI: ("app.ai.providers.openai_provider", "OpenAIProvider"),
+    AIProvider.GROQ: ("app.ai.providers.groq_provider", "GroqProvider"),
+    AIProvider.GEMINI: ("app.ai.providers.gemini_provider", "GeminiProvider"),
+}
+
+
+def _load_provider_class(provider: AIProvider) -> Type[BaseAIProvider]:
+    module_name, class_name = PROVIDER_CLASS_PATHS[provider]
+    module = import_module(module_name)
+    provider_class = getattr(module, class_name)
+    return provider_class
 
 
 class AIManager:
@@ -69,7 +80,8 @@ class AIManager:
         )
         if self._is_valid_api_key(openai_key, "openai"):
             try:
-                self.providers[AIProvider.OPENAI] = OpenAIProvider(openai_key)
+                provider_class = _load_provider_class(AIProvider.OPENAI)
+                self.providers[AIProvider.OPENAI] = provider_class(str(openai_key))
                 logger.info("Initialized OpenAI provider")
             except Exception as e:
                 logger.warning("Failed to initialize OpenAI provider", error=str(e))
@@ -82,7 +94,8 @@ class AIManager:
         )
         if self._is_valid_api_key(groq_key, "groq"):
             try:
-                self.providers[AIProvider.GROQ] = GroqProvider(groq_key)
+                provider_class = _load_provider_class(AIProvider.GROQ)
+                self.providers[AIProvider.GROQ] = provider_class(str(groq_key))
                 logger.info("Initialized Groq provider")
             except Exception as e:
                 logger.warning("Failed to initialize Groq provider", error=str(e))
@@ -95,7 +108,8 @@ class AIManager:
         )
         if self._is_valid_api_key(gemini_key, "gemini"):
             try:
-                self.providers[AIProvider.GEMINI] = GeminiProvider(gemini_key)
+                provider_class = _load_provider_class(AIProvider.GEMINI)
+                self.providers[AIProvider.GEMINI] = provider_class(str(gemini_key))
                 logger.info("Initialized Gemini provider")
             except Exception as e:
                 logger.warning("Failed to initialize Gemini provider", error=str(e))
@@ -488,6 +502,9 @@ async def get_ai_manager_for_tenant(
     Uses per-tenant creation futures to prevent multiple coroutines from concurrently constructing AIManager.
     """
     # First check: see if we can return existing without any heavy work
+    creation_future = None
+    future_to_await = None
+
     async with _tenant_cache_lock:
         existing = _tenant_ai_managers.get(tenant_id)
         if existing:

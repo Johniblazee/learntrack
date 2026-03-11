@@ -29,11 +29,6 @@ from app.models.rag import (
 )
 from app.models.file import EmbeddingStatus, FileStatus
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
-from app.rag.services.rag_service import RAGService
-from app.services.web_search_service import WebSearchService
-from app.ai.services.ai_manager import get_ai_manager_for_tenant, AIManager
-from app.services.tenant_ai_config_service import TenantAIConfigService
-from app.services.question_service import QuestionService
 from app.core.utils import to_object_id
 from app.utils.enums import (
     normalize_question_type,
@@ -43,6 +38,42 @@ from app.utils.enums import (
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+def _create_rag_service(database: AsyncIOMotorDatabase):
+    from app.rag.services.rag_service import RAGService
+
+    return RAGService(database)
+
+
+def _create_web_search_service(database: AsyncIOMotorDatabase):
+    from app.services.web_search_service import WebSearchService
+
+    return WebSearchService(database)
+
+
+def _create_tenant_config_service(database: AsyncIOMotorDatabase):
+    from app.services.tenant_ai_config_service import TenantAIConfigService
+
+    return TenantAIConfigService(database)
+
+
+def _create_question_service(database: AsyncIOMotorDatabase):
+    from app.services.question_service import QuestionService
+
+    return QuestionService(database)
+
+
+async def _get_ai_manager(tenant_id: str):
+    from app.ai.services.ai_manager import get_ai_manager_for_tenant
+
+    return await get_ai_manager_for_tenant(tenant_id)
+
+
+def _create_default_ai_manager():
+    from app.ai.services.ai_manager import AIManager
+
+    return AIManager()
 
 
 def _build_basic_rag_context(
@@ -88,10 +119,10 @@ async def generate_questions_with_rag(
     """Generate questions using RAG with optional web search"""
     try:
         start_time = time.monotonic()
-        rag_service = RAGService(database)
-        web_search_service = WebSearchService(database)
-        question_service = QuestionService(database)
-        config_service = TenantAIConfigService(database)
+        rag_service = _create_rag_service(database)
+        web_search_service = _create_web_search_service(database)
+        question_service = _create_question_service(database)
+        config_service = _create_tenant_config_service(database)
 
         tenant_config = await config_service.get_or_create_default(
             current_user.tutor_id
@@ -150,7 +181,7 @@ async def generate_questions_with_rag(
                 from app.agents.rag.graph import AgenticRAGAgent
                 from app.agents.rag.state import RAGConfig
 
-                manager = await get_ai_manager_for_tenant(current_user.tutor_id)
+                manager = await _get_ai_manager(current_user.tutor_id)
                 rag_llm_provider = None
                 try:
                     rag_llm_provider = manager.get_provider(ai_provider)
@@ -228,7 +259,7 @@ async def generate_questions_with_rag(
                 web_results = [r.model_dump() for r in results]
 
         # Generate questions with RAG context
-        manager = await get_ai_manager_for_tenant(current_user.tutor_id)
+        manager = await _get_ai_manager(current_user.tutor_id)
         if model_name:
             try:
                 manager.set_provider_model(ai_provider, model_name)
@@ -308,8 +339,8 @@ async def regenerate_single_question(
 ):
     """Regenerate a single question with modifications"""
     try:
-        manager = get_ai_manager_for_tenant(current_user.tutor_id)
-        question_service = QuestionService(database)
+        manager = await _get_ai_manager(current_user.tutor_id)
+        question_service = _create_question_service(database)
         original = await question_service.get_question_by_id(
             body.question_id, current_user.clerk_id
         )
@@ -364,7 +395,7 @@ async def get_available_models(
 ):
     """Get available models for a provider"""
     try:
-        manager = AIManager()
+        manager = _create_default_ai_manager()
         models = manager.get_available_models(provider)
         return {"provider": provider, "models": models}
     except Exception as e:
@@ -415,8 +446,8 @@ async def get_document_library(
 
 @router.post("/process/{file_id}", response_model=DocumentProcessingStatus)
 async def process_document_for_rag(
+    background_tasks: BackgroundTasks,
     file_id: str = Path(..., description="File ID to process"),
-    background_tasks: BackgroundTasks = None,
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
@@ -434,7 +465,7 @@ async def process_document_for_rag(
         if not file_doc:
             raise HTTPException(status_code=404, detail="File not found")
 
-        rag_service = RAGService(database)
+        rag_service = _create_rag_service(database)
         storage_path = str(file_doc.get("storage_path") or "")
         source_url = file_doc.get("source_url") or file_doc.get("uploadthing_url")
         if not storage_path:
@@ -502,7 +533,7 @@ async def delete_document_embeddings(
 ):
     """Delete embeddings for a document"""
     try:
-        rag_service = RAGService(database)
+        rag_service = _create_rag_service(database)
         await rag_service.delete_file_embeddings(file_id, current_user.clerk_id)
 
         try:
@@ -549,7 +580,7 @@ async def migrate_embeddings_to_active_collection(
 ):
     """Backfill embeddings from legacy collections into active model collection."""
     try:
-        rag_service = RAGService(database)
+        rag_service = _create_rag_service(database)
         result = await rag_service.backfill_embeddings(
             source_collections=source_collections,
             batch_size=batch_size,
@@ -569,8 +600,8 @@ async def get_rag_stats(
 ):
     """Get RAG statistics for tutor"""
     try:
-        rag_service = RAGService(database)
-        web_search_service = WebSearchService(database)
+        rag_service = _create_rag_service(database)
+        web_search_service = _create_web_search_service(database)
 
         collection_stats = await rag_service.get_collection_stats(current_user.clerk_id)
         remaining_credits = await web_search_service.get_remaining_credits(
@@ -602,7 +633,7 @@ async def get_available_providers(
 ):
     """Get list of available AI providers"""
     try:
-        manager = await get_ai_manager_for_tenant(current_user.tutor_id)
+        manager = await _get_ai_manager(current_user.tutor_id)
         return manager.get_available_providers()
     except Exception as e:
         logger.exception("Failed to get available providers")

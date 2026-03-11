@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -8,7 +9,7 @@ from datetime import datetime, timezone
 
 from app.core.database import database
 from app.core.config import settings
-from app.core.enhanced_auth import _clerk_http_client
+from app.core.enhanced_auth import close_clerk_http_client
 from app.models.responses import HealthResponse
 from app.core.exceptions import (
     LearnTrackException,
@@ -25,12 +26,38 @@ from app.core.audit_middleware import AuditLoggingMiddleware
 from app.core.health import health_checker, HealthStatus
 from app.core.logging_config import RequestLoggingMiddleware, configure_logging
 from app.core.cache import get_cache_stats
-from app.core.migrations import get_migration_runner
+from app.api.v1.lazy_subapps import create_lazy_router_subapp
 
 # Configure structured logging
 configure_logging()
 
 logger = structlog.get_logger()
+
+
+def _track_background_task(task, task_name: str):
+    """Track background startup tasks and log failures without blocking readiness."""
+
+    def _log_result(completed_task):
+        try:
+            completed_task.result()
+            logger.info("Background startup task completed", task=task_name)
+        except Exception as error:
+            logger.error(
+                "Background startup task failed",
+                task=task_name,
+                error=str(error),
+            )
+
+    task.add_done_callback(_log_result)
+    return task
+
+
+async def _run_startup_bootstrap(db_ref):
+    """Run non-critical schema bootstrap work outside request-serving startup."""
+    from app.bootstrap import run_bootstrap_tasks
+
+    await run_bootstrap_tasks(db_ref)
+
 
 app = FastAPI(
     title="LearnTrack API",
@@ -113,39 +140,21 @@ app.add_middleware(
 # Database lifecycle events
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database connection on startup"""
+    """Initialize lightweight process state on startup."""
     try:
-        await database.connect_to_database()
-
-        if database.database is None:
-            raise RuntimeError("Database connection is not initialized")
-
-        db_ref = database.database
-
-        # Store database reference in app state for middleware access
+        db_ref = await database.init_client()
         app.state.db = db_ref
+        app.state.startup_tasks = {}
 
-        # Run pending MongoDB migrations
-        try:
-            migration_runner = get_migration_runner(db_ref)
-            migration_results = await migration_runner.migrate()
-            app.state.migration_results = migration_results
-            logger.info("Database migrations checked", **migration_results)
-        except Exception as migration_error:
-            logger.error(
-                "Failed to run database migrations", error=str(migration_error)
+        if settings.STARTUP_PING_DATABASE:
+            await database.ensure_connected()
+
+        if settings.RUN_STARTUP_BOOTSTRAP:
+            task = _track_background_task(
+                asyncio.create_task(_run_startup_bootstrap(db_ref)),
+                "database_bootstrap",
             )
-
-        # Setup audit log TTL index for automatic cleanup
-        try:
-            from app.services.audit_log_service import AuditLogService
-
-            audit_service = AuditLogService(db_ref)
-            await audit_service.setup_ttl_index()
-        except Exception as e:
-            logger.warning(
-                "Failed to setup audit log TTL index (may already exist)", error=str(e)
-            )
+            app.state.startup_tasks["database_bootstrap"] = task
 
         logger.info("FastAPI application started successfully")
     except Exception as e:
@@ -157,8 +166,11 @@ async def startup_event():
 async def shutdown_event():
     """Close database connection on shutdown"""
     try:
+        for task in getattr(app.state, "startup_tasks", {}).values():
+            if task and not task.done():
+                task.cancel()
         await database.close_database_connection()
-        await _clerk_http_client.aclose()
+        await close_clerk_http_client()
         logger.info("FastAPI application shutdown successfully")
     except Exception as e:
         logger.error("Error during FastAPI application shutdown", error=str(e))
@@ -168,6 +180,14 @@ async def shutdown_event():
 from app.api.v1 import api_router
 
 app.include_router(api_router, prefix="/api/v1")
+app.mount(
+    "/api/v1/question-generator",
+    create_lazy_router_subapp("app.api.v1.endpoints.question_generator"),
+)
+app.mount(
+    "/api/v1/rag",
+    create_lazy_router_subapp("app.api.v1.endpoints.rag"),
+)
 
 # Mount Socket.IO app for WebSocket support
 socket_app = get_socket_app()
@@ -199,7 +219,20 @@ async def health_ready():
     Verifies database connectivity and other dependencies.
     Returns 503 if not ready.
     """
-    result = await health_checker.check_readiness()
+    result = await health_checker.check_readiness(deep=False)
+
+    if result["status"] == HealthStatus.UNHEALTHY.value:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=503, content=result)
+
+    return result
+
+
+@app.get("/health/ready/deep", tags=["Health"])
+async def health_ready_deep():
+    """Optional deep readiness check including vector store connectivity."""
+    result = await health_checker.check_readiness(deep=True)
 
     if result["status"] == HealthStatus.UNHEALTHY.value:
         from fastapi.responses import JSONResponse

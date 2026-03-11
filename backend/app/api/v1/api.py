@@ -26,8 +26,6 @@ from app.api.v1.endpoints import (
     groups,
     websocket,
     assignment_templates,
-    rag,
-    question_generator,
     settings,
     documents,
     cost_tracking,
@@ -71,10 +69,6 @@ api_router.include_router(
     tags=["assignment-templates"],
 )
 api_router.include_router(websocket.router, tags=["websocket"])
-api_router.include_router(rag.router, prefix="/rag", tags=["rag"])
-api_router.include_router(
-    question_generator.router, prefix="/question-generator", tags=["question-generator"]
-)
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
 api_router.include_router(

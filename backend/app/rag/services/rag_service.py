@@ -6,7 +6,7 @@ Consolidated RAG orchestrator that replaces multiple scattered services
 import asyncio
 import os
 import uuid
-from typing import List, Dict, Any, Optional, Set
+from typing import TYPE_CHECKING, List, Dict, Any, Optional, Set
 from datetime import datetime, timezone
 import structlog
 
@@ -18,9 +18,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.models.file import EmbeddingStatus
 from app.core.utils import to_object_id
-from .embedding_service import EmbeddingService
-from .chunking_service import ChunkingService
-from .retrieval_service import RetrievalService
+
+if TYPE_CHECKING:
+    from .embedding_service import EmbeddingService
+    from .chunking_service import ChunkingService
+    from .retrieval_service import RetrievalService
 
 logger = structlog.get_logger()
 
@@ -34,13 +36,16 @@ class RAGService:
     def __init__(
         self,
         database: AsyncIOMotorDatabase,
-        embedding_service: Optional[EmbeddingService] = None,
+        embedding_service: Optional["EmbeddingService"] = None,
         collection_name: str = "documents",
     ):
         self.db = database
         self.base_collection_name = collection_name
 
-        # Initialize services with LangChain
+        from .chunking_service import ChunkingService
+        from .embedding_service import EmbeddingService
+        from .retrieval_service import RetrievalService
+
         self.embedding_service = embedding_service or EmbeddingService()
         self.chunking_service = ChunkingService(self.embedding_service)
         self.retrieval_service = RetrievalService(

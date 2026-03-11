@@ -3,7 +3,6 @@ from typing import Any, Dict, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from svix.webhooks import Webhook, WebhookVerificationError
 import structlog
 
 from app.core.config import settings
@@ -14,6 +13,12 @@ from app.utils.slug import generate_unique_slug
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+def _get_svix_webhook_tools():
+    from svix.webhooks import Webhook, WebhookVerificationError
+
+    return Webhook, WebhookVerificationError
 
 
 def _get_metadata(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -331,6 +336,8 @@ async def clerk_webhook(
     if not webhook_secret:
         logger.error("CLERK_WEBHOOK_SECRET is not configured")
         raise HTTPException(status_code=500, detail="Webhook secret is not configured")
+
+    Webhook, WebhookVerificationError = _get_svix_webhook_tools()
 
     try:
         headers = request.headers

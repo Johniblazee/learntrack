@@ -21,8 +21,8 @@ from app.core.database import get_database
 
 logger = structlog.get_logger()
 
-# Shared httpx client — reuses connection pool across requests (M2)
-_clerk_http_client = httpx.AsyncClient(timeout=10.0)
+# Shared httpx client — initialized lazily to avoid startup overhead.
+_clerk_http_client: Optional[httpx.AsyncClient] = None
 
 # Header containing active admin impersonation session ID.
 IMPERSONATION_SESSION_HEADER = "x-learntrack-impersonation-session"
@@ -47,6 +47,20 @@ _user_db_cache: TTLCache = TTLCache(maxsize=10000, ttl=60)
 # Key: user_id, Value: (failure_count, last_failure_time)
 # After 5 failures, we stop trying for 1 hour
 _clerk_api_failure_cache: Dict[str, tuple] = {}
+
+
+def _get_clerk_http_client() -> httpx.AsyncClient:
+    global _clerk_http_client
+    if _clerk_http_client is None:
+        _clerk_http_client = httpx.AsyncClient(timeout=10.0)
+    return _clerk_http_client
+
+
+async def close_clerk_http_client() -> None:
+    global _clerk_http_client
+    if _clerk_http_client is not None:
+        await _clerk_http_client.aclose()
+        _clerk_http_client = None
 
 
 class ClerkUserContext(BaseModel):
@@ -180,7 +194,7 @@ class EnhancedClerkJWTBearer:
         jwks_url = f"{self.issuer}/.well-known/jwks.json"
         try:
             # Reuse the module-level shared client for connection pooling
-            response = await _clerk_http_client.get(jwks_url)
+            response = await _get_clerk_http_client().get(jwks_url)
             response.raise_for_status()
 
             jwks_data = response.json()
@@ -301,7 +315,7 @@ class EnhancedClerkJWTBearer:
 
         for attempt in range(max_retries):
             try:
-                response = await _clerk_http_client.get(
+                response = await _get_clerk_http_client().get(
                     f"https://api.clerk.com/v1/users/{user_id}",
                     headers={
                         "Authorization": f"Bearer {self.clerk_secret}",
@@ -633,9 +647,23 @@ class EnhancedClerkJWTBearer:
         )
 
 
-# Global instance
-enhanced_clerk_bearer = EnhancedClerkJWTBearer()
+_enhanced_clerk_bearer: Optional[EnhancedClerkJWTBearer] = None
 security = HTTPBearer()
+
+
+def _get_enhanced_clerk_bearer() -> EnhancedClerkJWTBearer:
+    global _enhanced_clerk_bearer
+    if _enhanced_clerk_bearer is None:
+        _enhanced_clerk_bearer = EnhancedClerkJWTBearer()
+    return _enhanced_clerk_bearer
+
+
+class _LazyEnhancedClerkBearerProxy:
+    def __getattr__(self, name: str):
+        return getattr(_get_enhanced_clerk_bearer(), name)
+
+
+enhanced_clerk_bearer = _LazyEnhancedClerkBearerProxy()
 
 
 async def _apply_impersonation_session_override(
@@ -678,6 +706,7 @@ async def _apply_impersonation_session_override(
         )
         return current_user
 
+    enhanced_clerk_bearer = _get_enhanced_clerk_bearer()
     target_user = await enhanced_clerk_bearer._get_user_from_database(
         session.target_clerk_id
     )
@@ -728,7 +757,7 @@ async def get_current_user(
 ) -> ClerkUserContext:
     """Get current authenticated user from JWT token"""
     token = credentials.credentials
-    current_user = await enhanced_clerk_bearer.verify_token(token)
+    current_user = await _get_enhanced_clerk_bearer().verify_token(token)
     setattr(request.state, AUTHENTICATED_ACTOR_STATE_KEY, current_user.clerk_id)
     setattr(request.state, IMPERSONATION_ACTIVE_STATE_KEY, False)
     current_user = await _apply_impersonation_session_override(current_user, request)
