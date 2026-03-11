@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useUser } from '@clerk/clerk-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Bell, Globe, Lock, Palette, Save, User } from 'lucide-react'
 
@@ -12,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
 import { toast } from '../contexts/ToastContext'
+import { useUserContext } from '@/contexts/UserContext'
 import { useApiClient } from '../lib/api-client'
 
 type StudentDefaultTab = 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
@@ -69,6 +71,8 @@ export default function SettingsPage() {
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
   const apiClient = useApiClient()
+  const queryClient = useQueryClient()
+  const { backendUser } = useUserContext()
 
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -77,6 +81,10 @@ export default function SettingsPage() {
     displayName: user?.fullName || '',
     email: user?.primaryEmailAddress?.emailAddress || '',
   })
+
+  const userRole = String(backendUser?.role || user?.publicMetadata?.role || '').toLowerCase()
+  const isStudent = userRole === 'student'
+  const roleLabel = isStudent ? 'student workspace' : userRole === 'parent' ? 'parent account' : 'personal account'
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -151,6 +159,7 @@ export default function SettingsPage() {
       }
 
       toast.success('Settings saved successfully!')
+      queryClient.invalidateQueries({ queryKey: ['user-settings'] })
     } catch (error: any) {
       console.error('Failed to save settings:', error)
       toast.error(error.message || 'Failed to save settings')
@@ -175,9 +184,9 @@ export default function SettingsPage() {
               </Button>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Manage your account settings and preferences
-                </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Manage your {roleLabel} settings and preferences
+                  </p>
               </div>
             </div>
 
@@ -388,65 +397,81 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Preferences</CardTitle>
-                <CardDescription>Tailor your student workspace experience</CardDescription>
+                <CardDescription>
+                  {isStudent
+                    ? 'Tailor your student workspace experience'
+                    : userRole === 'parent'
+                      ? 'Messaging and alert preferences are handled above for your parent dashboard.'
+                      : 'Personal notification and privacy settings above drive most of your day-to-day experience.'}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label htmlFor="defaultStudentTab">Default Student Dashboard Tab</Label>
-                  <select
-                    id="defaultStudentTab"
-                    value={settings.defaultStudentTab}
-                    onChange={(event) =>
-                      setSettings({
-                        ...settings,
-                        defaultStudentTab: normalizeDefaultStudentTab(event.target.value),
-                      })
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  >
-                    <option value="dashboard">Dashboard</option>
-                    <option value="courses">My Courses</option>
-                    <option value="assignments">Assignments</option>
-                    <option value="grades">Grades</option>
-                    <option value="library">Library</option>
-                  </select>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Choose which tab opens first when you enter the student dashboard.
-                  </p>
-                </div>
+                {isStudent ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="defaultStudentTab">Default Student Dashboard Tab</Label>
+                      <select
+                        id="defaultStudentTab"
+                        value={settings.defaultStudentTab}
+                        onChange={(event) =>
+                          setSettings({
+                            ...settings,
+                            defaultStudentTab: normalizeDefaultStudentTab(event.target.value),
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                      >
+                        <option value="dashboard">Dashboard</option>
+                        <option value="courses">My Courses</option>
+                        <option value="assignments">Assignments</option>
+                        <option value="grades">Grades</option>
+                        <option value="library">Library</option>
+                      </select>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Choose which tab opens first when you enter the student dashboard.
+                      </p>
+                    </div>
 
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Show Weekend in Weekly Schedule</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Include Saturday and Sunday in the schedule view.</p>
-                  </div>
-                  <Switch
-                    checked={settings.showWeekendSchedule}
-                    onCheckedChange={(checked) => setSettings({ ...settings, showWeekendSchedule: checked })}
-                  />
-                </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Show Weekend in Weekly Schedule</Label>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Include Saturday and Sunday in the schedule view.</p>
+                      </div>
+                      <Switch
+                        checked={settings.showWeekendSchedule}
+                        onCheckedChange={(checked) => setSettings({ ...settings, showWeekendSchedule: checked })}
+                      />
+                    </div>
 
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Compact Assignment Cards</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Reduce card spacing to fit more assignments on screen.</p>
-                  </div>
-                  <Switch
-                    checked={settings.compactAssignmentCards}
-                    onCheckedChange={(checked) => setSettings({ ...settings, compactAssignmentCards: checked })}
-                  />
-                </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Compact Assignment Cards</Label>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Reduce card spacing to fit more assignments on screen.</p>
+                      </div>
+                      <Switch
+                        checked={settings.compactAssignmentCards}
+                        onCheckedChange={(checked) => setSettings({ ...settings, compactAssignmentCards: checked })}
+                      />
+                    </div>
 
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Auto-open Next Assignment</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Open the next in-progress assignment from Resume Learning Session.</p>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Auto-open Next Assignment</Label>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Open the next in-progress assignment from Resume Learning Session.</p>
+                      </div>
+                      <Switch
+                        checked={settings.autoOpenNextAssignment}
+                        onCheckedChange={(checked) => setSettings({ ...settings, autoOpenNextAssignment: checked })}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                    {userRole === 'parent'
+                      ? 'Your parent dashboard already uses the notification settings above for reminders and messages.'
+                      : 'Tutor-specific AI and system configuration is managed in the admin settings area. Personal controls here are handled through profile, notifications, privacy, and appearance.'}
                   </div>
-                  <Switch
-                    checked={settings.autoOpenNextAssignment}
-                    onCheckedChange={(checked) => setSettings({ ...settings, autoOpenNextAssignment: checked })}
-                  />
-                </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

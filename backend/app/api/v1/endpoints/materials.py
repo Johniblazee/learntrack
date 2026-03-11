@@ -3,8 +3,12 @@ Reference material management endpoints.
 """
 
 import mimetypes
+import os
+import hashlib
+import re
+from datetime import datetime, timezone
 from pathlib import Path as FilePath
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import uuid4
 
 import structlog
@@ -26,8 +30,11 @@ from app.models.material import (
     MaterialFolder,
     MaterialFolderCreate,
     MaterialFolderUpdate,
+    MaterialStatus,
     MaterialUpdate,
 )
+from app.models.file import EmbeddingStatus, FileStatus, SyncStatus
+from app.rag.processors.document_processor import get_document_processor
 from app.services.material_service import MaterialService
 from app.utils.pagination import PaginatedResponse, paginate
 
@@ -37,6 +44,7 @@ router = APIRouter()
 BACKEND_ROOT = FilePath(__file__).resolve().parents[4]
 MATERIAL_UPLOAD_DIR = BACKEND_ROOT / "uploads" / "materials"
 MATERIAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000")
 
 
 class MoveMaterialRequest(BaseModel):
@@ -61,6 +69,63 @@ def _material_type_from_file(file_name: str, content_type: Optional[str]) -> str
         return "video"
 
     return "other"
+
+
+def _tenant_tutor_id(current_user: ClerkUserContext) -> str:
+    return current_user.tutor_id or current_user.clerk_id
+
+
+async def _authorize_uploaded_file_access(
+    *,
+    file_name: str,
+    current_user: ClerkUserContext,
+    database: AsyncIOMotorDatabase,
+) -> dict:
+    file_doc = await database.files.find_one({"uploadthing_key": file_name})
+    if file_doc:
+        file_tutor_id = str(file_doc.get("tutor_id") or "").strip()
+
+        if current_user.role.value == "tutor":
+            if file_tutor_id != current_user.clerk_id:
+                raise HTTPException(status_code=403, detail="Access forbidden")
+            return file_doc
+
+        tenant_tutor_id = _tenant_tutor_id(current_user)
+        if file_tutor_id != tenant_tutor_id:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        material = await database.materials.find_one(
+            {
+                "file_id": str(file_doc.get("_id")),
+                "tutor_id": tenant_tutor_id,
+                "status": MaterialStatus.ACTIVE.value,
+                "shared_with_students": True,
+            }
+        )
+        if not material:
+            raise HTTPException(status_code=403, detail="Access forbidden")
+
+        return file_doc
+
+    material_query: dict[str, Any] = {
+        "file_url": {"$regex": f"/{re.escape(file_name)}$"}
+    }
+    if current_user.role.value == "tutor":
+        material_query["tutor_id"] = current_user.clerk_id
+    else:
+        material_query.update(
+            {
+                "tutor_id": _tenant_tutor_id(current_user),
+                "status": MaterialStatus.ACTIVE.value,
+                "shared_with_students": True,
+            }
+        )
+
+    material = await database.materials.find_one(material_query)
+    if not material:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return {"storage_path": str(MATERIAL_UPLOAD_DIR / file_name)}
 
 
 @router.post("/", response_model=Material)
@@ -251,6 +316,7 @@ async def get_materials_for_student(
 async def upload_material_file(
     file: UploadFile = File(...),
     current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Upload a material file and return a URL for material records."""
     if not file.filename:
@@ -274,12 +340,82 @@ async def upload_material_file(
         logger.error("Failed to persist uploaded material file", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to store uploaded file")
 
+    source_path = f"/api/v1/materials/files/{safe_name}"
+    uploaded_at = datetime.now(timezone.utc)
+    file_doc = {
+        "uploadthing_key": safe_name,
+        "uploadthing_url": f"{BACKEND_PUBLIC_URL}{source_path}",
+        "source_url": source_path,
+        "storage_path": str(output_path),
+        "filename": file.filename,
+        "content_type": file.content_type or "application/octet-stream",
+        "size": len(content),
+        "uploaded_by": current_user.clerk_id,
+        "uploaded_at": uploaded_at,
+        "tutor_id": current_user.clerk_id,
+        "tenant_path": f"{current_user.clerk_id}/{safe_name}",
+        "status": FileStatus.PROCESSING.value,
+        "processing_started_at": uploaded_at,
+        "embedding_status": EmbeddingStatus.PENDING.value,
+        "sync_status": SyncStatus.SYNCED.value,
+        "processing_attempts": 1,
+        "content_hash": hashlib.sha256(content).hexdigest(),
+        "character_count": None,
+        "token_estimate": None,
+        "processor_used": None,
+        "extracted_text": None,
+    }
+    insert_result = await database.files.insert_one(file_doc)
+    file_id = str(insert_result.inserted_id)
+
+    processing_updates = {
+        "status": FileStatus.ERROR.value,
+        "processing_completed_at": datetime.now(timezone.utc),
+        "error_message": "Document text extraction did not run",
+    }
+
+    try:
+        processor = get_document_processor()
+        extracted_text = await processor.extract_text_only(output_path)
+        completed_at = datetime.now(timezone.utc)
+        processing_updates = {
+            "status": FileStatus.PROCESSED.value,
+            "processing_completed_at": completed_at,
+            "error_message": None,
+            "extracted_text": extracted_text,
+            "character_count": len(extracted_text),
+            "token_estimate": max(
+                len(extracted_text.split()), len(extracted_text) // 4
+            ),
+            "processor_used": "langchain-docling",
+            "last_synced_at": completed_at,
+        }
+    except Exception as processing_error:
+        logger.warning(
+            "Failed to extract uploaded material text",
+            file_id=file_id,
+            filename=file.filename,
+            error=str(processing_error),
+        )
+        processing_updates = {
+            **processing_updates,
+            "error_message": str(processing_error),
+        }
+
+    await database.files.update_one(
+        {"_id": insert_result.inserted_id},
+        {"$set": processing_updates},
+    )
+
     return {
-        "file_url": f"/api/v1/materials/files/{safe_name}",
+        "file_id": file_id,
+        "file_url": source_path,
         "file_size": len(content),
         "material_type": _material_type_from_file(file.filename, file.content_type),
         "filename": file.filename,
         "uploaded_by": current_user.clerk_id,
+        "processing_status": processing_updates["status"],
+        "processing_error": processing_updates.get("error_message"),
     }
 
 
@@ -287,15 +423,22 @@ async def upload_material_file(
 async def get_uploaded_material_file(
     file_name: str = Path(..., description="Stored material file name"),
     current_user: ClerkUserContext = Depends(require_authenticated_user),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Serve uploaded material files."""
-    del current_user
-
     sanitized_name = FilePath(file_name).name
     if sanitized_name != file_name:
         raise HTTPException(status_code=400, detail="Invalid file name")
 
-    file_path = MATERIAL_UPLOAD_DIR / sanitized_name
+    file_doc = await _authorize_uploaded_file_access(
+        file_name=sanitized_name,
+        current_user=current_user,
+        database=database,
+    )
+
+    file_path = FilePath(
+        str(file_doc.get("storage_path") or MATERIAL_UPLOAD_DIR / sanitized_name)
+    )
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -452,11 +595,19 @@ async def track_download(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Track material download."""
-    del current_user
     try:
         material_service = MaterialService(database)
+        material = await material_service.get_material_by_id(
+            material_id=material_id,
+            tutor_id=_tenant_tutor_id(current_user),
+        )
+        if current_user.role.value != "tutor" and not material.shared_with_students:
+            raise HTTPException(status_code=403, detail="Material is private")
+
         await material_service.increment_download_count(material_id)
         return {"message": "Download tracked"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to track download", material_id=material_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to track download")

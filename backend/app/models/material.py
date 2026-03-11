@@ -37,12 +37,13 @@ class MaterialBase(BaseModel):
     description: Optional[str] = None
     material_type: MaterialType
     file_url: Optional[str] = None  # UploadThing URL or external link
+    file_id: Optional[str] = None
     file_size: Optional[int] = None  # in bytes
     subject_id: Optional[str] = None
     topic: Optional[str] = None
     folder_id: Optional[str] = None
     folder_path: Optional[str] = None
-    tags: List[str] = []
+    tags: List[str] = Field(default_factory=list)
 
 
 class MaterialCreate(MaterialBase):
@@ -59,6 +60,7 @@ class MaterialUpdate(BaseModel):
     description: Optional[str] = None
     material_type: Optional[MaterialType] = None
     file_url: Optional[str] = None
+    file_id: Optional[str] = None
     file_size: Optional[int] = None
     subject_id: Optional[str] = None
     topic: Optional[str] = None
@@ -84,8 +86,8 @@ class MaterialInDB(MaterialBase):
     download_count: int = 0
 
     # Relationships
-    linked_questions: List[str] = []  # Question IDs
-    linked_assignments: List[str] = []  # Assignment IDs
+    linked_questions: List[str] = Field(default_factory=list)  # Question IDs
+    linked_assignments: List[str] = Field(default_factory=list)  # Assignment IDs
 
     # Access control
     shared_with_students: bool = True  # Whether students can access

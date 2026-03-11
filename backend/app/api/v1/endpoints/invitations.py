@@ -8,7 +8,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 
 from app.core.database import get_database
-from app.core.enhanced_auth import ClerkUserContext, require_tutor, get_current_user
+from app.core.enhanced_auth import (
+    ClerkUserContext,
+    require_authenticated_user,
+    require_tutor,
+)
 from app.models.invitation import (
     Invitation,
     InvitationCreate,
@@ -118,6 +122,7 @@ async def verify_invitation(
 @router.post("/accept", status_code=status.HTTP_200_OK)
 async def accept_invitation(
     request: InvitationAcceptRequest,
+    current_user: ClerkUserContext = Depends(require_authenticated_user),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
@@ -127,12 +132,18 @@ async def accept_invitation(
     This endpoint is called after the user signs up with Clerk.
     """
     try:
+        if not current_user.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authenticated email is required to accept an invitation",
+            )
+
         invitation_service = InvitationService(database)
         user = await invitation_service.accept_invitation(
             token=request.token,
-            clerk_id=request.clerk_id,
-            email=request.email,
-            name=request.name,
+            clerk_id=current_user.clerk_id,
+            email=str(current_user.email),
+            name=str(current_user.name or request.name or "User"),
             selected_student_ids=request.selected_student_ids,
         )
 

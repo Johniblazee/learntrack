@@ -47,11 +47,19 @@ export interface GenerationSettings {
   materialIds: string[]
 }
 
+export interface GenerationSourceOption {
+  id: string
+  title: string
+  subtitle: string
+}
+
 interface SettingsModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   settings: GenerationSettings
   onSettingsChange: (settings: GenerationSettings) => void
+  availableSources?: GenerationSourceOption[]
+  isSourcesLoading?: boolean
 }
 
 const BLOOMS_LEVELS = [
@@ -98,6 +106,8 @@ export function SettingsModal({
   onOpenChange,
   settings,
   onSettingsChange,
+  availableSources = [],
+  isSourcesLoading = false,
 }: SettingsModalProps) {
   const [localSettings, setLocalSettings] = useState<GenerationSettings>(settings)
   const [expandedSection, setExpandedSection] = useState<string | null>('basic')
@@ -131,6 +141,15 @@ export function SettingsModal({
         ? prev.bloomsLevels.filter(l => l !== levelId)
         : [...prev.bloomsLevels, levelId]
       return { ...prev, bloomsLevels: levels }
+    })
+  }
+
+  const toggleMaterial = (materialId: string) => {
+    setLocalSettings(prev => {
+      const materialIds = prev.materialIds.includes(materialId)
+        ? prev.materialIds.filter(id => id !== materialId)
+        : [...prev.materialIds, materialId]
+      return { ...prev, materialIds }
     })
   }
 
@@ -298,6 +317,58 @@ export function SettingsModal({
                     </div>
                   </div>
 
+                </motion.div>
+              )}
+            </div>
+
+            <Separator />
+
+            <div>
+              <SectionHeader title="Source Materials" icon={BookOpen} sectionId="sources" />
+              {expandedSection === 'sources' && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="space-y-3 py-4"
+                >
+                  <p className="text-sm text-muted-foreground">
+                    Choose processed documents or materials to ground AI generation.
+                  </p>
+                  {isSourcesLoading ? (
+                    <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      Loading available sources...
+                    </div>
+                  ) : availableSources.length === 0 ? (
+                    <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      No processed sources are ready yet. Upload and process a document first.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {availableSources.map((source) => (
+                        <button
+                          key={source.id}
+                          type="button"
+                          onClick={() => toggleMaterial(source.id)}
+                          className={cn(
+                            'flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-all',
+                            localSettings.materialIds.includes(source.id)
+                              ? 'border-[#5c4a38] bg-[#5c4a38]/5'
+                              : 'border-border hover:bg-muted/50'
+                          )}
+                        >
+                          <Checkbox
+                            checked={localSettings.materialIds.includes(source.id)}
+                            className="pointer-events-none mt-0.5"
+                          />
+                          <div>
+                            <div className="font-medium text-sm">{source.title}</div>
+                            <div className="text-xs text-muted-foreground">{source.subtitle}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </motion.div>
               )}
             </div>

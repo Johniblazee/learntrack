@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/config'
 import { QUESTION_TYPES, DIFFICULTIES } from '@/lib/constants'
 import { ChatPanel, ChatMessage } from './ChatPanel'
-import { SettingsModal, GenerationSettings } from './SettingsModal'
+import { SettingsModal, GenerationSettings, GenerationSourceOption } from './SettingsModal'
 
 import { QuestionCanvas } from './QuestionCanvas'
 import { GeneratedQuestion, StreamEvent } from './types'
@@ -39,6 +39,16 @@ interface SessionSnapshot {
   chatMessages: ChatMessage[]
 }
 
+interface LibraryItem {
+  id: string
+  filename: string
+  content_type: string
+  status: string
+  embedding_status: string
+  topic?: string | null
+  subject_id?: string | null
+}
+
 export function OpenCanvasGenerator() {
   const { getToken } = useAuth()
 
@@ -55,6 +65,8 @@ export function OpenCanvasGenerator() {
     materialIds: [],
   })
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [availableSources, setAvailableSources] = useState<GenerationSourceOption[]>([])
+  const [isSourcesLoading, setIsSourcesLoading] = useState(false)
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false)
@@ -95,6 +107,50 @@ export function OpenCanvasGenerator() {
     }
     fetchAIDefaults()
   }, [getToken])
+
+  const fetchAvailableSources = useCallback(async () => {
+    try {
+      setIsSourcesLoading(true)
+      const token = await getToken()
+      const response = await fetch(`${API_BASE_URL}/rag/library`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to load generation sources')
+      }
+
+      const data = (await response.json()) as LibraryItem[]
+      const sourceOptions = (Array.isArray(data) ? data : [])
+        .filter((item) => item.status === 'processed' || item.embedding_status === 'completed')
+        .map((item) => ({
+          id: item.id,
+          title: item.filename,
+          subtitle: [
+            item.embedding_status === 'completed' ? 'Embedded and ready' : 'Processed and ready',
+            item.topic || item.subject_id || item.content_type,
+          ]
+            .filter(Boolean)
+            .join(' • '),
+        }))
+
+      setAvailableSources(sourceOptions)
+    } catch (error) {
+      console.error('Failed to load generation sources:', error)
+    } finally {
+      setIsSourcesLoading(false)
+    }
+  }, [getToken])
+
+  useEffect(() => {
+    void fetchAvailableSources()
+  }, [fetchAvailableSources])
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      void fetchAvailableSources()
+    }
+  }, [fetchAvailableSources, isSettingsOpen])
 
   // Fetch sessions
   const fetchSessions = useCallback(async () => {
@@ -1038,6 +1094,8 @@ export function OpenCanvasGenerator() {
         onOpenChange={setIsSettingsOpen}
         settings={settings}
         onSettingsChange={setSettings}
+        availableSources={availableSources}
+        isSourcesLoading={isSourcesLoading}
       />
     </div>
   )

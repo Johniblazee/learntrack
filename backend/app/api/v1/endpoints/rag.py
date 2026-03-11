@@ -27,6 +27,7 @@ from app.models.rag import (
     DocumentLibraryItem,
     DocumentProcessingStatus,
 )
+from app.models.file import EmbeddingStatus, FileStatus
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
 from app.agents.rag.graph import AgenticRAGAgent
 from app.agents.rag.state import RAGConfig
@@ -35,6 +36,7 @@ from app.services.web_search_service import WebSearchService
 from app.ai.services.ai_manager import get_ai_manager_for_tenant, AIManager
 from app.services.tenant_ai_config_service import TenantAIConfigService
 from app.services.question_service import QuestionService
+from app.core.utils import to_object_id
 from app.utils.enums import (
     normalize_question_type,
     normalize_difficulty,
@@ -113,7 +115,7 @@ async def generate_questions_with_rag(
         rag_context = ""
         source_chunks = []
         if body.document_ids:
-            manager = get_ai_manager_for_tenant(current_user.tutor_id)
+            manager = await get_ai_manager_for_tenant(current_user.tutor_id)
             rag_llm_provider = None
             try:
                 rag_llm_provider = manager.get_provider(ai_provider)
@@ -182,7 +184,7 @@ async def generate_questions_with_rag(
                 web_results = [r.model_dump() for r in results]
 
         # Generate questions with RAG context
-        manager = get_ai_manager_for_tenant(current_user.tutor_id)
+        manager = await get_ai_manager_for_tenant(current_user.tutor_id)
         if model_name:
             try:
                 manager.set_provider_model(ai_provider, model_name)
@@ -332,21 +334,33 @@ async def get_document_library(
 ):
     """Get tutor's document library with embedding status"""
     try:
-        files = await database.files.find({"tutor_id": current_user.clerk_id}).to_list(
-            100
+        files = (
+            await database.files.find(
+                {"tutor_id": current_user.clerk_id, "status": {"$ne": "deleted"}}
+            )
+            .sort("uploaded_at", -1)
+            .to_list(100)
         )
         library_items = []
         for f in files:
             item = DocumentLibraryItem(
                 id=str(f["_id"]),
                 filename=f.get("filename", ""),
-                file_type=f.get("file_type", ""),
-                file_size=f.get("file_size", 0),
-                uploaded_at=f.get("created_at"),
-                embedding_status=f.get("embedding_status", "pending"),
-                chunk_count=f.get("chunk_count"),
+                content_type=f.get("content_type", ""),
+                size=f.get("size", 0),
+                uploaded_at=f.get("uploaded_at") or f.get("created_at"),
+                status=f.get("status", FileStatus.UPLOADED.value),
+                embedding_status=f.get(
+                    "embedding_status", EmbeddingStatus.PENDING.value
+                ),
+                chunk_count=int(f.get("chunk_count", 0) or 0),
                 tags=f.get("tags", []),
                 category=f.get("category"),
+                subject_id=f.get("subject_id"),
+                topic=f.get("topic"),
+                uploadthing_url=str(
+                    f.get("source_url") or f.get("uploadthing_url") or ""
+                ),
             )
             library_items.append(item)
         return library_items
@@ -364,41 +378,70 @@ async def process_document_for_rag(
 ):
     """Process a document for RAG (create embeddings)"""
     try:
+        try:
+            file_oid = to_object_id(file_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid file ID")
+
         # Get file info
         file_doc = await database.files.find_one(
-            {"_id": file_id, "tutor_id": current_user.clerk_id}
+            {"_id": file_oid, "tutor_id": current_user.clerk_id}
         )
         if not file_doc:
             raise HTTPException(status_code=404, detail="File not found")
 
         rag_service = RAGService(database)
+        storage_path = str(file_doc.get("storage_path") or "")
+        source_url = file_doc.get("source_url") or file_doc.get("uploadthing_url")
+        if not storage_path:
+            raise HTTPException(
+                status_code=400, detail="File is missing local storage path"
+            )
 
         # Process in background if background_tasks available
         if background_tasks:
             background_tasks.add_task(
                 rag_service.process_document,
-                file_doc.get("file_path", ""),
-                file_id,
+                storage_path,
+                file_doc.get("filename") or file_id,
                 current_user.clerk_id,
-                file_doc.get("file_url"),
+                file_doc.get("uploaded_by") or current_user.clerk_id,
+                file_id=file_id,
+                tutor_id=current_user.clerk_id,
+                file_url=source_url,
             )
             return DocumentProcessingStatus(
                 file_id=file_id,
                 status="processing",
-                message="Document processing started",
+                embedding_status=EmbeddingStatus.PROCESSING.value,
+                current_step="Document processing started",
             )
         else:
             result = await rag_service.process_document(
-                file_doc.get("file_path", ""),
-                file_id,
+                storage_path,
+                file_doc.get("filename") or file_id,
                 current_user.clerk_id,
-                file_doc.get("file_url"),
+                file_doc.get("uploaded_by") or current_user.clerk_id,
+                file_id=file_id,
+                tutor_id=current_user.clerk_id,
+                file_url=source_url,
             )
             return DocumentProcessingStatus(
                 file_id=file_id,
-                status="completed",
-                chunks_processed=result.get("chunks", 0),
-                message="Document processed successfully",
+                status="completed" if result.get("success") else "failed",
+                embedding_status=(
+                    EmbeddingStatus.COMPLETED.value
+                    if result.get("success")
+                    else EmbeddingStatus.FAILED.value
+                ),
+                chunks_processed=result.get("chunks_count", 0),
+                total_chunks=result.get("chunks_count", 0),
+                current_step=(
+                    "Document processed successfully"
+                    if result.get("success")
+                    else result.get("error", "Document processing failed")
+                ),
+                error_message=result.get("error"),
             )
     except HTTPException:
         raise
@@ -418,10 +461,21 @@ async def delete_document_embeddings(
         rag_service = RAGService(database)
         await rag_service.delete_file_embeddings(file_id, current_user.clerk_id)
 
+        try:
+            file_oid = to_object_id(file_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid file ID")
+
         # Update file status - include tutor_id in filter for ownership verification
         await database.files.update_one(
-            {"_id": file_id, "uploaded_by": current_user.clerk_id},
-            {"$set": {"embedding_status": "pending", "chunk_count": None}},
+            {"_id": file_oid, "tutor_id": current_user.clerk_id},
+            {
+                "$set": {
+                    "embedding_status": EmbeddingStatus.PENDING.value,
+                    "chunk_count": 0,
+                    "qdrant_collection_id": None,
+                }
+            },
         )
         return {"message": "Embeddings deleted successfully"}
     except Exception as e:
@@ -504,7 +558,7 @@ async def get_available_providers(
 ):
     """Get list of available AI providers"""
     try:
-        manager = get_ai_manager_for_tenant(current_user.tenant_id)
+        manager = await get_ai_manager_for_tenant(current_user.tutor_id)
         return manager.get_available_providers()
     except Exception as e:
         logger.exception("Failed to get available providers")

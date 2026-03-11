@@ -14,7 +14,7 @@ from app.models.conversation import (
     ConversationListResponse,
 )
 from app.services.conversation_service import ConversationService
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -43,8 +43,11 @@ async def create_conversation(
             conversation_data=conversation_data,
             current_user_id=current_user.clerk_id,
             tutor_id=_resolve_tenant_id(current_user),
+            current_user_role=current_user.role,
         )
         return conversation
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -134,9 +137,13 @@ async def mark_conversation_as_read(
     try:
         service = ConversationService(db)
         await service.mark_as_read(
-            conversation_id=conversation_id, user_id=current_user.clerk_id
+            conversation_id=conversation_id,
+            user_id=current_user.clerk_id,
+            tutor_id=_resolve_tenant_id(current_user),
         )
         return None
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(
             "Failed to mark conversation as read",
@@ -200,8 +207,11 @@ async def get_or_create_conversation_with_user(
             conversation_data=conversation_data,
             current_user_id=current_user.clerk_id,
             tutor_id=_resolve_tenant_id(current_user),
+            current_user_role=current_user.role,
         )
         return conversation
+    except AuthorizationError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:

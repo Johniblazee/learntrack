@@ -199,7 +199,10 @@ const initialCreateForm: CreateTutorForm = {
   admin_permissions: [],
 }
 
-const togglePermission = (permissions: AdminPermission[], value: AdminPermission) => {
+const togglePermission = (
+  permissions: AdminPermission[],
+  value: AdminPermission
+): AdminPermission[] => {
   if (value === 'full_access') {
     return permissions.includes('full_access') ? [] : ['full_access']
   }

@@ -10,7 +10,7 @@ import structlog
 from pymongo import ReturnDocument
 
 from app.models.user import User, UserRole, UserCreate, UserUpdate
-from app.core.exceptions import NotFoundError, DatabaseException
+from app.core.exceptions import NotFoundError, DatabaseException, ValidationError
 from app.core.utils import to_object_id
 from app.utils.slug import generate_unique_slug
 
@@ -43,10 +43,8 @@ class UserService:
 
     async def create_user(self, user_data: UserCreate) -> User:
         """Create a new user with tenant support in role-specific collection"""
+        collection = self._get_collection_for_role(user_data.role)
         try:
-            # Get the appropriate collection for this role
-            collection = self._get_collection_for_role(user_data.role)
-
             # Check if user already exists by clerk_id
             if user_data.clerk_id:
                 existing_user = await collection.find_one(
@@ -269,7 +267,12 @@ class UserService:
                 if unlinked:
                     await self.students_collection.update_one(
                         {"_id": unlinked["_id"]},
-                        {"$set": {"clerk_id": user_context.clerk_id, "updated_at": datetime.now(timezone.utc)}},
+                        {
+                            "$set": {
+                                "clerk_id": user_context.clerk_id,
+                                "updated_at": datetime.now(timezone.utc),
+                            }
+                        },
                     )
                     logger.info(
                         "Linked existing student doc to Clerk ID",
@@ -277,7 +280,13 @@ class UserService:
                         student_id=str(unlinked["_id"]),
                     )
                     # Merge clerk_id + role (required by User model, absent from StudentInDB docs)
-                    return User(**{**unlinked, "clerk_id": user_context.clerk_id, "role": user_context.role})
+                    return User(
+                        **{
+                            **unlinked,
+                            "clerk_id": user_context.clerk_id,
+                            "role": user_context.role,
+                        }
+                    )
 
             # Determine tutor_id based on role
             if user_context.role in [UserRole.TUTOR, UserRole.SUPER_ADMIN]:
@@ -605,17 +614,32 @@ class UserService:
     ) -> bool:
         """Assign child to parent using parents collection (IDs are Clerk IDs)"""
         try:
-            # Update parent's children list by Clerk ID and keep both fields in sync
-            await self.parents_collection.update_one(
+            now = datetime.now(timezone.utc)
+
+            parent_result = await self.parents_collection.update_one(
                 {"clerk_id": parent_clerk_id},
                 {
                     "$addToSet": {
                         "parent_children": child_clerk_id,
                         "student_ids": child_clerk_id,
                     },
-                    "$set": {"updated_at": datetime.now(timezone.utc)},
+                    "$set": {"updated_at": now},
                 },
             )
+
+            student_result = await self.students_collection.update_one(
+                {"clerk_id": child_clerk_id},
+                {
+                    "$addToSet": {"parent_ids": parent_clerk_id},
+                    "$set": {"updated_at": now},
+                },
+            )
+
+            if parent_result.matched_count == 0:
+                raise ValidationError("Parent not found for child linkage")
+
+            if student_result.matched_count == 0:
+                raise ValidationError("Student not found for parent linkage")
 
             logger.info(
                 "Child assigned to parent",
@@ -627,3 +651,79 @@ class UserService:
         except Exception as e:
             logger.error("Failed to assign child to parent", error=str(e))
             raise DatabaseException(f"Failed to assign child: {str(e)}")
+
+    async def upsert_invited_user(
+        self,
+        *,
+        clerk_id: str,
+        email: str,
+        name: str,
+        role: UserRole,
+        tutor_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> User:
+        """Create or relink an invited user from a verified Clerk session."""
+        target_collection = self._get_collection_for_role(role)
+        resolved_tenant_id = tenant_id or tutor_id
+        now = datetime.now(timezone.utc)
+
+        base_updates: Dict[str, Any] = {
+            "clerk_id": clerk_id,
+            "email": email,
+            "name": name,
+            "role": role.value,
+            "tutor_id": tutor_id,
+            "tenant_id": resolved_tenant_id,
+            "is_active": True,
+            "updated_at": now,
+        }
+
+        if role == UserRole.STUDENT:
+            base_updates.setdefault("student_tutors", [tutor_id])
+        elif role == UserRole.PARENT:
+            base_updates.setdefault("parent_children", [])
+            base_updates.setdefault("student_ids", [])
+
+        existing_by_clerk = await self.get_user_by_clerk_id(clerk_id)
+        if existing_by_clerk and existing_by_clerk.role != role:
+            migrated_user = await self.update_user_role(clerk_id, role)
+            if not migrated_user:
+                raise DatabaseException("Failed to migrate invited user to target role")
+
+        target_user = await target_collection.find_one({"clerk_id": clerk_id})
+        if target_user:
+            updated = await target_collection.find_one_and_update(
+                {"_id": target_user["_id"]},
+                {"$set": base_updates},
+                return_document=ReturnDocument.AFTER,
+            )
+            if not updated:
+                raise DatabaseException("Failed to update invited user")
+            return User(**updated)
+
+        existing_by_email = await target_collection.find_one({"email": email})
+        if existing_by_email:
+            existing_clerk_id = existing_by_email.get("clerk_id")
+            if existing_clerk_id and existing_clerk_id != clerk_id:
+                raise ValidationError("This email is already linked to another account")
+
+            updated = await target_collection.find_one_and_update(
+                {"_id": existing_by_email["_id"]},
+                {"$set": base_updates, "$setOnInsert": {"created_at": now}},
+                return_document=ReturnDocument.AFTER,
+            )
+            if not updated:
+                raise DatabaseException("Failed to relink invited user")
+            return User(**updated)
+
+        return await self.create_user(
+            UserCreate(
+                clerk_id=clerk_id,
+                email=email,
+                name=name,
+                role=role,
+                tutor_id=tutor_id,
+                tenant_id=resolved_tenant_id,
+                is_active=True,
+            )
+        )

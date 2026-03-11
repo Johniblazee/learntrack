@@ -83,6 +83,11 @@ interface AssignmentCardData {
   progress: number
   status: AssignmentStatus
   rawStatus: string
+  score: number | null
+  feedback: string | null
+  reviewAvailable: boolean
+  submittedAt: Date | null
+  gradedAt: Date | null
 }
 
 interface CourseSummary {
@@ -188,16 +193,11 @@ function toAssignmentCards(items: any[]): AssignmentCardData[] {
     const dueDate = item?.due_date || item?.dueDate ? new Date(item?.due_date ?? item?.dueDate) : null
     const rawStatus = String(item?.status ?? "pending")
     const status = normalizeAssignmentStatus(rawStatus, dueDate)
+    const backendProgress = Number(item?.progress_percent ?? item?.progressPercent)
     const computedProgress = questionCount > 0 ? Math.round((completedQuestions / questionCount) * 100) : 0
-
-    const fallbackProgress =
-      status === "completed"
-        ? 100
-        : status === "active"
-          ? 55
-          : status === "overdue"
-            ? 35
-            : 0
+    const progress = Number.isFinite(backendProgress)
+      ? Math.max(0, Math.min(100, backendProgress))
+      : Math.max(0, Math.min(100, computedProgress))
 
     const subjectIdValue = item?.subject_id
     const subjectId =
@@ -220,9 +220,14 @@ function toAssignmentCards(items: any[]): AssignmentCardData[] {
       subjectId,
       dueDate,
       questionCount,
-      progress: Math.max(0, Math.min(100, computedProgress > 0 ? computedProgress : fallbackProgress)),
+      progress,
       status,
       rawStatus,
+      score: typeof item?.best_score === "number" ? item.best_score : typeof item?.score === "number" ? item.score : null,
+      feedback: typeof item?.feedback === "string" && item.feedback.trim() ? item.feedback : null,
+      reviewAvailable: Boolean(item?.review_available),
+      submittedAt: item?.submitted_at ? new Date(item.submitted_at) : null,
+      gradedAt: item?.graded_at ? new Date(item.graded_at) : null,
     }
   })
 }
@@ -491,6 +496,16 @@ export default function StudentDashboard() {
   const overdueAssignments = useMemo(
     () => actionableAssignments.filter((item) => item.status === "overdue"),
     [actionableAssignments]
+  )
+
+  const pendingReviewAssignments = useMemo(
+    () => assignments.filter((item) => item.rawStatus === "submitted"),
+    [assignments]
+  )
+
+  const gradedAssignments = useMemo(
+    () => assignments.filter((item) => item.rawStatus === "graded"),
+    [assignments]
   )
 
   const filteredAssignments = useMemo(() => {
@@ -1356,6 +1371,57 @@ export default function StudentDashboard() {
         </div>
 
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
+          <Card className="border-0 bg-card shadow-sm xl:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-lg">Results & Review</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {pendingReviewAssignments.length === 0 && gradedAssignments.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Complete and submit assignments to see review updates here.</p>
+              ) : (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Awaiting Review</p>
+                    <p className="mt-2 text-2xl font-bold">{pendingReviewAssignments.length}</p>
+                    <div className="mt-3 space-y-3">
+                      {pendingReviewAssignments.slice(0, 3).map((assignment) => (
+                        <div key={`pending-${assignment.id}`} className="rounded-md bg-muted/40 p-3">
+                          <p className="font-medium">{assignment.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {assignment.subject} • Submitted {formatDueDate(assignment.submittedAt)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Reviewed Results</p>
+                    <p className="mt-2 text-2xl font-bold">{gradedAssignments.length}</p>
+                    <div className="mt-3 space-y-3">
+                      {gradedAssignments.slice(0, 3).map((assignment) => (
+                        <div key={`graded-${assignment.id}`} className="rounded-md bg-muted/40 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium">{assignment.title}</p>
+                            <Badge variant="outline">
+                              {assignment.score !== null ? `${Math.round(assignment.score)}%` : "Reviewed"}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {assignment.subject} • Reviewed {formatDueDate(assignment.gradedAt)}
+                          </p>
+                          {assignment.feedback && (
+                            <p className="mt-2 text-sm text-muted-foreground">{assignment.feedback}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card className="border-0 bg-card shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">Subject Performance</CardTitle>

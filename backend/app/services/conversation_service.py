@@ -38,7 +38,11 @@ class ConversationService:
         return None
 
     async def create_conversation(
-        self, conversation_data: ConversationCreate, current_user_id: str, tutor_id: str
+        self,
+        conversation_data: ConversationCreate,
+        current_user_id: str,
+        tutor_id: str,
+        current_user_role: UserRole,
     ) -> Conversation:
         """
         Create a new conversation or return existing one
@@ -59,6 +63,12 @@ class ConversationService:
         # Validate we have at least 2 participants
         if len(participant_ids) < 2:
             raise ValidationError("Conversation must have at least 2 participants")
+
+        await self.validate_conversation_participants(
+            participant_ids=participant_ids,
+            current_user_id=current_user_id,
+            current_user_role=current_user_role,
+        )
 
         # Check if conversation already exists with same participants
         # Use $all and $size to ensure exact match of participants
@@ -85,19 +95,23 @@ class ConversationService:
 
         for participant_id in participant_ids:
             user = await self._get_user_profile_by_clerk_id(participant_id)
-            if user:
-                participant_names[participant_id] = str(
-                    user.get("name") or "Unknown User"
+            if not user:
+                raise ValidationError(f"User not found: {participant_id}")
+
+            participant_tutor_id = str(
+                user.get("tutor_id") or user.get("clerk_id") or ""
+            ).strip()
+            if participant_tutor_id != tutor_id:
+                raise AuthorizationError(
+                    f"User {participant_id} is outside your tenant visibility"
                 )
-                role_value = user.get("role", "student")
-                if isinstance(role_value, UserRole):
-                    participant_roles[participant_id] = role_value.value
-                else:
-                    participant_roles[participant_id] = str(role_value)
+
+            participant_names[participant_id] = str(user.get("name") or "Unknown User")
+            role_value = user.get("role", "student")
+            if isinstance(role_value, UserRole):
+                participant_roles[participant_id] = role_value.value
             else:
-                logger.warning("User not found in database", clerk_id=participant_id)
-                participant_names[participant_id] = "Unknown User"
-                participant_roles[participant_id] = "student"
+                participant_roles[participant_id] = str(role_value)
 
         # Create conversation document
         conversation_doc = {
@@ -222,7 +236,9 @@ class ConversationService:
             },
         )
 
-    async def mark_as_read(self, conversation_id: str, user_id: str) -> None:
+    async def mark_as_read(
+        self, conversation_id: str, user_id: str, tutor_id: str
+    ) -> None:
         """
         Mark conversation as read for user (reset unread count)
 
@@ -230,8 +246,12 @@ class ConversationService:
             conversation_id: Conversation ID
             user_id: User's Clerk ID
         """
-        await self.collection.update_one(
-            {"_id": ObjectId(conversation_id)},
+        result = await self.collection.update_one(
+            {
+                "_id": ObjectId(conversation_id),
+                "tutor_id": tutor_id,
+                "participants": user_id,
+            },
             {
                 "$set": {
                     f"unread_count.{user_id}": 0,
@@ -239,6 +259,9 @@ class ConversationService:
                 }
             },
         )
+
+        if result.matched_count == 0:
+            raise NotFoundError("Conversation", conversation_id)
 
     async def get_total_unread_count(self, user_id: str, tutor_id: str) -> int:
         """

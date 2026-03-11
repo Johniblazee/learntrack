@@ -118,6 +118,14 @@ async def _create_notification_event(
         )
 
 
+def _is_progress_locked(status_value: Any) -> bool:
+    normalized = str(status_value or "").strip().lower()
+    return normalized in {
+        SubmissionStatus.SUBMITTED.value,
+        SubmissionStatus.GRADED.value,
+    }
+
+
 @router.get("/student", response_model=ProgressAnalytics)
 async def get_student_progress_analytics(
     current_user: ClerkUserContext = Depends(require_student),
@@ -516,7 +524,7 @@ async def get_student_assignment_progress(
                 ProgressCreate(
                     assignment_id=assignment_id,
                     student_id=student_id,
-                    tutor_id=current_user.tutor_id,
+                    tutor_id=student.tutor_id or current_user.tutor_id or student_id,
                 )
             )
         return progress
@@ -541,6 +549,53 @@ async def update_assignment_progress(
     try:
         progress_service = ProgressService(database)
 
+        try:
+            assignment_oid = to_object_id(assignment_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid assignment ID",
+            )
+
+        assignment = await database.assignments.find_one({"_id": assignment_oid})
+        if not assignment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assignment not found",
+            )
+
+        if current_user.clerk_id not in (assignment.get("student_ids") or []):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not assigned to this assignment",
+            )
+
+        if (
+            progress_update.status
+            and progress_update.status != SubmissionStatus.IN_PROGRESS
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Students can only save assignments in progress",
+            )
+
+        if any(
+            value is not None
+            for value in [
+                progress_update.submitted_at,
+                progress_update.score,
+                progress_update.points_earned,
+                progress_update.points_possible,
+                progress_update.feedback,
+                progress_update.graded_at,
+                progress_update.graded_by,
+            ]
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Students cannot submit grading fields through save-progress",
+            )
+
         # Get or create progress record
         progress = await progress_service.get_student_assignment_progress(
             current_user.clerk_id, assignment_id
@@ -550,11 +605,24 @@ async def update_assignment_progress(
                 ProgressCreate(
                     assignment_id=assignment_id,
                     student_id=current_user.clerk_id,
-                    tutor_id=current_user.tutor_id,
+                    tutor_id=current_user.tutor_id or current_user.clerk_id,
                 )
             )
 
-        return await progress_service.update_progress(str(progress.id), progress_update)
+        if _is_progress_locked(progress.status):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This assignment has already been submitted",
+            )
+
+        safe_update = ProgressUpdate(
+            answers=progress_update.answers,
+            status=SubmissionStatus.IN_PROGRESS,
+            time_spent=progress_update.time_spent,
+        )
+        return await progress_service.update_progress(str(progress.id), safe_update)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to update assignment progress", error=str(e))
         raise HTTPException(
@@ -600,8 +668,14 @@ async def submit_answer(
             ProgressCreate(
                 assignment_id=assignment_id,
                 student_id=current_user.clerk_id,
-                tutor_id=current_user.tutor_id,
+                tutor_id=current_user.tutor_id or current_user.clerk_id,
             )
+        )
+
+    if _is_progress_locked(progress.status):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This assignment has already been submitted",
         )
 
     incoming_answers = submission.answers or progress.answers
@@ -945,6 +1019,16 @@ async def grade_submission(
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
+
+    existing_status = str(existing.get("status") or "").lower()
+    if existing_status not in {
+        SubmissionStatus.SUBMITTED.value,
+        SubmissionStatus.GRADED.value,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only submitted work can be graded",
         )
 
     update = ProgressUpdate(

@@ -152,65 +152,12 @@ async def update_user_role(
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Update current user's role in the database"""
-    try:
-        # Validate role
-        role_str = role_data.get("role", "").lower()
-        if role_str not in ["tutor", "student", "parent"]:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid role. Must be 'tutor', 'student', or 'parent'",
-            )
-
-        role = UserRole(role_str)
-        user_service = UserService(db)
-
-        # Get or create user in database
-        db_user = await user_service.get_user_by_clerk_id(current_user.clerk_id)
-
-        if db_user:
-            # Update existing user's role
-            updated_user = await user_service.update_user_role(
-                current_user.clerk_id, role
-            )
-            if not updated_user:
-                raise HTTPException(status_code=404, detail="User not found")
-        else:
-            # Create new user with role
-            from app.models.user import UserCreate
-
-            user_create = UserCreate(
-                clerk_id=current_user.clerk_id,
-                email=str(current_user.email)
-                if current_user.email
-                else f"{current_user.clerk_id}@learntrack.local",
-                name=str(current_user.name) if current_user.name else "User",
-                role=role,
-                tutor_id=current_user.clerk_id if role == UserRole.TUTOR else None,
-            )
-            updated_user = await user_service.create_user(user_create)
-
-        logger.info(
-            "User role updated", clerk_id=current_user.clerk_id, new_role=role_str
-        )
-
-        return {
-            "id": str(updated_user.id),
-            "clerk_id": updated_user.clerk_id,
-            "email": updated_user.email,
-            "name": updated_user.name,
-            "role": updated_user.role.value,
-            "tutor_id": updated_user.tutor_id,
-            "message": f"Role updated to {role_str}",
-        }
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(
-            "Failed to update user role", error=str(e), clerk_id=current_user.clerk_id
-        )
-        raise HTTPException(status_code=500, detail="Failed to update user role")
+    """Roles must be assigned through the invite/onboarding flow."""
+    del role_data, current_user, db
+    raise HTTPException(
+        status_code=403,
+        detail="Self-service role changes are disabled. Use the invite or onboarding flow.",
+    )
 
 
 @router.get("/{clerk_id}", response_model=User)

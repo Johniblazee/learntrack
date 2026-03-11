@@ -50,6 +50,34 @@ class MaterialService:
             query["tutor_id"] = tutor_id
         return query
 
+    async def _sync_file_metadata(
+        self,
+        *,
+        file_id: Optional[str],
+        tutor_id: str,
+        material_id: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        topic: Optional[str] = None,
+    ) -> None:
+        if not file_id:
+            return
+
+        update_payload: Dict[str, Any] = {
+            "updated_at": self._now(),
+            "tutor_id": tutor_id,
+        }
+        if material_id:
+            update_payload["material_id"] = material_id
+        if subject_id is not None:
+            update_payload["subject_id"] = subject_id
+        if topic is not None:
+            update_payload["topic"] = topic
+
+        await self.database.files.update_one(
+            {"_id": to_object_id(file_id), "tutor_id": tutor_id},
+            {"$set": update_payload},
+        )
+
     async def _get_folder_doc(self, folder_id: str, tutor_id: str) -> Dict[str, Any]:
         folder = await self.folder_collection.find_one(
             {"_id": to_object_id(folder_id), "tutor_id": tutor_id}
@@ -177,6 +205,14 @@ class MaterialService:
 
             result = await self.collection.insert_one(material_dict)
             material_dict["_id"] = result.inserted_id
+
+            await self._sync_file_metadata(
+                file_id=material_dict.get("file_id"),
+                tutor_id=tutor_id,
+                material_id=str(result.inserted_id),
+                subject_id=material_dict.get("subject_id"),
+                topic=material_dict.get("topic"),
+            )
 
             logger.info(
                 "Material created",
@@ -317,6 +353,17 @@ class MaterialService:
                 raise NotFoundError("Material", material_id)
 
             logger.info("Material updated", material_id=material_id)
+            effective_file_id = update_dict.get("file_id")
+            if effective_file_id is None:
+                effective_file_id = existing.file_id
+
+            await self._sync_file_metadata(
+                file_id=effective_file_id,
+                tutor_id=owner_tutor_id,
+                material_id=material_id,
+                subject_id=update_dict.get("subject_id", existing.subject_id),
+                topic=update_dict.get("topic", existing.topic),
+            )
             return await self.get_material_by_id(material_id, tutor_id=tutor_id)
         except (ValidationError, NotFoundError):
             raise

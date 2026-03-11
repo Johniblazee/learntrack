@@ -649,7 +649,7 @@ async def _apply_impersonation_session_override(
         logger.warning("Failed to load impersonation session store", error=str(error))
         return current_user
 
-    session = get_impersonation_session(session_id.strip())
+    session = await get_impersonation_session(session_id.strip())
     if not session:
         return current_user
 
@@ -797,5 +797,3 @@ def require_admin_permission(permission: AdminPermission):
         return current_user
 
     return permission_checker
-
-

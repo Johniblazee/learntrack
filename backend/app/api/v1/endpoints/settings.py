@@ -10,9 +10,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.database import get_database
 from app.core.enhanced_auth import (
     require_authenticated_user,
+    require_admin_permission,
     require_tutor,
     ClerkUserContext,
 )
+from app.models.user import AdminPermission
 from app.models.settings import (
     AppSettings,
     SettingsUpdateRequest,
@@ -79,10 +81,12 @@ class UserSettingsUpdateRequest(BaseModel):
 
 @router.get("/", response_model=SettingsResponse)
 async def get_app_settings(
-    current_user: ClerkUserContext = Depends(require_tutor),
+    current_user: ClerkUserContext = Depends(
+        require_admin_permission(AdminPermission.MANAGE_SYSTEM_SETTINGS)
+    ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Get current application settings (tutor only)"""
+    """Get current global application settings (admin only)."""
     service = SettingsService(database)
     settings = await service.get_settings()
 
@@ -96,10 +100,12 @@ async def get_app_settings(
 @router.put("/", response_model=SettingsResponse)
 async def update_app_settings(
     update_request: SettingsUpdateRequest,
-    current_user: ClerkUserContext = Depends(require_tutor),
+    current_user: ClerkUserContext = Depends(
+        require_admin_permission(AdminPermission.MANAGE_SYSTEM_SETTINGS)
+    ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Update application settings (tutor only)"""
+    """Update global application settings (admin only)."""
     service = SettingsService(database)
 
     try:
@@ -123,10 +129,12 @@ async def update_app_settings(
 async def update_ai_provider(
     provider: AIProvider,
     config: AIProviderConfig,
-    current_user: ClerkUserContext = Depends(require_tutor),
+    current_user: ClerkUserContext = Depends(
+        require_admin_permission(AdminPermission.MANAGE_AI_PROVIDERS)
+    ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Update AI provider configuration (tutor only)"""
+    """Update AI provider configuration (admin only)."""
     service = SettingsService(database)
 
     try:
@@ -162,10 +170,12 @@ async def update_ai_provider(
 @router.post("/ai/{provider}/test")
 async def test_ai_provider(
     provider: AIProvider,
-    current_user: ClerkUserContext = Depends(require_tutor),
+    current_user: ClerkUserContext = Depends(
+        require_admin_permission(AdminPermission.MANAGE_AI_PROVIDERS)
+    ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Test AI provider connection (tutor only)"""
+    """Test AI provider connection (admin only)."""
     service = SettingsService(database)
 
     try:
@@ -180,10 +190,12 @@ async def test_ai_provider(
 
 @router.get("/ai/providers")
 async def get_available_providers(
-    current_user: ClerkUserContext = Depends(require_tutor),
+    current_user: ClerkUserContext = Depends(
+        require_admin_permission(AdminPermission.MANAGE_AI_PROVIDERS)
+    ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Get list of available AI providers and their status (tutor only)"""
+    """Get list of available AI providers and their status (admin only)."""
     service = SettingsService(database)
     settings = await service.get_settings()
 
@@ -205,10 +217,12 @@ async def get_available_providers(
 @router.put("/ai/default/{provider}")
 async def set_default_ai_provider(
     provider: AIProvider,
-    current_user: ClerkUserContext = Depends(require_tutor),
+    current_user: ClerkUserContext = Depends(
+        require_admin_permission(AdminPermission.MANAGE_AI_PROVIDERS)
+    ),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Set default AI provider (tutor only)"""
+    """Set default AI provider (admin only)."""
     service = SettingsService(database)
     settings = await service.get_settings()
 

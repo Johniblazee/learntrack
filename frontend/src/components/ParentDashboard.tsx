@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Heart,
   Layers,
+  MessageCircle,
   Target,
   TrendingUp,
   Trophy,
@@ -39,6 +40,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DashboardHeaderActions } from '@/components/dashboard/DashboardHeaderActions'
+import ConversationsView from '@/components/TutorDashboard/views/ConversationsView'
 import {
   useParentDashboardStats,
   useParentProgress,
@@ -46,7 +48,7 @@ import {
 import { useImpersonation } from '@/contexts/ImpersonationContext'
 import { useUserContext } from '@/contexts/UserContext'
 
-type ParentTab = 'overview' | 'children' | 'upcoming'
+type ParentTab = 'overview' | 'children' | 'upcoming' | 'messages'
 
 export default function ParentDashboard() {
   const { user } = useUser()
@@ -130,6 +132,7 @@ export default function ParentDashboard() {
     { label: 'Overview', tab: 'overview', icon: Heart },
     { label: 'Children', tab: 'children', icon: Users },
     { label: 'Upcoming', tab: 'upcoming', icon: CalendarClock },
+    { label: 'Messages', tab: 'messages', icon: MessageCircle },
   ]
 
   return (
@@ -257,10 +260,11 @@ export default function ParentDashboard() {
             </div>
 
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ParentTab)}>
-              <TabsList className="grid w-full grid-cols-3 md:w-[420px]">
+              <TabsList className="grid w-full grid-cols-4 md:w-[560px]">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="children">Children</TabsTrigger>
                 <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
+                <TabsTrigger value="messages">Messages</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="mt-4">
@@ -385,6 +389,23 @@ export default function ParentDashboard() {
                         ))}
                       </div>
                     )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="messages" className="mt-4">
+                <Card className="border-0 bg-card shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <MessageCircle className="h-5 w-5 text-primary" />
+                      Messages
+                    </CardTitle>
+                    <CardDescription>Stay in touch with your child&apos;s teacher in real time.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="h-[620px] overflow-hidden rounded-b-xl border-t">
+                      <ConversationsView routeMode="chats" />
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>

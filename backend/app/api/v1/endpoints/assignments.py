@@ -14,7 +14,12 @@ from app.core.enhanced_auth import (
     require_authenticated_user,
     ClerkUserContext,
 )
-from app.models.assignment import Assignment, AssignmentCreate, AssignmentUpdate
+from app.models.assignment import (
+    Assignment,
+    AssignmentCreate,
+    AssignmentForStudent,
+    AssignmentUpdate,
+)
 from app.services.assignment_service import AssignmentService
 from app.services.user_service import UserService
 from app.utils.pagination import PaginationParams, PaginatedResponse, paginate
@@ -66,7 +71,7 @@ async def get_assignments(
         raise HTTPException(status_code=500, detail="Failed to get assignments")
 
 
-@router.get("/student/me", response_model=PaginatedResponse[Assignment])
+@router.get("/student/me", response_model=PaginatedResponse[AssignmentForStudent])
 async def get_my_assignments(
     status: Optional[str] = Query(
         None, description="Filter by status (pending, completed, etc.)"
@@ -78,30 +83,22 @@ async def get_my_assignments(
 ):
     """Get paginated assignments for currently authenticated student"""
     try:
-        if current_user.role != "student":
+        if current_user.role.value != "student":
             return paginate(items=[], page=page, per_page=per_page, total=0)
 
-        pagination = PaginationParams(page=page, per_page=per_page)
-
-        total = await assignment_service.get_student_assignments_count(
+        result = await assignment_service.get_student_assignment_summaries(
             student_id=current_user.clerk_id,
-            tutor_id=current_user.tutor_id,
+            tutor_id=current_user.tutor_id or current_user.clerk_id,
             status=status,
-        )
-
-        assignments = await assignment_service.get_student_assignments_paginated(
-            student_id=current_user.clerk_id,
-            tutor_id=current_user.tutor_id,
-            status=status,
-            skip=pagination.skip,
-            limit=pagination.limit,
+            page=page,
+            per_page=per_page,
         )
 
         return paginate(
-            items=assignments,
+            items=result["items"],
             page=page,
             per_page=per_page,
-            total=total,
+            total=result["total"],
         )
     except Exception as e:
         logger.error("Failed to get current student assignments", error=str(e))

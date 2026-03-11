@@ -58,6 +58,7 @@ class Database:
             await self.database.students.create_index("slug", unique=True)
             await self.database.students.create_index("tutor_id")
             await self.database.students.create_index("tenant_id")
+            await self.database.students.create_index("parent_ids")
             await self.database.students.create_index(
                 [("tutor_id", 1), ("is_active", 1)]
             )
@@ -133,6 +134,13 @@ class Database:
             await self.database.files.create_index(
                 [("tutor_id", 1), ("created_at", -1)]
             )
+            await self.database.files.create_index("uploadthing_key", unique=True)
+            await self.database.files.create_index(
+                [("tutor_id", 1), ("embedding_status", 1)]
+            )
+            await self.database.files.create_index(
+                [("tutor_id", 1), ("sync_status", 1)]
+            )
 
             # Topics collection indexes (with tenant isolation)
             await self.database.topics.create_index("tutor_id")
@@ -183,6 +191,16 @@ class Database:
             await self.database.materials.create_index(
                 [("tutor_id", 1), ("subject_id", 1)]
             )
+            await self.database.materials.create_index(
+                [("tutor_id", 1), ("file_id", 1)]
+            )
+
+            # Material folders collection indexes
+            await self.database.material_folders.create_index("tutor_id")
+            await self.database.material_folders.create_index("parent_id")
+            await self.database.material_folders.create_index(
+                [("tutor_id", 1), ("parent_id", 1), ("name", 1)], unique=True
+            )
 
             # Invitations collection indexes
             await self.database.invitations.create_index("tutor_id")
@@ -205,6 +223,23 @@ class Database:
             )
             await self.database.notifications.create_index(
                 [("recipient_id", 1), ("created_at", -1)]
+            )
+
+            # User settings collection indexes
+            await self.database.user_settings.create_index("user_id", unique=True)
+
+            # Generation sessions collection indexes
+            await self.database.generation_sessions.create_index("user_id")
+            await self.database.generation_sessions.create_index("tenant_id")
+            await self.database.generation_sessions.create_index(
+                [("user_id", 1), ("tenant_id", 1), ("updated_at", -1)]
+            )
+
+            # Impersonation session indexes
+            await self.database.impersonation_sessions.create_index("admin_clerk_id")
+            await self.database.impersonation_sessions.create_index(
+                "expires_at",
+                expireAfterSeconds=0,
             )
 
             # Text search indexes

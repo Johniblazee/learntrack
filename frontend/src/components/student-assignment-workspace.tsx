@@ -37,6 +37,12 @@ interface AnswerState {
   selectedOptions: string[]
 }
 
+interface SubmissionResult {
+  status: string
+  score: number | null
+  feedback: string | null
+}
+
 const EMPTY_ANSWER: AnswerState = {
   answer: "",
   selectedOptions: [],
@@ -61,6 +67,7 @@ export default function StudentAssignmentWorkspace({
   const [questions, setQuestions] = useState<StudentQuestion[]>([])
   const [answers, setAnswers] = useState<Record<string, AnswerState>>({})
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
+  const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null)
 
   const totalQuestions = questions.length
 
@@ -124,6 +131,17 @@ export default function StudentAssignmentWorkspace({
         setQuestions(safeQuestions)
 
         const progress = progressResponse.data as any
+        const progressStatus = String(progress?.status || "").toLowerCase()
+        if (progressStatus === "submitted" || progressStatus === "graded") {
+          setSubmissionResult({
+            status: progressStatus,
+            score: typeof progress?.score === "number" ? progress.score : null,
+            feedback: typeof progress?.feedback === "string" ? progress.feedback : null,
+          })
+        } else {
+          setSubmissionResult(null)
+        }
+
         const answerMap: Record<string, AnswerState> = {}
         const existingAnswers = Array.isArray(progress.answers) ? progress.answers : []
 
@@ -182,7 +200,7 @@ export default function StudentAssignmentWorkspace({
   }
 
   const handleSaveDraft = async () => {
-    if (!assignmentId) return
+    if (!assignmentId || submissionResult) return
 
     try {
       setSavingDraft(true)
@@ -204,7 +222,16 @@ export default function StudentAssignmentWorkspace({
   }
 
   const handleSubmitAssignment = async () => {
-    if (!assignmentId) return
+    if (!assignmentId || submissionResult) return
+
+    const unansweredCount = Math.max(totalQuestions - answeredCount, 0)
+    const confirmationMessage = unansweredCount > 0
+      ? `You still have ${unansweredCount} unanswered question${unansweredCount === 1 ? "" : "s"}. Submit anyway?`
+      : "Submit this assignment now? You will not be able to edit it after submission."
+
+    if (!window.confirm(confirmationMessage)) {
+      return
+    }
 
     try {
       setSubmitting(true)
@@ -219,8 +246,18 @@ export default function StudentAssignmentWorkspace({
       }
 
       const score = (response.data as any).score
+      const status = String((response.data as any).status || "submitted")
+      const feedback = typeof (response.data as any).feedback === "string"
+        ? (response.data as any).feedback
+        : null
       toast.success("Assignment submitted", {
         description: typeof score === "number" ? `Score: ${score}%` : "Submission sent for review",
+      })
+
+      setSubmissionResult({
+        status,
+        score: typeof score === "number" ? score : null,
+        feedback,
       })
 
       await Promise.all([
@@ -230,7 +267,6 @@ export default function StudentAssignmentWorkspace({
       ])
 
       onSubmitted?.()
-      onOpenChange(false)
     } catch (error) {
       console.error("Failed to submit assignment:", error)
       toast.error("Could not submit assignment")
@@ -329,6 +365,50 @@ export default function StudentAssignmentWorkspace({
         ) : totalQuestions === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
             This assignment has no available questions yet.
+          </div>
+        ) : submissionResult ? (
+          <div className="space-y-5 rounded-lg border p-6">
+            <div>
+              <Badge variant="outline">
+                {submissionResult.status === "graded" ? "Reviewed" : "Submitted"}
+              </Badge>
+              <h3 className="mt-3 text-xl font-semibold text-foreground">
+                {submissionResult.status === "graded"
+                  ? "Your results are ready"
+                  : "Your assignment has been submitted"}
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {submissionResult.status === "graded"
+                  ? "Review your latest outcome before heading back to the dashboard."
+                  : "Your tutor will review the submission and post feedback here once grading is complete."}
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border bg-muted/30 p-4">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Score</p>
+                <p className="mt-2 text-3xl font-bold text-foreground">
+                  {submissionResult.score !== null ? `${Math.round(submissionResult.score)}%` : "Pending"}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-4">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Completion</p>
+                <p className="mt-2 text-3xl font-bold text-foreground">{answeredCount}/{totalQuestions}</p>
+              </div>
+            </div>
+
+            {submissionResult.feedback && (
+              <div className="rounded-lg border bg-muted/30 p-4">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Tutor Feedback</p>
+                <p className="mt-2 text-sm text-foreground">{submissionResult.feedback}</p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Back to Dashboard
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="space-y-5">

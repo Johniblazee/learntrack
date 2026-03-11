@@ -283,6 +283,7 @@ async def send_email_message(
             ),
             current_user_id=current_user.clerk_id,
             tutor_id=tenant_id,
+            current_user_role=current_user.role,
         )
 
         recipient = await _find_user_by_clerk_id(db, email_data.recipient_id)

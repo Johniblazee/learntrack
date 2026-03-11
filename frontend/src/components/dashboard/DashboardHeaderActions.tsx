@@ -218,6 +218,10 @@ export function DashboardHeaderActions({
               })
             )}
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => navigate('/notifications')}>
+            View all notifications
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 

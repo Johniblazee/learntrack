@@ -4,7 +4,7 @@ Material Retriever Tool
 Retrieves relevant content from source materials using RAG.
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 import structlog
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -40,10 +40,10 @@ class MaterialRetrieverTool(BaseTool):
     args_schema: type[BaseModel] = MaterialRetrieverInput
 
     # Injected dependencies
-    rag_service: Optional[object] = None
+    rag_service: Optional[Any] = None
     tenant_id: Optional[str] = None
 
-    def __init__(self, rag_service=None, tenant_id: str = None, **kwargs):
+    def __init__(self, rag_service=None, tenant_id: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
         self.rag_service = rag_service
         self.tenant_id = tenant_id
@@ -116,6 +116,54 @@ class MaterialRetrieverTool(BaseTool):
                 chunks.append(chunk)
 
             logger.info("Retrieved chunks", count=len(chunks))
+            if chunks:
+                return chunks
+
+            if self.rag_service.db:
+                fallback_chunks = []
+                object_ids = []
+                for material_id in material_ids:
+                    try:
+                        object_ids.append(to_object_id(material_id))
+                    except Exception:
+                        continue
+
+                if object_ids:
+                    file_docs = await self.rag_service.db.files.find(
+                        {
+                            "_id": {"$in": object_ids},
+                            "tutor_id": self.tenant_id,
+                            "status": "processed",
+                            "extracted_text": {"$exists": True, "$ne": None},
+                        }
+                    ).to_list(length=len(object_ids))
+
+                    for file_doc in file_docs:
+                        extracted_text = str(
+                            file_doc.get("extracted_text") or ""
+                        ).strip()
+                        if not extracted_text:
+                            continue
+
+                        fallback_chunks.append(
+                            SourceChunk(
+                                material_id=str(file_doc.get("_id") or ""),
+                                material_title=str(
+                                    file_doc.get("filename") or "Uploaded document"
+                                ),
+                                content=extracted_text[:5000],
+                                location="Extracted text",
+                                relevance_score=0.5,
+                            )
+                        )
+
+                if fallback_chunks:
+                    logger.info(
+                        "Retrieved fallback chunks from extracted text",
+                        count=len(fallback_chunks),
+                    )
+                    return fallback_chunks
+
             return chunks
 
         except Exception as e:

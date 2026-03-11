@@ -33,7 +33,7 @@ class QuestionAnswer(BaseModel):
 
     question_id: str
     answer: Optional[str] = None
-    selected_options: Optional[List[str]] = []
+    selected_options: List[str] = Field(default_factory=list)
     answer_type: AnswerType = AnswerType.UNANSWERED
     points_earned: float = 0.0
     points_possible: float = 1.0
@@ -78,7 +78,7 @@ class ProgressInDB(ProgressBase):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     attempt_number: int = 1
     status: SubmissionStatus = SubmissionStatus.IN_PROGRESS
-    answers: List[QuestionAnswer] = []
+    answers: List[QuestionAnswer] = Field(default_factory=list)
 
     # Timing
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -154,13 +154,13 @@ class ProgressAnalytics(BaseModel):
     total_time_spent: int = 0  # minutes
 
     # Subject-wise breakdown
-    subject_performance: List[Dict[str, Any]] = []
+    subject_performance: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Recent activity
-    recent_submissions: List[Dict[str, Any]] = []
+    recent_submissions: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Trends
-    weekly_progress: List[Dict[str, Any]] = []
+    weekly_progress: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ParentProgressView(BaseModel):
@@ -188,7 +188,9 @@ class StudentPerformanceInDB(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     student_id: str
     student_name: str
-    subject_scores: Dict[str, int] = {}  # subject_name -> score
+    subject_scores: Dict[str, int] = Field(
+        default_factory=dict
+    )  # subject_name -> score
     tutor_id: str = Field(
         ..., description="Tutor ID - references the tutor's Clerk user ID"
     )

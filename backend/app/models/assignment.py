@@ -101,16 +101,20 @@ class AssignmentInDB(AssignmentBase):
 
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     tutor_id: str
-    student_ids: List[str] = []  # Made optional with default for backward compatibility
-    questions: List[
-        QuestionAssignment
-    ] = []  # Made optional with default for backward compatibility
+    student_ids: List[str] = Field(
+        default_factory=list
+    )  # Made optional with default for backward compatibility
+    questions: List[QuestionAssignment] = Field(
+        default_factory=list
+    )  # Made optional with default for backward compatibility
     status: AssignmentStatus = AssignmentStatus.SCHEDULED
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Group assignment metadata
-    group_ids: List[str] = []  # Groups this assignment was assigned to
+    group_ids: List[str] = Field(
+        default_factory=list
+    )  # Groups this assignment was assigned to
     assigned_via_subject: Optional[str] = None  # Subject ID if assigned by subject
     is_group_assignment: bool = False  # Flag for group assignments
 
@@ -120,11 +124,15 @@ class AssignmentInDB(AssignmentBase):
     average_score: Optional[float] = None
 
     # Group-specific statistics
-    group_completion_rates: Dict[str, float] = {}  # {group_id: completion_rate}
-    group_average_scores: Dict[str, float] = {}  # {group_id: average_score}
+    group_completion_rates: Dict[str, float] = Field(
+        default_factory=dict
+    )  # {group_id: completion_rate}
+    group_average_scores: Dict[str, float] = Field(
+        default_factory=dict
+    )  # {group_id: average_score}
 
     # Reference materials
-    reference_materials: List[str] = []  # Material IDs
+    reference_materials: List[str] = Field(default_factory=list)  # Material IDs
 
     @validator("id", pre=True)
     def convert_objectid_to_str(cls, v):
@@ -149,7 +157,7 @@ class Assignment(AssignmentInDB):
 class AssignmentWithProgress(Assignment):
     """Assignment with student progress"""
 
-    student_progress: List[Dict] = []
+    student_progress: List[Dict] = Field(default_factory=list)
     completion_rate: float = 0.0
 
 
@@ -171,3 +179,8 @@ class AssignmentForStudent(BaseModel):
     attempts_used: int = 0
     best_score: Optional[float] = None
     last_attempt: Optional[datetime] = None
+    progress_percent: int = 0
+    feedback: Optional[str] = None
+    submitted_at: Optional[datetime] = None
+    graded_at: Optional[datetime] = None
+    review_available: bool = False

@@ -2,6 +2,7 @@
 Document Management Dashboard API Endpoints
 Provides stats, list, detail, and batch operations for document management
 """
+
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
@@ -19,8 +20,10 @@ router = APIRouter()
 
 # ==================== Request/Response Models ====================
 
+
 class DocumentStats(BaseModel):
     """Document dashboard statistics"""
+
     total_documents: int = 0
     total_chunks: int = 0
     total_tokens: int = 0
@@ -35,6 +38,7 @@ class DocumentStats(BaseModel):
 
 class DocumentListItem(BaseModel):
     """Document list item"""
+
     id: str
     filename: str
     content_type: str
@@ -50,6 +54,7 @@ class DocumentListItem(BaseModel):
 
 class DocumentListResponse(BaseModel):
     """Paginated document list response"""
+
     items: List[DocumentListItem]
     total: int
     page: int
@@ -59,6 +64,7 @@ class DocumentListResponse(BaseModel):
 
 class DocumentDetail(BaseModel):
     """Full document detail"""
+
     id: str
     filename: str
     content_type: str
@@ -84,33 +90,37 @@ class DocumentDetail(BaseModel):
 
 class BatchDeleteRequest(BaseModel):
     """Batch delete request"""
+
     file_ids: List[str]
     hard_delete: bool = False
 
 
 class BatchResyncRequest(BaseModel):
     """Batch resync request"""
+
     file_ids: List[str]
     force: bool = False
 
 
 class BatchStatusRequest(BaseModel):
     """Batch status request"""
+
     file_ids: List[str]
 
 
 # ==================== Dashboard Stats Endpoint ====================
 
+
 @router.get("/dashboard/stats", response_model=DocumentStats)
 async def get_dashboard_stats(
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Get aggregated document statistics for the dashboard.
     Returns counts by status, format, processor, and storage usage.
     """
-    tutor_id = current_user.tutor_id
+    tutor_id = current_user.tutor_id or current_user.clerk_id
     files_collection = db.files
 
     # Build base query for tutor's non-deleted files
@@ -122,13 +132,15 @@ async def get_dashboard_stats(
     # Aggregation pipeline for stats
     pipeline = [
         {"$match": base_query},
-        {"$group": {
-            "_id": None,
-            "total_chunks": {"$sum": "$chunk_count"},
-            "total_tokens": {"$sum": {"$ifNull": ["$token_estimate", 0]}},
-            "total_size": {"$sum": "$size"},
-            "last_ingestion": {"$max": "$last_embedded_at"}
-        }}
+        {
+            "$group": {
+                "_id": None,
+                "total_chunks": {"$sum": "$chunk_count"},
+                "total_tokens": {"$sum": {"$ifNull": ["$token_estimate", 0]}},
+                "total_size": {"$sum": "$size"},
+                "last_ingestion": {"$max": "$last_embedded_at"},
+            }
+        },
     ]
 
     agg_result = await files_collection.aggregate(pipeline).to_list(1)
@@ -137,7 +149,7 @@ async def get_dashboard_stats(
     # Count by embedding status
     status_pipeline = [
         {"$match": base_query},
-        {"$group": {"_id": "$embedding_status", "count": {"$sum": 1}}}
+        {"$group": {"_id": "$embedding_status", "count": {"$sum": 1}}},
     ]
     status_result = await files_collection.aggregate(status_pipeline).to_list(10)
     by_status = {item["_id"] or "unknown": item["count"] for item in status_result}
@@ -145,7 +157,7 @@ async def get_dashboard_stats(
     # Count by content type (format)
     format_pipeline = [
         {"$match": base_query},
-        {"$group": {"_id": "$content_type", "count": {"$sum": 1}}}
+        {"$group": {"_id": "$content_type", "count": {"$sum": 1}}},
     ]
     format_result = await files_collection.aggregate(format_pipeline).to_list(20)
     by_format = {item["_id"] or "unknown": item["count"] for item in format_result}
@@ -153,12 +165,30 @@ async def get_dashboard_stats(
     # Count by processor
     processor_pipeline = [
         {"$match": {**base_query, "processor_used": {"$ne": None}}},
-        {"$group": {"_id": "$processor_used", "count": {"$sum": 1}}}
+        {"$group": {"_id": "$processor_used", "count": {"$sum": 1}}},
     ]
     processor_result = await files_collection.aggregate(processor_pipeline).to_list(10)
 
+    by_processor = {
+        item["_id"] or "unknown": item["count"] for item in processor_result
+    }
+
+    return DocumentStats(
+        total_documents=total_documents,
+        total_chunks=int(agg_data.get("total_chunks", 0) or 0),
+        total_tokens=int(agg_data.get("total_tokens", 0) or 0),
+        by_status=by_status,
+        by_format=by_format,
+        by_processor=by_processor,
+        storage_used_mb=round((agg_data.get("total_size", 0) or 0) / (1024 * 1024), 2),
+        last_ingestion=agg_data.get("last_ingestion"),
+        pending_count=int(by_status.get(EmbeddingStatus.PENDING.value, 0)),
+        failed_count=int(by_status.get(EmbeddingStatus.FAILED.value, 0)),
+    )
+
 
 # ==================== Document List Endpoint ====================
+
 
 @router.get("/dashboard/list", response_model=DocumentListResponse)
 async def get_document_list(
@@ -171,7 +201,7 @@ async def get_document_list(
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
     page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100)
+    per_page: int = Query(20, ge=1, le=100),
 ):
     """
     Get paginated list of documents with filters and sorting.
@@ -199,40 +229,47 @@ async def get_document_list(
 
     # Get paginated results
     skip = (page - 1) * per_page
-    cursor = files_collection.find(query).sort(sort_by, sort_dir).skip(skip).limit(per_page)
+    cursor = (
+        files_collection.find(query).sort(sort_by, sort_dir).skip(skip).limit(per_page)
+    )
 
     items = []
     async for doc in cursor:
-        items.append(DocumentListItem(
-            id=str(doc["_id"]),
-            filename=doc.get("filename", ""),
-            content_type=doc.get("content_type", ""),
-            size=doc.get("size", 0),
-            embedding_status=doc.get("embedding_status", EmbeddingStatus.PENDING.value),
-            sync_status=doc.get("sync_status", SyncStatus.NEVER_SYNCED.value),
-            chunk_count=doc.get("chunk_count", 0),
-            token_estimate=doc.get("token_estimate"),
-            processor_used=doc.get("processor_used"),
-            created_at=doc.get("created_at", doc.get("uploaded_at")),
-            last_embedded_at=doc.get("last_embedded_at")
-        ))
+        items.append(
+            DocumentListItem(
+                id=str(doc["_id"]),
+                filename=doc.get("filename", ""),
+                content_type=doc.get("content_type", ""),
+                size=doc.get("size", 0),
+                embedding_status=doc.get(
+                    "embedding_status", EmbeddingStatus.PENDING.value
+                ),
+                sync_status=doc.get("sync_status", SyncStatus.NEVER_SYNCED.value),
+                chunk_count=doc.get("chunk_count", 0),
+                token_estimate=doc.get("token_estimate"),
+                processor_used=doc.get("processor_used"),
+                created_at=doc.get("created_at", doc.get("uploaded_at")),
+                last_embedded_at=doc.get("last_embedded_at"),
+            )
+        )
 
     return DocumentListResponse(
         items=items,
         total=total,
         page=page,
         per_page=per_page,
-        total_pages=(total + per_page - 1) // per_page if per_page > 0 else 0
+        total_pages=(total + per_page - 1) // per_page if per_page > 0 else 0,
     )
 
 
 # ==================== Document Detail Endpoint ====================
 
+
 @router.get("/dashboard/{document_id}", response_model=DocumentDetail)
 async def get_document_detail(
     document_id: str,
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Get full document details including processing history.
@@ -271,18 +308,19 @@ async def get_document_detail(
         processing_history=doc.get("processing_history", []),
         created_at=doc.get("created_at", doc.get("uploaded_at")),
         last_embedded_at=doc.get("last_embedded_at"),
-        last_synced_at=doc.get("last_synced_at")
+        last_synced_at=doc.get("last_synced_at"),
     )
 
 
 # ==================== Batch Operations Endpoints ====================
+
 
 @router.post("/batch/delete")
 async def batch_delete_documents(
     request: BatchDeleteRequest,
     background_tasks: BackgroundTasks,
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Delete multiple documents and their embeddings in batch.
@@ -291,9 +329,7 @@ async def batch_delete_documents(
     governance_service = DocumentGovernanceService(db)
 
     result = await governance_service.batch_delete_files(
-        file_ids=request.file_ids,
-        tutor_id=tutor_id,
-        hard_delete=request.hard_delete
+        file_ids=request.file_ids, tutor_id=tutor_id, hard_delete=request.hard_delete
     )
 
     return result
@@ -304,7 +340,7 @@ async def batch_resync_documents(
     request: BatchResyncRequest,
     background_tasks: BackgroundTasks,
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Re-sync multiple documents in batch (re-process and re-embed).
@@ -313,9 +349,7 @@ async def batch_resync_documents(
     governance_service = DocumentGovernanceService(db)
 
     result = await governance_service.batch_resync_files(
-        file_ids=request.file_ids,
-        tutor_id=tutor_id,
-        force=request.force
+        file_ids=request.file_ids, tutor_id=tutor_id, force=request.force
     )
 
     return result
@@ -325,7 +359,7 @@ async def batch_resync_documents(
 async def batch_get_status(
     request: BatchStatusRequest,
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Get status of multiple documents.
@@ -339,18 +373,26 @@ async def batch_get_status(
             oid = to_object_id(file_id)
             doc = await files_collection.find_one(
                 {"_id": oid, "tutor_id": tutor_id},
-                {"_id": 1, "filename": 1, "embedding_status": 1, "sync_status": 1,
-                 "chunk_count": 1, "embedding_error": 1}
+                {
+                    "_id": 1,
+                    "filename": 1,
+                    "embedding_status": 1,
+                    "sync_status": 1,
+                    "chunk_count": 1,
+                    "embedding_error": 1,
+                },
             )
             if doc:
-                statuses.append({
-                    "file_id": str(doc["_id"]),
-                    "filename": doc.get("filename"),
-                    "embedding_status": doc.get("embedding_status"),
-                    "sync_status": doc.get("sync_status"),
-                    "chunk_count": doc.get("chunk_count", 0),
-                    "error": doc.get("embedding_error")
-                })
+                statuses.append(
+                    {
+                        "file_id": str(doc["_id"]),
+                        "filename": doc.get("filename"),
+                        "embedding_status": doc.get("embedding_status"),
+                        "sync_status": doc.get("sync_status"),
+                        "chunk_count": doc.get("chunk_count", 0),
+                        "error": doc.get("embedding_error"),
+                    }
+                )
         except:
             pass
 
@@ -362,7 +404,7 @@ async def resync_single_document(
     document_id: str,
     force: bool = Query(False, description="Force resync even if not needed"),
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Re-sync a single document.
@@ -371,9 +413,7 @@ async def resync_single_document(
     governance_service = DocumentGovernanceService(db)
 
     result = await governance_service.resync_document(
-        file_id=document_id,
-        tutor_id=tutor_id,
-        force=force
+        file_id=document_id, tutor_id=tutor_id, force=force
     )
 
     return result
@@ -382,7 +422,7 @@ async def resync_single_document(
 @router.get("/needs-resync")
 async def get_documents_needing_resync(
     current_user: ClerkUserContext = Depends(require_authenticated_user),
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     Get list of documents that need re-syncing.
@@ -393,4 +433,3 @@ async def get_documents_needing_resync(
     files = await governance_service.get_files_needing_resync(tutor_id)
 
     return {"files": files, "count": len(files)}
-

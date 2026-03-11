@@ -20,6 +20,7 @@ const AcceptInvitationPage  = lazy(() => import('./pages/AcceptInvitationPage'))
 const TeacherOnboarding     = lazy(() => import('./components/onboarding/TeacherOnboarding'))
 const StudentOnboarding     = lazy(() => import('./components/onboarding/StudentOnboarding'))
 const ParentOnboarding      = lazy(() => import('./components/onboarding/ParentOnboarding'))
+const NotificationsPage     = lazy(() => import('./pages/NotificationsPage'))
 const SettingsPage          = lazy(() => import('./pages/SettingsPage'))
 const NotFoundPage          = lazy(() => import('./pages/NotFoundPage'))
 const AccessDeniedPage      = lazy(() => import('./pages/AccessDeniedPage'))
@@ -102,6 +103,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <RoleSetupPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/notifications"
+                element={
+                  <ProtectedRoute>
+                    <NotificationsPage />
                   </ProtectedRoute>
                 }
               />

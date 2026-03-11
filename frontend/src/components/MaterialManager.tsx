@@ -23,6 +23,7 @@ interface Material {
   description?: string
   material_type: 'pdf' | 'doc' | 'video' | 'link' | 'image' | 'other'
   file_url?: string
+  file_id?: string
   file_size?: number
   subject_id?: string
   topic?: string
@@ -112,6 +113,7 @@ export default function MaterialManager() {
     subject_id: '',
     folder_id: '',
     shared_with_students: true,
+    file_id: '',
     file_size: 0,
   })
 
@@ -189,6 +191,7 @@ export default function MaterialManager() {
     try {
       const token = await getToken()
       let resolvedFileUrl = ''
+      let resolvedFileId = formData.file_id
       let resolvedFileSize = formData.file_size
       let resolvedType = formData.material_type
 
@@ -204,6 +207,7 @@ export default function MaterialManager() {
         const uploadPayload = await uploadRes.json().catch(() => null)
         if (!uploadRes.ok) throw new Error(uploadPayload?.detail || 'Upload failed')
         resolvedFileUrl = String(uploadPayload?.file_url || '')
+        resolvedFileId = String(uploadPayload?.file_id || '')
         resolvedFileSize = Number(uploadPayload?.file_size || selectedFile.size)
         resolvedType = uploadPayload?.material_type || resolvedType
       }
@@ -218,6 +222,7 @@ export default function MaterialManager() {
         description: null,
         material_type: resolvedType,
         file_url: resolvedFileUrl,
+        file_id: resolvedFileId || null,
         file_size: resolvedFileSize,
         subject_id: formData.subject_id || null,
         folder_id: formData.folder_id || null,
@@ -235,7 +240,7 @@ export default function MaterialManager() {
       if (res.ok) {
         toast.success('Material uploaded successfully')
         setIsCreateDialogOpen(false)
-        setFormData({ title: '', material_type: 'pdf', subject_id: '', folder_id: '', shared_with_students: true, file_size: 0 })
+        setFormData({ title: '', material_type: 'pdf', subject_id: '', folder_id: '', shared_with_students: true, file_id: '', file_size: 0 })
         setSelectedFile(null)
         fetchMaterials()
       } else {
@@ -413,7 +418,7 @@ export default function MaterialManager() {
     else if (['doc', 'docx'].includes(ext || '')) materialType = 'doc'
     else if (['mp4', 'mov', 'avi', 'webm'].includes(ext || '')) materialType = 'video'
     else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) materialType = 'image'
-    setFormData({ ...formData, title: file.name, material_type: materialType, file_size: file.size })
+    setFormData({ ...formData, title: file.name, material_type: materialType, file_id: '', file_size: file.size })
     setSelectedFile(file)
     setIsCreateDialogOpen(true)
   }

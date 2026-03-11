@@ -15,6 +15,7 @@ from app.models.assignment import (
     AssignmentUpdate,
     AssignmentInDB,
     AssignmentForStudent,
+    AssignmentType,
     AssignmentStatus,
     QuestionAssignment,
 )
@@ -57,6 +58,52 @@ async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _count_answered_questions(answers: Any) -> int:
+    if not isinstance(answers, list):
+        return 0
+
+    total = 0
+    for answer in answers:
+        if not isinstance(answer, dict):
+            continue
+        answer_text = str(answer.get("answer") or "").strip()
+        selected_options = answer.get("selected_options") or []
+        if answer_text or selected_options:
+            total += 1
+    return total
+
+
+def _derive_student_assignment_status(
+    assignment_doc: Dict[str, Any], progress_doc: Optional[Dict[str, Any]]
+) -> str:
+    assignment_status = str(assignment_doc.get("status") or "").lower()
+    if assignment_status in {
+        AssignmentStatus.ARCHIVED.value,
+        AssignmentStatus.DRAFT.value,
+    }:
+        return assignment_status
+
+    raw_progress_status = str((progress_doc or {}).get("status") or "").lower()
+    if raw_progress_status == "graded":
+        return "graded"
+    if raw_progress_status == "submitted":
+        return "submitted"
+    if raw_progress_status == "in_progress":
+        return "in_progress"
+
+    due_date = assignment_doc.get("due_date")
+    if isinstance(due_date, datetime):
+        normalized_due_date = (
+            due_date
+            if due_date.tzinfo is not None
+            else due_date.replace(tzinfo=timezone.utc)
+        )
+        if normalized_due_date < datetime.now(timezone.utc):
+            return "overdue"
+
+    return "pending"
 
 
 class AssignmentService:
@@ -124,7 +171,7 @@ class AssignmentService:
             assignment_dict["tutor_id"] = tutor_id
             assignment_dict["created_at"] = datetime.now(timezone.utc)
             assignment_dict["updated_at"] = datetime.now(timezone.utc)
-            assignment_dict["status"] = AssignmentStatus.SCHEDULED
+            assignment_dict["status"] = AssignmentStatus.PUBLISHED
             assignment_dict["questions"] = [q.dict() for q in questions]
             assignment_dict["student_ids"] = list(student_ids)
             assignment_dict["group_ids"] = group_ids
@@ -167,7 +214,9 @@ class AssignmentService:
                     {"clerk_id": {"$in": list(student_ids)}}
                 ).to_list(length=None)
                 student_docs_map = {
-                    doc["clerk_id"]: doc for doc in student_docs_list if doc.get("clerk_id")
+                    doc["clerk_id"]: doc
+                    for doc in student_docs_list
+                    if doc.get("clerk_id")
                 }
 
                 notification_due_date = (
@@ -235,9 +284,13 @@ class AssignmentService:
                 # Bulk insert all notifications in a single DB round-trip
                 if bulk_notifications:
                     try:
-                        await notification_service.bulk_create_notifications(bulk_notifications)
+                        await notification_service.bulk_create_notifications(
+                            bulk_notifications
+                        )
                     except Exception as e:
-                        logger.warning("Failed to bulk create notifications", error=str(e))
+                        logger.warning(
+                            "Failed to bulk create notifications", error=str(e)
+                        )
             except Exception as e:
                 logger.warning("Failed to send assignment notifications", error=str(e))
 
@@ -297,7 +350,9 @@ class AssignmentService:
                 max_docs = 200
                 assignment_docs = []
                 if hasattr(cursor, "to_list"):
-                    assignment_docs = await _maybe_await(cursor.to_list(length=max_docs))
+                    assignment_docs = await _maybe_await(
+                        cursor.to_list(length=max_docs)
+                    )
                 return [_convert_doc_to_assignment(doc) for doc in assignment_docs]
 
             per_page = min(per_page, 200)
@@ -401,41 +456,192 @@ class AssignmentService:
     ) -> List[AssignmentForStudent]:
         """Get assignments assigned to a student"""
         try:
-            query = {"student_ids": student_id}
-            cursor = self.collection.find(query).sort("due_date", 1)
-            assignments = []
+            student_doc = await self.db.students.find_one({"clerk_id": student_id})
+            if not student_doc or not student_doc.get("tutor_id"):
+                return []
 
-            async for assignment in cursor:
-                # Convert to student view
-                student_assignment = AssignmentForStudent(
-                    id=str(assignment["_id"]),
-                    title=assignment["title"],
-                    description=assignment.get("description"),
-                    subject_id=assignment["subject_id"],
-                    topic=assignment["topic"],
-                    assignment_type=assignment["assignment_type"],
-                    due_date=assignment["due_date"],
-                    time_limit=assignment.get("time_limit"),
-                    max_attempts=assignment["max_attempts"],
-                    shuffle_questions=assignment["shuffle_questions"],
-                    show_results_immediately=assignment["show_results_immediately"],
-                    status=assignment["status"],
-                    question_count=len(assignment.get("questions", [])),
-                    attempts_used=0,  # Would come from progress tracking
-                    last_attempt_score=None,  # Would come from progress tracking
-                    is_overdue=assignment["due_date"] < datetime.now(timezone.utc)
-                    if assignment.get("due_date")
-                    else False,
-                )
-                assignments.append(student_assignment)
-
-            return assignments
+            result = await self.get_student_assignment_summaries(
+                student_id=student_id,
+                tutor_id=str(student_doc.get("tutor_id")),
+                page=1,
+                per_page=200,
+            )
+            return result["items"]
 
         except Exception as e:
             logger.error(
                 "Failed to get student assignments", student_id=student_id, error=str(e)
             )
             raise DatabaseException(f"Failed to get assignments: {str(e)}")
+
+    async def get_student_assignment_summaries(
+        self,
+        student_id: str,
+        tutor_id: str,
+        status: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 10,
+    ) -> Dict[str, Any]:
+        """Get student-facing assignment summaries joined with progress state."""
+        try:
+            query: Dict[str, Any] = {
+                "tutor_id": tutor_id,
+                "student_ids": student_id,
+                "status": {"$ne": AssignmentStatus.DRAFT.value},
+            }
+
+            assignment_docs = (
+                await self.collection.find(query)
+                .sort("due_date", 1)
+                .to_list(length=500)
+            )
+
+            assignment_ids = [
+                str(assignment.get("_id"))
+                for assignment in assignment_docs
+                if assignment.get("_id")
+            ]
+
+            progress_docs = []
+            if assignment_ids:
+                progress_docs = await self.db.progress.find(
+                    {
+                        "student_id": student_id,
+                        "assignment_id": {"$in": assignment_ids},
+                    }
+                ).to_list(length=len(assignment_ids))
+
+            progress_by_assignment = {
+                str(progress.get("assignment_id")): progress
+                for progress in progress_docs
+                if progress.get("assignment_id")
+            }
+
+            subject_object_ids = []
+            subject_name_by_string_id: Dict[str, str] = {}
+            for assignment in assignment_docs:
+                subject_id = assignment.get("subject_id")
+                if isinstance(subject_id, str):
+                    try:
+                        subject_object_ids.append(to_object_id(subject_id))
+                    except Exception:
+                        subject_name_by_string_id[subject_id] = subject_id
+
+            subject_docs = []
+            if subject_object_ids:
+                subject_docs = await self.db.subjects.find(
+                    {"_id": {"$in": subject_object_ids}},
+                    {"name": 1},
+                ).to_list(length=len(subject_object_ids))
+
+            subject_name_map = {
+                str(subject.get("_id")): subject.get("name", "General")
+                for subject in subject_docs
+                if subject.get("_id")
+            }
+
+            summaries: List[AssignmentForStudent] = []
+            for assignment in assignment_docs:
+                assignment_id = str(assignment.get("_id"))
+                progress_doc = progress_by_assignment.get(assignment_id)
+                question_count = len(assignment.get("questions", []) or [])
+                answered_count = _count_answered_questions(
+                    progress_doc.get("answers") if progress_doc else []
+                )
+                derived_status = _derive_student_assignment_status(
+                    assignment, progress_doc
+                )
+                progress_percent = (
+                    round((answered_count / question_count) * 100)
+                    if question_count > 0
+                    else (100 if derived_status in {"submitted", "graded"} else 0)
+                )
+
+                subject_raw = assignment.get("subject_id")
+                subject_key = str(subject_raw) if subject_raw is not None else ""
+                subject_name = subject_name_map.get(
+                    subject_key,
+                    subject_name_by_string_id.get(subject_key, "General"),
+                )
+
+                summary = AssignmentForStudent(
+                    id=assignment_id,
+                    title=assignment.get("title", "Untitled Assignment"),
+                    description=assignment.get("description"),
+                    subject_name=subject_name,
+                    topic=assignment.get("topic") or "General",
+                    assignment_type=assignment.get(
+                        "assignment_type", AssignmentType.PRACTICE.value
+                    ),
+                    due_date=assignment.get("due_date"),
+                    time_limit=assignment.get("time_limit"),
+                    max_attempts=int(assignment.get("max_attempts", 1) or 1),
+                    total_points=int(assignment.get("total_points", 0) or 0),
+                    question_count=question_count,
+                    status=derived_status,
+                    attempts_used=1 if progress_doc else 0,
+                    best_score=progress_doc.get("score") if progress_doc else None,
+                    last_attempt=(
+                        progress_doc.get("submitted_at")
+                        or progress_doc.get("updated_at")
+                        or progress_doc.get("started_at")
+                        if progress_doc
+                        else None
+                    ),
+                    progress_percent=max(0, min(progress_percent, 100)),
+                    feedback=progress_doc.get("feedback") if progress_doc else None,
+                    submitted_at=progress_doc.get("submitted_at")
+                    if progress_doc
+                    else None,
+                    graded_at=progress_doc.get("graded_at") if progress_doc else None,
+                    review_available=(
+                        derived_status == "graded"
+                        or (
+                            derived_status == "submitted"
+                            and bool(assignment.get("show_results_immediately", False))
+                        )
+                    ),
+                )
+                summaries.append(summary)
+
+            normalized_status = str(status or "").strip().lower()
+            if normalized_status and normalized_status not in {"all"}:
+                filter_aliases = {
+                    "completed": {"graded"},
+                    "active": {"pending", "in_progress"},
+                }
+                allowed_statuses = filter_aliases.get(
+                    normalized_status, {normalized_status}
+                )
+                summaries = [
+                    summary
+                    for summary in summaries
+                    if summary.status in allowed_statuses
+                ]
+
+            total = len(summaries)
+            start = max(page - 1, 0) * per_page
+            end = start + per_page
+
+            return {
+                "items": summaries[start:end],
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "total_pages": (total + per_page - 1) // per_page
+                if per_page > 0
+                else 0,
+            }
+        except Exception as e:
+            logger.error(
+                "Failed to get student assignment summaries",
+                student_id=student_id,
+                tutor_id=tutor_id,
+                error=str(e),
+            )
+            raise DatabaseException(
+                f"Failed to get student assignment summaries: {str(e)}"
+            )
 
     async def update_assignment(
         self, assignment_id: str, assignment_update: AssignmentUpdate, tutor_id: str

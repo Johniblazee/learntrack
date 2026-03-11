@@ -20,6 +20,9 @@ from pydantic import BaseModel
 logger = structlog.get_logger()
 router = APIRouter()
 
+COMPLETED_PROGRESS_STATUSES = {"submitted", "graded"}
+LIVE_ASSIGNMENT_STATUSES = {"scheduled", "published", "active"}
+
 
 class DashboardStats(BaseModel):
     """Dashboard statistics response"""
@@ -66,22 +69,27 @@ async def get_dashboard_stats(
             {"tutor_id": current_user.clerk_id, "is_active": True}
         )
 
-        # 2. Count active assignments (assignments with status "active" or "published")
+        # 2. Count active assignments
         active_assignments = await database.assignments.count_documents(
             {
                 "tutor_id": current_user.clerk_id,
-                "status": {"$in": ["active", "published"]},
+                "status": {"$in": list(LIVE_ASSIGNMENT_STATUSES)},
             }
         )
 
-        # 3. Calculate average performance from student submissions
-        # Get all submissions for this tutor's assignments
+        # 3. Calculate average performance from student progress records
         pipeline = [
-            {"$match": {"tutor_id": current_user.clerk_id}},
+            {
+                "$match": {
+                    "tutor_id": current_user.clerk_id,
+                    "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
+                    "score": {"$ne": None},
+                }
+            },
             {"$group": {"_id": None, "avg_score": {"$avg": "$score"}}},
         ]
 
-        avg_result = await database.submissions.aggregate(pipeline).to_list(length=1)
+        avg_result = await database.progress.aggregate(pipeline).to_list(length=1)
         avg_performance = (
             round(avg_result[0]["avg_score"], 1)
             if avg_result and avg_result[0].get("avg_score")
@@ -93,11 +101,14 @@ async def get_dashboard_stats(
 
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
-        active_students = await database.submissions.distinct(
+        active_students = await database.progress.distinct(
             "student_id",
             {
                 "tutor_id": current_user.clerk_id,
-                "submitted_at": {"$gte": seven_days_ago},
+                "$or": [
+                    {"submitted_at": {"$gte": seven_days_ago}},
+                    {"updated_at": {"$gte": seven_days_ago}},
+                ],
             },
         )
 
@@ -133,7 +144,13 @@ async def get_top_performers(
     """Get top performing students - calculated from real submissions"""
     try:
         pipeline = [
-            {"$match": {"tutor_id": current_user.clerk_id}},
+            {
+                "$match": {
+                    "tutor_id": current_user.clerk_id,
+                    "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
+                    "score": {"$ne": None},
+                }
+            },
             {
                 "$group": {
                     "_id": "$student_id",
@@ -160,7 +177,7 @@ async def get_top_performers(
             },
         ]
 
-        top_students = await database.submissions.aggregate(pipeline).to_list(length=4)
+        top_students = await database.progress.aggregate(pipeline).to_list(length=4)
 
         if not top_students:
             return []
@@ -368,14 +385,13 @@ async def get_recent_activity(
             actor_id = str(doc.get("user_id") or "")
             actor_name = str(metadata.get("student_name") or "").strip()
             if actor_name.lower() in GENERIC_NAME_SENTINELS:
-                actor_name = ""          # force DB lookup for old records with generic names
+                actor_name = ""  # force DB lookup for old records with generic names
 
             if not actor_name:
                 if actor_id == current_user.clerk_id:
                     actor_name = "You"
                 else:
                     actor_name = students_by_id.get(actor_id, "Learner")
-
 
             related_assignment_id = str(doc.get("related_entity_id") or "")
             if not related_assignment_id:
@@ -436,7 +452,7 @@ async def get_upcoming_deadlines(
                     "due_date": {
                         "$gte": today_start
                     },  # Include assignments from start of today
-                    "status": {"$in": ["active", "published"]},
+                    "status": {"$in": list(LIVE_ASSIGNMENT_STATUSES)},
                 }
             )
             .sort("due_date", 1)
@@ -466,17 +482,18 @@ async def get_upcoming_deadlines(
 
         submission_map = {}
         if assignment_ids:
-            submission_pipeline = [
+            progress_pipeline = [
                 {
                     "$match": {
                         "tutor_id": current_user.clerk_id,
                         "assignment_id": {"$in": assignment_ids},
+                        "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     }
                 },
                 {"$group": {"_id": "$assignment_id", "count": {"$sum": 1}}},
             ]
-            submission_stats = await database.submissions.aggregate(
-                submission_pipeline
+            submission_stats = await database.progress.aggregate(
+                progress_pipeline
             ).to_list(length=len(assignment_ids))
             submission_map = {
                 item["_id"]: item.get("count", 0) for item in submission_stats
@@ -513,6 +530,9 @@ async def get_upcoming_deadlines(
             subject_name = subject_map.get(subject_id, "Unknown")
             assignment_id = str(assignment.get("_id"))
             submission_count = submission_map.get(assignment_id, 0)
+            total_expected = (
+                len(assignment.get("student_ids", []) or []) or total_students
+            )
 
             deadlines.append(
                 {
@@ -521,7 +541,7 @@ async def get_upcoming_deadlines(
                     "dueDate": date_label,
                     "urgency": urgency,
                     "completed": submission_count,
-                    "total": total_students,
+                    "total": total_expected,
                     "due_date_iso": due_date.isoformat(),  # For sorting/filtering on frontend
                 }
             )
@@ -540,7 +560,7 @@ async def get_performance_chart(
     database: AsyncIOMotorDatabase = Depends(get_database),
     days: int = 30,
 ):
-    """Calculate performance chart data dynamically from submissions"""
+    """Calculate performance chart data dynamically from progress records"""
     try:
         from datetime import timedelta
 
@@ -548,18 +568,13 @@ async def get_performance_chart(
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
 
-        # Get all subjects for this tutor
-        subjects = await database.subjects.find(
-            {"tutor_id": current_user.clerk_id}
-        ).to_list(length=100)
-        subject_map = {str(s.get("_id")): s.get("name", "Unknown") for s in subjects}
-
-        # Aggregate submissions by date and subject
         pipeline = [
             {
                 "$match": {
                     "tutor_id": current_user.clerk_id,
                     "submitted_at": {"$gte": start_date, "$lte": end_date},
+                    "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
+                    "score": {"$ne": None},
                 }
             },
             {
@@ -571,7 +586,6 @@ async def get_performance_chart(
                                 "date": "$submitted_at",
                             }
                         },
-                        "subject_id": "$subject_id",
                     },
                     "avg_score": {"$avg": "$score"},
                 }
@@ -579,24 +593,18 @@ async def get_performance_chart(
             {"$sort": {"_id.date": 1}},
         ]
 
-        results = await database.submissions.aggregate(pipeline).to_list(length=1000)
+        results = await database.progress.aggregate(pipeline).to_list(length=1000)
 
-        # Group by date
         date_map = {}
         for result in results:
             date = result["_id"]["date"]
-            subject_id = result["_id"]["subject_id"]
-            subject_name = (
-                subject_map.get(subject_id, "Unknown").lower().replace(" ", "_")
-            )
             avg_score = round(result["avg_score"], 1)
 
-            if date not in date_map:
-                date_map[date] = {"day": date[-2:]}  # Get day from YYYY-MM-DD
+            date_map[date] = {
+                "period": date,
+                "performance": avg_score,
+            }
 
-            date_map[date][subject_name] = avg_score
-
-        # Convert to list and fill missing days with interpolated values
         chart_data = list(date_map.values())
 
         return chart_data
@@ -719,7 +727,7 @@ async def get_student_dashboard_stats(
 
         # Calculate stats
         total_assignments = len(assignments)
-        completed_statuses = {"completed", "submitted", "graded"}
+        completed_statuses = COMPLETED_PROGRESS_STATUSES
         completed = len(
             [p for p in progress_records if p.get("status") in completed_statuses]
         )
@@ -764,80 +772,41 @@ async def get_parent_dashboard_stats(
 ):
     """Get dashboard statistics for parent"""
     try:
-        # Get parent's children from parents collection
-        parent = await database.parents.find_one({"clerk_id": current_user.clerk_id})
+        from app.services.progress_service import ProgressService
 
-        if not parent:
-            return {"children": []}
-
-        child_ids = parent.get("parent_children", [])
-
-        students = await database.students.find(
-            {"clerk_id": {"$in": child_ids}}
-        ).to_list(length=len(child_ids))
-        student_map = {student.get("clerk_id"): student for student in students}
-
-        progress_pipeline = [
-            {"$match": {"student_id": {"$in": child_ids}}},
-            {
-                "$group": {
-                    "_id": "$student_id",
-                    "completed_scores": {
-                        "$push": {
-                            "$cond": [
-                                {
-                                    "$and": [
-                                        {
-                                            "$in": [
-                                                "$status",
-                                                ["completed", "submitted", "graded"],
-                                            ]
-                                        },
-                                        {"$ne": ["$score", None]},
-                                    ]
-                                },
-                                "$score",
-                                "$$REMOVE",
-                            ]
-                        }
-                    },
-                    "assignments_due": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "in_progress"]}, 1, 0]}
-                    },
-                }
-            },
-        ]
-        progress_stats = await database.progress.aggregate(progress_pipeline).to_list(
-            length=len(child_ids)
+        progress_service = ProgressService(database)
+        parent_views = await progress_service.get_parent_progress_view(
+            current_user.clerk_id
         )
-        progress_map = {item["_id"]: item for item in progress_stats}
+        student_docs = await database.students.find(
+            {"clerk_id": {"$in": [view.child_id for view in parent_views]}},
+            {"clerk_id": 1, "student_profile.grade": 1},
+        ).to_list(length=len(parent_views))
+        grade_by_child_id = {
+            str(student.get("clerk_id")): student.get("student_profile", {}).get(
+                "grade"
+            )
+            for student in student_docs
+            if student.get("clerk_id")
+        }
 
         children = []
-        for child_id in child_ids:
-            child = student_map.get(child_id)
-            if not child:
-                continue
-
-            child_progress = progress_map.get(child_id, {})
-            completed_scores = child_progress.get("completed_scores", [])
-            avg_score = (
-                round(sum(completed_scores) / len(completed_scores), 1)
-                if completed_scores
-                else 0
-            )
-
+        for view in parent_views:
+            avg_score = view.analytics.average_score or 0
             children.append(
                 {
-                    "id": child_id,
-                    "name": child.get("name", "Unknown"),
-                    "grade": child.get("student_profile", {}).get("grade", "N/A"),
-                    "overall_progress": avg_score,
+                    "id": view.child_id,
+                    "name": view.child_name,
+                    "grade": grade_by_child_id.get(view.child_id),
+                    "overall_progress": round(avg_score, 1),
                     "recent_grade": "A"
                     if avg_score >= 90
                     else "B+"
                     if avg_score >= 85
-                    else "B",
-                    "assignments_due": child_progress.get("assignments_due", 0),
+                    else "B"
+                    if avg_score >= 80
+                    else "C",
+                    "assignments_due": len(view.upcoming_assignments),
                 }
             )
 

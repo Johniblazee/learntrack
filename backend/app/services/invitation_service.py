@@ -19,7 +19,7 @@ from app.models.invitation import (
     InvitationListResponse,
     InvitationStats,
 )
-from app.models.user import UserRole, UserCreate, User
+from app.models.user import UserRole, User
 from app.core.exceptions import NotFoundError, ValidationError, DatabaseException
 from app.services.user_service import UserService
 from app.services.email_service import email_service
@@ -244,21 +244,41 @@ class InvitationService:
                 else UserRole.PARENT
             )
 
-            # Create user
-            user_data = UserCreate(
+            allowed_student_ids = [
+                str(student_id) for student_id in invitation.student_ids
+            ]
+            requested_student_ids = [
+                str(student_id)
+                for student_id in (selected_student_ids or [])
+                if student_id
+            ]
+
+            if user_role == UserRole.PARENT:
+                if requested_student_ids:
+                    invalid_student_ids = sorted(
+                        set(requested_student_ids) - set(allowed_student_ids)
+                    )
+                    if invalid_student_ids:
+                        raise ValidationError(
+                            "Parent invitations can only link invited students"
+                        )
+                    student_ids_to_link = requested_student_ids
+                else:
+                    student_ids_to_link = allowed_student_ids
+            else:
+                student_ids_to_link = []
+
+            user = await self.user_service.upsert_invited_user(
                 clerk_id=clerk_id,
                 email=email,
                 name=name,
                 role=user_role,
                 tutor_id=invitation.tutor_id,
-                is_active=True,
+                tenant_id=invitation.tutor_id,
             )
-
-            user = await self.user_service.create_user(user_data)
 
             # For parent invitations, link to students
             if user_role == UserRole.PARENT:
-                student_ids_to_link = selected_student_ids or invitation.student_ids
                 for student_id in student_ids_to_link:
                     await self.user_service.assign_child_to_parent(
                         student_id, user.clerk_id

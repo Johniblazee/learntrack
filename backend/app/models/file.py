@@ -1,6 +1,7 @@
 """
 File handling models for UploadThing integration
 """
+
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from enum import Enum
@@ -11,6 +12,7 @@ from app.models.user import PyObjectId
 
 class FileType(str, Enum):
     """Supported file types"""
+
     PDF = "application/pdf"
     PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     PPT = "application/vnd.ms-powerpoint"
@@ -21,6 +23,7 @@ class FileType(str, Enum):
 
 class FileStatus(str, Enum):
     """File processing status"""
+
     UPLOADED = "uploaded"
     PROCESSING = "processing"
     PROCESSED = "processed"
@@ -29,6 +32,7 @@ class FileStatus(str, Enum):
 
 class EmbeddingStatus(str, Enum):
     """RAG embedding status for files"""
+
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -37,6 +41,7 @@ class EmbeddingStatus(str, Enum):
 
 class SyncStatus(str, Enum):
     """Document sync status for change detection"""
+
     SYNCED = "synced"
     OUT_OF_SYNC = "out_of_sync"
     NEVER_SYNCED = "never_synced"
@@ -44,6 +49,7 @@ class SyncStatus(str, Enum):
 
 class ErrorCategory(str, Enum):
     """Categorized processing error types"""
+
     FORMAT_ERROR = "format_error"
     API_LIMIT = "api_limit"
     NETWORK_ERROR = "network_error"
@@ -53,6 +59,7 @@ class ErrorCategory(str, Enum):
 
 class ProcessingHistoryEntry(BaseModel):
     """Single entry in document processing history"""
+
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     action: str  # "embed", "re-embed", "delete", "sync"
     status: str  # "started", "completed", "failed"
@@ -63,6 +70,7 @@ class ProcessingHistoryEntry(BaseModel):
 
 class UploadedFile(BaseModel):
     """UploadThing file model"""
+
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
 
     # UploadThing specific fields
@@ -71,12 +79,19 @@ class UploadedFile(BaseModel):
     filename: str
     content_type: str
     size: int
+    storage_path: Optional[str] = None
+    source_url: Optional[str] = None
 
     # User and metadata
     uploaded_by: str  # user_id
     uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    tutor_id: Optional[str] = Field(None, description="Tutor ID - references the tutor's Clerk user ID for tenant isolation")
-    tenant_path: Optional[str] = Field(None, description="Tenant-prefixed storage path for S3 migration readiness")
+    tutor_id: Optional[str] = Field(
+        None,
+        description="Tutor ID - references the tutor's Clerk user ID for tenant isolation",
+    )
+    tenant_path: Optional[str] = Field(
+        None, description="Tenant-prefixed storage path for S3 migration readiness"
+    )
 
     # Processing metadata
     status: FileStatus = FileStatus.UPLOADED
@@ -100,7 +115,7 @@ class UploadedFile(BaseModel):
     chunk_count: int = 0
     embedding_model_used: Optional[str] = None
     last_embedded_at: Optional[datetime] = None
-    tags: List[str] = []
+    tags: List[str] = Field(default_factory=list)
     category: Optional[str] = None
     embedding_error: Optional[str] = None
 
@@ -110,7 +125,6 @@ class UploadedFile(BaseModel):
     content_hash: Optional[str] = None  # SHA-256 hash for change detection
     page_count: Optional[int] = None
     processor_used: Optional[str] = None  # docling, unstructured, pypdf, etc.
-    processing_time: Optional[float] = None  # seconds
 
     # Governance fields for lifecycle management
     embedding_version: int = 1  # Track embedding versions
@@ -119,23 +133,23 @@ class UploadedFile(BaseModel):
     processing_attempts: int = 0
     max_processing_attempts: int = 3  # For retry logic
     last_error_category: Optional[ErrorCategory] = None
-    processing_history: List[ProcessingHistoryEntry] = []
+    processing_history: List[ProcessingHistoryEntry] = Field(default_factory=list)
 
     model_config = ConfigDict(
-        populate_by_name=True,
-        arbitrary_types_allowed=True,
-        json_encoders={str: str}
+        populate_by_name=True, arbitrary_types_allowed=True, json_encoders={str: str}
     )
 
 
 class UploadThingWebhookPayload(BaseModel):
     """UploadThing webhook payload"""
+
     eventType: str
     data: Dict[str, Any]
 
 
 class FileMetadataRequest(BaseModel):
     """Request to register file metadata after UploadThing upload"""
+
     uploadthing_key: str
     uploadthing_url: HttpUrl
     filename: str
@@ -150,6 +164,7 @@ class FileMetadataRequest(BaseModel):
 
 class FileRegistrationResponse(BaseModel):
     """Response after registering file metadata"""
+
     file_id: str
     filename: str
     size: int
@@ -160,6 +175,7 @@ class FileRegistrationResponse(BaseModel):
 
 class FileProcessingResult(BaseModel):
     """File processing result"""
+
     file_id: str
     status: FileStatus
     questions_generated: int = 0
@@ -169,6 +185,7 @@ class FileProcessingResult(BaseModel):
 
 class UploadThingFileCreate(BaseModel):
     """Create file record from UploadThing data"""
+
     uploadthing_key: str
     uploadthing_url: HttpUrl
     filename: str
@@ -181,6 +198,7 @@ class UploadThingFileCreate(BaseModel):
 
 class UploadThingFileUpdate(BaseModel):
     """Update file record"""
+
     status: Optional[FileStatus] = None
     processing_started_at: Optional[datetime] = None
     processing_completed_at: Optional[datetime] = None

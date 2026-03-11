@@ -8,6 +8,7 @@ import { ReactNode } from 'react'
 vi.mock('@clerk/clerk-react', () => ({
   ClerkProvider: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   useUser: () => ({ isSignedIn: false, user: null, isLoaded: true }),
+  useAuth: () => ({ getToken: vi.fn().mockResolvedValue(null), isSignedIn: false, userId: null }),
 }))
 
 describe('App', () => {

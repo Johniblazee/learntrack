@@ -44,7 +44,22 @@ class VisibilityService:
                 visible_users.append(student["tutor_id"])
 
             # Add linked parents
-            parent_ids = student.get("parent_ids", [])
+            parent_ids = list(student.get("parent_ids", []) or [])
+            if not parent_ids:
+                linked_parents = await self.parents.find(
+                    {
+                        "$or": [
+                            {"parent_children": student_clerk_id},
+                            {"student_ids": student_clerk_id},
+                        ]
+                    },
+                    {"clerk_id": 1},
+                ).to_list(length=None)
+                parent_ids = [
+                    parent.get("clerk_id")
+                    for parent in linked_parents
+                    if parent.get("clerk_id")
+                ]
             visible_users.extend(parent_ids)
 
             logger.info(
@@ -76,10 +91,18 @@ class VisibilityService:
 
             visible_users = []
 
-            # Get children from students collection
-            children = await self.students.find(
-                {"parent_ids": parent_clerk_id}
-            ).to_list(length=None)
+            child_ids = list(
+                parent.get("parent_children") or parent.get("student_ids") or []
+            )
+
+            if child_ids:
+                children = await self.students.find(
+                    {"clerk_id": {"$in": child_ids}}
+                ).to_list(length=None)
+            else:
+                children = await self.students.find(
+                    {"parent_ids": parent_clerk_id}
+                ).to_list(length=None)
 
             # Add children IDs
             child_ids = [child["clerk_id"] for child in children]
@@ -131,6 +154,23 @@ class VisibilityService:
             parent_ids = set()
             for student in students:
                 parent_ids.update(student.get("parent_ids", []))
+
+            if not parent_ids and student_ids:
+                parent_docs = await self.parents.find(
+                    {
+                        "tutor_id": tutor_clerk_id,
+                        "$or": [
+                            {"parent_children": {"$in": student_ids}},
+                            {"student_ids": {"$in": student_ids}},
+                        ],
+                    },
+                    {"clerk_id": 1},
+                ).to_list(length=None)
+                parent_ids.update(
+                    parent.get("clerk_id")
+                    for parent in parent_docs
+                    if parent.get("clerk_id")
+                )
 
             visible_users.extend(list(parent_ids))
 

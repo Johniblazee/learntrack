@@ -77,9 +77,11 @@ def _assert_impersonation_start_allowed(
     )
 
 
-def get_active_impersonation_session(session_id: str) -> Optional[ImpersonationSession]:
+async def get_active_impersonation_session(
+    session_id: str,
+) -> Optional[ImpersonationSession]:
     """Compatibility helper used by auth layer."""
-    return get_impersonation_session_record(session_id)
+    return await get_impersonation_session_record(session_id)
 
 
 @router.post("/start", response_model=ImpersonationResponse)
@@ -157,7 +159,7 @@ async def start_impersonation(
             expires_at=expires_at,
         )
 
-        put_impersonation_session(session)
+        await put_impersonation_session(session)
 
         # Log the impersonation start
         await _log_admin_action(
@@ -213,7 +215,7 @@ async def end_impersonation(
 ):
     """End an impersonation session"""
     try:
-        session = get_impersonation_session_record(session_id)
+        session = await get_impersonation_session_record(session_id)
 
         if not session:
             raise HTTPException(
@@ -228,7 +230,7 @@ async def end_impersonation(
             )
 
         # Remove the session
-        remove_impersonation_session(session_id)
+        await remove_impersonation_session(session_id)
 
         # Log the impersonation end
         await _log_admin_action(
@@ -273,7 +275,7 @@ async def get_impersonation_session(
     current_user: ClerkUserContext = Depends(require_authenticated_user),
 ):
     """Get details of an active impersonation session"""
-    session = get_impersonation_session_record(session_id)
+    session = await get_impersonation_session_record(session_id)
 
     if not session:
         raise HTTPException(status_code=404, detail="Impersonation session not found")
@@ -315,7 +317,7 @@ async def get_active_sessions(
 
     requester_clerk_id = _get_requester_clerk_id(request, current_user)
 
-    for session in list_impersonation_sessions_for_admin(requester_clerk_id):
+    for session in await list_impersonation_sessions_for_admin(requester_clerk_id):
         sessions.append(
             {
                 "session_id": session.session_id,
