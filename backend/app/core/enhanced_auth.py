@@ -169,7 +169,7 @@ class EnhancedClerkJWTBearer:
                 self._missing_issuer_logged = True
             return {}
 
-        # Check cache validity (refresh every hour)
+        # Serve from cache while still valid
         if (
             self._jwks_cache
             and self._cache_expiry
@@ -177,26 +177,33 @@ class EnhancedClerkJWTBearer:
         ):
             return self._jwks_cache
 
+        jwks_url = f"{self.issuer}/.well-known/jwks.json"
         try:
-            # Construct JWKS URL based on Clerk instance
-            jwks_url = f"{self.issuer}/.well-known/jwks.json"
+            # Reuse the module-level shared client for connection pooling
+            response = await _clerk_http_client.get(jwks_url)
+            response.raise_for_status()
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(jwks_url)
-                response.raise_for_status()
+            jwks_data = response.json()
+            self._jwks_cache = jwks_data
+            self._cache_expiry = current_time + timedelta(hours=1)
 
-                jwks_data = response.json()
-
-                # Cache the JWKS data
-                self._jwks_cache = jwks_data
-                self._cache_expiry = current_time + timedelta(hours=1)
-
-                logger.info("JWKS fetched successfully", url=jwks_url)
-                return jwks_data
+            logger.info("JWKS fetched successfully", url=jwks_url)
+            return jwks_data
 
         except Exception as e:
-            logger.error("Failed to fetch JWKS", error=str(e))
-            # Fallback to direct secret validation if JWKS fails
+            logger.error(
+                "Failed to fetch JWKS",
+                error=str(e) or repr(e),
+                exc_type=type(e).__name__,
+                jwks_url=jwks_url,
+                exc_info=True,
+            )
+            # Stale-cache fallback: expired keys are better than no keys for
+            # transient connectivity blips. Real key rotation invalidates tokens
+            # at the JWT level anyway.
+            if self._jwks_cache:
+                logger.warning("Using stale JWKS cache due to fetch failure")
+                return self._jwks_cache
             return {}
 
     async def verify_token(self, token: str) -> ClerkUserContext:
