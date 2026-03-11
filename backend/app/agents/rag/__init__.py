@@ -1,20 +1,6 @@
-"""
-Agentic RAG Module
+"""Lightweight RAG package exports."""
 
-Self-corrective RAG agent using LangGraph for intelligent document retrieval
-with query rewriting, relevance grading, and answer generation.
-"""
-
-from app.agents.rag.graph import AgenticRAGAgent
-from app.agents.rag.state import RAGState, RAGConfig, RetrievedDocument
-from app.agents.rag.nodes import (
-    QueryAnalyzerNode,
-    RetrieverNode,
-    RelevanceGraderNode,
-    QueryRewriterNode,
-    AnswerGeneratorNode,
-    HallucinationCheckerNode,
-)
+from importlib import import_module
 
 __all__ = [
     "AgenticRAGAgent",
@@ -29,3 +15,21 @@ __all__ = [
     "HallucinationCheckerNode",
 ]
 
+
+def __getattr__(name: str):
+    if name in {"RAGState", "RAGConfig", "RetrievedDocument"}:
+        module = import_module("app.agents.rag.state")
+        return getattr(module, name)
+    if name == "AgenticRAGAgent":
+        return import_module("app.agents.rag.graph").AgenticRAGAgent
+    if name in {
+        "QueryAnalyzerNode",
+        "RetrieverNode",
+        "RelevanceGraderNode",
+        "QueryRewriterNode",
+        "AnswerGeneratorNode",
+        "HallucinationCheckerNode",
+    }:
+        module = import_module("app.agents.rag.nodes")
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -34,7 +34,6 @@ from app.models.material import (
     MaterialUpdate,
 )
 from app.models.file import EmbeddingStatus, FileStatus, SyncStatus
-from app.rag.processors.document_processor import get_document_processor
 from app.services.material_service import MaterialService
 from app.utils.pagination import PaginatedResponse, paginate
 
@@ -375,6 +374,8 @@ async def upload_material_file(
     }
 
     try:
+        from app.rag.processors.document_processor import get_document_processor
+
         processor = get_document_processor()
         extracted_text = await processor.extract_text_only(output_path)
         completed_at = datetime.now(timezone.utc)

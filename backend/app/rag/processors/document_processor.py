@@ -4,16 +4,31 @@ Replaces multiple document processors with a single LangChain-based solution
 """
 
 import os
+import importlib
 import tempfile
 import threading
 from dataclasses import dataclass
+from enum import Enum
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import structlog
 
 from langchain_core.documents import Document
-from langchain_docling import DoclingLoader
-from langchain_docling.loader import ExportType
+
+try:
+    DoclingLoader = importlib.import_module("langchain_docling").DoclingLoader
+    ExportType = importlib.import_module("langchain_docling.loader").ExportType
+
+    DOCLING_AVAILABLE = True
+except ImportError:
+    DoclingLoader = None
+    DOCLING_AVAILABLE = False
+
+    class ExportType(str, Enum):
+        MARKDOWN = "markdown"
+        TEXT = "text"
+        JSON = "json"
+
 
 logger = structlog.get_logger()
 
@@ -65,9 +80,37 @@ class DocumentProcessor:
         }
 
         logger.info(
-            "Initialized DocumentProcessor with langchain-docling",
+            "Initialized DocumentProcessor",
             supported_formats=list(self.supported_extensions),
+            docling_available=DOCLING_AVAILABLE,
         )
+
+    def _load_text_fallback(
+        self, file_path: Path, export_type: ExportType
+    ) -> List[Document]:
+        text_extensions = {".txt", ".md", ".json", ".html", ".htm", ".xml", ".rtf"}
+        if file_path.suffix.lower() not in text_extensions:
+            raise ImportError(
+                "langchain_docling is not installed. Install it to process PDFs and Office documents."
+            )
+
+        text_content = file_path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not text_content:
+            return []
+
+        return [
+            Document(
+                page_content=text_content,
+                metadata={
+                    "source_file": str(file_path),
+                    "filename": file_path.name,
+                    "file_extension": file_path.suffix.lower(),
+                    "file_size": file_path.stat().st_size,
+                    "export_type": export_type.value,
+                    "processor": "text-fallback",
+                },
+            )
+        ]
 
     async def load_document(
         self,
@@ -95,13 +138,13 @@ class DocumentProcessor:
                     f"Supported formats: {self.supported_extensions}"
                 )
 
-            # Create DoclingLoader with the specified export type
-            loader = DoclingLoader(
-                file_path=str(file_path), export_type=export_type, **loader_kwargs
-            )
-
-            # Load documents
-            documents = await loader.aload()
+            if DOCLING_AVAILABLE and DoclingLoader is not None:
+                loader = DoclingLoader(
+                    file_path=str(file_path), export_type=export_type, **loader_kwargs
+                )
+                documents = await loader.aload()
+            else:
+                documents = self._load_text_fallback(file_path, export_type)
 
             # Add metadata to documents
             for doc in documents:
@@ -112,7 +155,9 @@ class DocumentProcessor:
                         "file_extension": file_path.suffix.lower(),
                         "file_size": file_path.stat().st_size,
                         "export_type": export_type.value,
-                        "processor": "langchain-docling",
+                        "processor": "langchain-docling"
+                        if DOCLING_AVAILABLE
+                        else "text-fallback",
                     }
                 )
 

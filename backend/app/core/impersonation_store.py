@@ -8,12 +8,22 @@ from app.models.admin import ImpersonationSession
 COLLECTION_NAME = "impersonation_sessions"
 
 
+def _ensure_utc_datetime(value):
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    return value
+
+
 def _session_from_doc(doc: Optional[dict]) -> Optional[ImpersonationSession]:
     if not doc:
         return None
 
     normalized = dict(doc)
     normalized.pop("_id", None)
+    normalized["started_at"] = _ensure_utc_datetime(normalized.get("started_at"))
+    normalized["expires_at"] = _ensure_utc_datetime(normalized.get("expires_at"))
     return ImpersonationSession(**normalized)
 
 

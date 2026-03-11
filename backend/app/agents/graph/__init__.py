@@ -1,17 +1,21 @@
-"""
-LangGraph Components for Question Generator
+"""Lightweight graph package exports."""
 
-This module contains the graph definition, state schema, nodes, and edges
-for the Question Generator ReAct agent.
-"""
-
-from app.agents.graph.state import AgentState, GenerationConfig, ThinkingStep
-from app.agents.graph.question_generator_graph import QuestionGeneratorAgent
+from importlib import import_module
 
 __all__ = [
     "AgentState",
-    "GenerationConfig", 
+    "GenerationConfig",
     "ThinkingStep",
     "QuestionGeneratorAgent",
 ]
 
+
+def __getattr__(name: str):
+    if name in {"AgentState", "GenerationConfig", "ThinkingStep"}:
+        module = import_module("app.agents.graph.state")
+        return getattr(module, name)
+    if name == "QuestionGeneratorAgent":
+        return import_module(
+            "app.agents.graph.question_generator_graph"
+        ).QuestionGeneratorAgent
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

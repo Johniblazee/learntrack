@@ -29,8 +29,6 @@ from app.models.rag import (
 )
 from app.models.file import EmbeddingStatus, FileStatus
 from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
-from app.agents.rag.graph import AgenticRAGAgent
-from app.agents.rag.state import RAGConfig
 from app.rag.services.rag_service import RAGService
 from app.services.web_search_service import WebSearchService
 from app.ai.services.ai_manager import get_ai_manager_for_tenant, AIManager
@@ -45,6 +43,37 @@ from app.utils.enums import (
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+def _build_basic_rag_context(
+    documents: List[Any],
+) -> tuple[str, List[Dict[str, Any]]]:
+    rag_context_parts: List[str] = []
+    source_chunks: List[Dict[str, Any]] = []
+
+    for index, doc in enumerate(documents):
+        metadata = getattr(doc, "metadata", {}) or {}
+        content = str(getattr(doc, "page_content", "") or "").strip()
+        if not content:
+            continue
+
+        rag_context_parts.append(content)
+        source_chunks.append(
+            {
+                "file_id": metadata.get("file_id") or metadata.get("filename") or "",
+                "file_name": metadata.get("filename")
+                or metadata.get("source")
+                or "Unknown",
+                "chunk_index": metadata.get("chunk_index", index),
+                "page_number": metadata.get("page") or metadata.get("page_number"),
+                "score": metadata.get("similarity_score")
+                or metadata.get("score")
+                or 0.0,
+                "metadata": metadata,
+            }
+        )
+
+    return "\n\n".join(rag_context_parts), source_chunks
 
 
 @router.post("/generate", response_model=RAGGenerationResponse)
@@ -111,62 +140,77 @@ async def generate_questions_with_rag(
                 detail=f"Model {model_name} is not enabled for provider {ai_provider}",
             )
 
-        # Resolve RAG context using AgenticRAGAgent
+        # Resolve RAG context using AgenticRAGAgent when available,
+        # otherwise fall back to direct vector retrieval.
         rag_context = ""
         source_chunks = []
         if body.document_ids:
-            manager = await get_ai_manager_for_tenant(current_user.tutor_id)
-            rag_llm_provider = None
+            rag_query = body.web_search_query or f"{body.subject} {body.topic}"
             try:
-                rag_llm_provider = manager.get_provider(ai_provider)
-            except Exception:
+                from app.agents.rag.graph import AgenticRAGAgent
+                from app.agents.rag.state import RAGConfig
+
+                manager = await get_ai_manager_for_tenant(current_user.tutor_id)
                 rag_llm_provider = None
+                try:
+                    rag_llm_provider = manager.get_provider(ai_provider)
+                except Exception:
+                    rag_llm_provider = None
 
-            if not rag_llm_provider or not hasattr(rag_llm_provider, "llm"):
-                rag_llm_provider = next(
-                    (
-                        provider
-                        for provider in manager.providers.values()
-                        if hasattr(provider, "llm")
-                    ),
-                    None,
+                if not rag_llm_provider or not hasattr(rag_llm_provider, "llm"):
+                    rag_llm_provider = next(
+                        (
+                            provider
+                            for provider in manager.providers.values()
+                            if hasattr(provider, "llm")
+                        ),
+                        None,
+                    )
+
+                if rag_llm_provider and hasattr(rag_llm_provider, "llm"):
+                    rag_agent = AgenticRAGAgent(
+                        llm=rag_llm_provider.llm, rag_service=rag_service
+                    )
+                    rag_config = RAGConfig(
+                        top_k=body.context_chunks,
+                        generate_answer=False,
+                        document_ids=body.document_ids,
+                    )
+                    rag_session = await rag_agent.query(
+                        query=rag_query,
+                        user_id=current_user.clerk_id,
+                        tenant_id=current_user.tutor_id,
+                        config=rag_config,
+                        document_ids=body.document_ids,
+                        generate_answer=False,
+                    )
+
+                    for doc in rag_session.sources:
+                        rag_context += doc.content + "\n\n"
+                        source_chunks.append(
+                            {
+                                "file_id": doc.source_file_id,
+                                "file_name": doc.source_file,
+                                "chunk_index": doc.chunk_index,
+                                "page_number": doc.page_number,
+                                "score": doc.relevance_score,
+                                "metadata": doc.metadata,
+                            }
+                        )
+                else:
+                    raise RuntimeError("No LangChain-compatible provider available")
+            except Exception as rag_import_error:
+                logger.warning(
+                    "Falling back to direct RAG retrieval",
+                    error=str(rag_import_error),
                 )
-
-            if not rag_llm_provider or not hasattr(rag_llm_provider, "llm"):
-                raise HTTPException(
-                    status_code=500,
-                    detail="No LangChain-compatible provider available for RAG",
+                documents = await rag_service.retrieve_context(
+                    query=rag_query,
+                    tutor_id=current_user.tutor_id,
+                    document_ids=body.document_ids,
+                    top_k=body.context_chunks,
                 )
-
-            rag_agent = AgenticRAGAgent(
-                llm=rag_llm_provider.llm, rag_service=rag_service
-            )
-            rag_config = RAGConfig(
-                top_k=body.context_chunks,
-                generate_answer=False,
-                document_ids=body.document_ids,
-            )
-            rag_session = await rag_agent.query(
-                query=body.web_search_query or f"{body.subject} {body.topic}",
-                user_id=current_user.clerk_id,
-                tenant_id=current_user.tutor_id,
-                config=rag_config,
-                document_ids=body.document_ids,
-                generate_answer=False,
-            )
-
-            for doc in rag_session.sources:
-                rag_context += doc.content + "\n\n"
-                source_chunks.append(
-                    {
-                        "file_id": doc.source_file_id,
-                        "file_name": doc.source_file,
-                        "chunk_index": doc.chunk_index,
-                        "page_number": doc.page_number,
-                        "score": doc.relevance_score,
-                        "metadata": doc.metadata,
-                    }
-                )
+                rag_context, source_chunks = _build_basic_rag_context(documents)
 
         # Get web search context if enabled
         web_results = []

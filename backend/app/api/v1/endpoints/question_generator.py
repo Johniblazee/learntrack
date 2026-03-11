@@ -26,7 +26,6 @@ from app.agents.graph.state import (
     GeneratedQuestion,
     SourceCitation,
 )
-from app.agents.graph.question_generator_graph import QuestionGeneratorAgent
 from app.agents.streaming.sse_handler import SSEHandler
 from app.ai.services.ai_manager import get_tenant_ai_manager
 from app.services.tenant_ai_config_service import TenantAIConfigService
@@ -50,6 +49,22 @@ from app.utils.enums import (
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+def _get_question_generator_agent_class():
+    try:
+        from app.agents.graph.question_generator_graph import QuestionGeneratorAgent
+
+        return QuestionGeneratorAgent
+    except Exception as exc:
+        logger.warning(
+            "Question generator agent unavailable",
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Advanced question generation is currently unavailable on this server.",
+        )
 
 
 async def get_session_service(db=Depends(get_database)):
@@ -519,7 +534,8 @@ async def generate_questions(
 
         # Create agent with web search service for fallback
         web_search_service = WebSearchService(database)
-        agent = QuestionGeneratorAgent(
+        question_generator_agent_class = _get_question_generator_agent_class()
+        agent = question_generator_agent_class(
             llm=llm, rag_service=rag_service, web_search_service=web_search_service
         )
 
@@ -787,7 +803,8 @@ async def edit_question(
         provider = ai_manager.get_provider(ai_provider)
         llm = provider.llm
 
-        agent = QuestionGeneratorAgent(llm=llm, rag_service=rag_service)
+        question_generator_agent_class = _get_question_generator_agent_class()
+        agent = question_generator_agent_class(llm=llm, rag_service=rag_service)
         existing_questions = [
             _stored_to_generated_question(stored_q) for stored_q in session.questions
         ]

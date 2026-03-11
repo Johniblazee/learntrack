@@ -9,7 +9,15 @@ from typing import TypedDict, List, Optional, Dict, Any, Literal, Annotated
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field
-from langgraph.graph.message import add_messages
+
+try:
+    from langgraph.graph.message import add_messages
+except Exception:
+
+    def add_messages(existing: List[Any], new: List[Any]) -> List[Any]:
+        existing_messages = list(existing or [])
+        new_messages = list(new or [])
+        return [*existing_messages, *new_messages]
 
 
 class QuestionType(str, Enum):
