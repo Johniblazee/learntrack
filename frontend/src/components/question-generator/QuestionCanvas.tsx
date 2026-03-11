@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { AgentStatusBar } from './AgentStatusBar'
 import { QuestionCard } from './QuestionCard'
-import { FileQuestion, Download, CheckCircle } from 'lucide-react'
+import { FileQuestion, Download, CheckCircle, BookCheck } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-state'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
@@ -34,9 +34,11 @@ interface QuestionCanvasProps {
   // Actions
   onApprove?: (id: string) => void
   onReject?: (id: string) => void
+  onEdit?: (id: string, updates: Partial<GeneratedQuestion>) => void
   onRequestRegenerate?: (id: string, defaultMessage: string) => void
   onDelete?: (id: string) => void
   onApproveAll?: () => void
+  onPublishApproved?: () => void
   onExport?: () => void
 }
 
@@ -102,18 +104,28 @@ export function QuestionCanvas({
   streamingContent,
   onApprove,
   onReject,
+  onEdit,
   onRequestRegenerate,
   onDelete,
   onApproveAll,
+  onPublishApproved,
   onExport,
 }: QuestionCanvasProps) {
   const pendingCount = questions.filter(q => q.status === 'pending' || !q.status).length
   const approvedCount = questions.filter(q => q.status === 'approved').length
+  const publishedCount = questions.filter(q => Boolean(q.published_question_id)).length
+  const publishReadyCount = questions.filter(
+    q => q.status === 'approved' && !q.published_question_id,
+  ).length
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom when new questions arrive or streaming
   useEffect(() => {
-    if (scrollRef.current && (isGenerating || questions.length > 0)) {
+    if (
+      scrollRef.current
+      && typeof scrollRef.current.scrollTo === 'function'
+      && (isGenerating || questions.length > 0)
+    ) {
       scrollRef.current.scrollTo({
         top: scrollRef.current.scrollHeight,
         behavior: 'smooth'
@@ -153,6 +165,7 @@ export function QuestionCanvas({
                       question={question}
                       index={index}
                       isStreaming={false}
+                      onEdit={onEdit}
                       onApprove={onApprove}
                       onReject={onReject}
                       onRequestRegenerate={onRequestRegenerate}
@@ -243,12 +256,19 @@ export function QuestionCanvas({
               <span>{questions.length} questions</span>
               <span className="text-yellow-600">{pendingCount} pending</span>
               <span className="text-green-600">{approvedCount} approved</span>
+              <span className="text-blue-600">{publishedCount} published</span>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={onExport}>
                 <Download className="h-4 w-4 mr-2" />
                 Export
               </Button>
+              {publishReadyCount > 0 && (
+                <Button variant="outline" size="sm" onClick={onPublishApproved}>
+                  <BookCheck className="h-4 w-4 mr-2" />
+                  Publish Approved ({publishReadyCount})
+                </Button>
+              )}
               {pendingCount > 0 && (
                 <Button size="sm" onClick={onApproveAll}>
                   <CheckCircle className="h-4 w-4 mr-2" />

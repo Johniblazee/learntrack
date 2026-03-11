@@ -75,6 +75,9 @@ export function OpenCanvasGenerator() {
   const [streamingContent, setStreamingContent] = useState('')
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [generationProgressCurrent, setGenerationProgressCurrent] = useState(0)
+  const [currentAction, setCurrentAction] = useState<string | null>(null)
+  const [thinkingSteps, setThinkingSteps] = useState<string[]>([])
+  const [foundSources, setFoundSources] = useState<Array<{ id: string; title: string; excerpt: string }>>([])
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -173,7 +176,7 @@ export function OpenCanvasGenerator() {
     fetchSessions()
   }, [fetchSessions])
 
-  const getErrorDetail = async (response: Response, fallback: string): Promise<string> => {
+  const getErrorDetail = useCallback(async (response: Response, fallback: string): Promise<string> => {
     try {
       const data = await response.json()
       if (typeof data?.detail === 'string' && data.detail.trim()) {
@@ -186,7 +189,60 @@ export function OpenCanvasGenerator() {
       // ignore JSON parsing errors
     }
     return fallback
-  }
+  }, [])
+
+  const resetAgentStatus = useCallback(() => {
+    setCurrentAction(null)
+    setThinkingSteps([])
+    setFoundSources([])
+  }, [])
+
+  const mapSessionQuestion = useCallback(
+    (question: Partial<GeneratedQuestion>, sessionId?: string | null): GeneratedQuestion => {
+      const normalizedStatus =
+        question.status === 'edited' ? 'pending' : (question.status || 'pending')
+
+      return {
+        ...question,
+        question_id: String(question.question_id || ''),
+        session_id: question.session_id || sessionId || undefined,
+        type: String(question.type || 'multiple-choice'),
+        difficulty: String(question.difficulty || 'medium'),
+        question_text: String(question.question_text || ''),
+        correct_answer: String(question.correct_answer || ''),
+        explanation: question.explanation || '',
+        options: Array.isArray(question.options) ? question.options : undefined,
+        status: normalizedStatus as GeneratedQuestion['status'],
+        versions: question.versions,
+        currentVersionIndex: question.currentVersionIndex,
+        review_comments: question.review_comments,
+        rejection_reason: question.rejection_reason,
+        quality_score: question.quality_score,
+        source_citations: question.source_citations,
+        published_question_id: question.published_question_id,
+        published_at: question.published_at,
+      }
+    },
+    [],
+  )
+
+  const appendThinkingStep = useCallback((nextStep: string) => {
+    setThinkingSteps((previous) => {
+      if (!nextStep.trim() || previous[previous.length - 1] === nextStep) {
+        return previous
+      }
+      return [...previous.slice(-7), nextStep]
+    })
+  }, [])
+
+  const appendFoundSource = useCallback((nextSource: { id: string; title: string; excerpt: string }) => {
+    setFoundSources((previous) => {
+      if (previous.some((source) => source.id === nextSource.id && source.title === nextSource.title)) {
+        return previous
+      }
+      return [...previous, nextSource]
+    })
+  }, [])
 
   const mapPersistedChatMessages = useCallback((messages: any[] = []): ChatMessage[] => {
     return messages.map((message: any) => ({
@@ -249,8 +305,11 @@ export function OpenCanvasGenerator() {
     }
 
     setIsGenerating(true)
+    setQuestions([])
     setStreamingContent('')
     setGenerationProgressCurrent(0)
+    resetAgentStatus()
+    setCurrentAction('Preparing generation...')
 
     try {
       const token = await getToken()
@@ -312,22 +371,42 @@ export function OpenCanvasGenerator() {
           if (data.event_type === 'session:created' && data.session_id) {
             sessionId = data.session_id
             setCurrentSessionId(sessionId)
+          } else if (data.event_type === 'generation:start') {
+            setCurrentAction('Generation started')
           } else if (data.event_type === 'agent:thinking' && data.step) {
             assistantContent += `💭 ${data.step}\n`
+            appendThinkingStep(data.step)
+            setCurrentAction(data.step)
           } else if (data.event_type === 'agent:action' && data.step) {
             assistantContent += `⚡ ${data.step}\n`
+            appendThinkingStep(data.step)
+            setCurrentAction(data.step)
+          } else if (data.event_type === 'agent:observation' && data.step) {
+            appendThinkingStep(data.step)
+            setCurrentAction(data.step)
+          } else if (data.event_type === 'source:found' && data.source_id && data.source_title) {
+            appendFoundSource({
+              id: data.source_id,
+              title: data.source_title,
+              excerpt: data.source_excerpt || '',
+            })
           } else if (data.event_type === 'generation:chunk' && data.content) {
             setStreamingContent(prev => prev + data.content)
           } else if (data.event_type === 'generation:question_complete' && data.question_data) {
-            const question = {
-              ...data.question_data,
-              session_id: sessionId || undefined,
-              status: 'pending' as const,
-            }
+            const question = mapSessionQuestion(
+              {
+                ...data.question_data,
+                session_id: sessionId || undefined,
+                status: 'pending',
+              },
+              sessionId,
+            )
             appendedCount += 1
             setGenerationProgressCurrent(appendedCount)
             setQuestions(prev => [...prev, question])
             setStreamingContent('')
+          } else if (data.event_type === 'done') {
+            setCurrentAction('Generation complete')
           }
 
           setChatMessages(prev => {
@@ -377,6 +456,11 @@ export function OpenCanvasGenerator() {
     currentSessionId,
     fetchSessions,
     setGenerationProgressCurrent,
+    appendFoundSource,
+    appendThinkingStep,
+    getErrorDetail,
+    mapSessionQuestion,
+    resetAgentStatus,
   ])
 
   // Handle chat message (for refining/updating questions)
@@ -411,6 +495,8 @@ export function OpenCanvasGenerator() {
 
         setIsGenerating(true)
         setStreamingContent('')
+        resetAgentStatus()
+        setCurrentAction('Updating selected question...')
 
         const response = await fetch(`${API_BASE_URL}/question-generator/edit?session_id=${sessionIdForEdit}`, {
           method: 'POST',
@@ -456,10 +542,23 @@ export function OpenCanvasGenerator() {
 
               if (data.event_type === 'agent:thinking' && data.step) {
                 assistantContent += `💭 ${data.step}\n`
+                appendThinkingStep(data.step)
+                setCurrentAction(data.step)
               } else if (data.event_type === 'agent:action' && data.step) {
                 assistantContent += `⚡ ${data.step}\n`
+                appendThinkingStep(data.step)
+                setCurrentAction(data.step)
+              } else if (data.event_type === 'agent:observation' && data.step) {
+                appendThinkingStep(data.step)
+                setCurrentAction(data.step)
+              } else if (data.event_type === 'source:found' && data.source_id && data.source_title) {
+                appendFoundSource({
+                  id: data.source_id,
+                  title: data.source_title,
+                  excerpt: data.source_excerpt || '',
+                })
               } else if (data.event_type === 'generation:question_complete' && data.question_data) {
-                const editedQuestion = data.question_data
+                const editedQuestion = mapSessionQuestion(data.question_data, sessionIdForEdit)
                 updatedQuestion = true
 
                 setQuestions(prev => {
@@ -472,6 +571,10 @@ export function OpenCanvasGenerator() {
                     ...previousQuestion,
                     ...editedQuestion,
                     status: 'pending' as const,
+                    review_comments: null,
+                    rejection_reason: null,
+                    published_question_id: null,
+                    published_at: null,
                     versions,
                     currentVersionIndex: versions.length,
                   }
@@ -619,6 +722,11 @@ export function OpenCanvasGenerator() {
     hasGenerateIntent,
     settings,
     fetchSessions,
+    appendFoundSource,
+    appendThinkingStep,
+    getErrorDetail,
+    mapSessionQuestion,
+    resetAgentStatus,
   ])
 
   // Handle question actions
@@ -631,7 +739,9 @@ export function OpenCanvasGenerator() {
     }
 
     setQuestions(prev => prev.map(q =>
-      q.question_id === questionId ? { ...q, status: 'approved' } : q
+      q.question_id === questionId
+        ? { ...q, status: 'approved', rejection_reason: null }
+        : q
     ))
 
     try {
@@ -648,7 +758,7 @@ export function OpenCanvasGenerator() {
         throw new Error('approve failed')
       }
 
-      toast.success('Question approved')
+      toast.success('Question approved. Publish it when you are ready to add it to the question bank.')
       await fetchSessions()
     } catch (error) {
       setQuestions(prev => prev.map(q =>
@@ -668,7 +778,9 @@ export function OpenCanvasGenerator() {
     }
 
     setQuestions(prev => prev.map(q =>
-      q.question_id === questionId ? { ...q, status: 'rejected' } : q
+      q.question_id === questionId
+        ? { ...q, status: 'rejected', published_question_id: null, published_at: null }
+        : q
     ))
 
     try {
@@ -696,23 +808,184 @@ export function OpenCanvasGenerator() {
     }
   }, [questions, currentSessionId, getToken, fetchSessions])
 
-  const handleDelete = useCallback((questionId: string) => {
-    setQuestions(prev => prev.filter(q => q.question_id !== questionId))
+  const handleInlineEdit = useCallback(async (questionId: string, updates: Partial<GeneratedQuestion>) => {
+    const target = questions.find((question) => question.question_id === questionId)
+    const sessionId = target?.session_id || currentSessionId
+    if (!target || !sessionId) {
+      toast.error('Unable to update question: missing session context')
+      return
+    }
+
+    const previousQuestions = questions
+    const nextQuestion = mapSessionQuestion(
+      {
+        ...target,
+        ...updates,
+        status: 'pending',
+        review_comments: null,
+        rejection_reason: null,
+        published_question_id: null,
+        published_at: null,
+      },
+      sessionId,
+    )
+
+    setQuestions((previous) =>
+      previous.map((question) =>
+        question.question_id === questionId ? nextQuestion : question,
+      ),
+    )
+
+    try {
+      const token = await getToken()
+      const response = await fetch(
+        `${API_BASE_URL}/question-generator/sessions/${sessionId}/questions/${questionId}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            question_text: updates.question_text,
+            options: updates.options,
+            correct_answer: updates.correct_answer,
+            explanation: updates.explanation,
+          }),
+        },
+      )
+
+      if (!response.ok) {
+        throw new Error(await getErrorDetail(response, 'Failed to update question'))
+      }
+
+      toast.success('Question updated and moved back into review.')
+      await fetchSessions()
+    } catch (error) {
+      setQuestions(previousQuestions)
+      console.error('Inline edit error:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to update question')
+    }
+  }, [questions, currentSessionId, mapSessionQuestion, getToken, fetchSessions, getErrorDetail])
+
+  const handleDelete = useCallback(async (questionId: string) => {
+    const target = questions.find((question) => question.question_id === questionId)
+    const sessionId = target?.session_id || currentSessionId
+    if (!sessionId) {
+      toast.error('Unable to delete question: missing session context')
+      return
+    }
+
+    const previousQuestions = questions
+    setQuestions((previous) => previous.filter((question) => question.question_id !== questionId))
     if (selectedQuestionId === questionId) {
       setSelectedQuestionId(null)
     }
-    toast.success('Question deleted')
-  }, [selectedQuestionId])
+
+    try {
+      const token = await getToken()
+      const response = await fetch(
+        `${API_BASE_URL}/question-generator/sessions/${sessionId}/questions/${questionId}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      )
+
+      if (!response.ok) {
+        throw new Error(await getErrorDetail(response, 'Failed to delete question'))
+      }
+
+      toast.success('Question deleted')
+      await fetchSessions()
+    } catch (error) {
+      setQuestions(previousQuestions)
+      console.error('Delete question error:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to delete question')
+    }
+  }, [questions, currentSessionId, selectedQuestionId, getToken, fetchSessions, getErrorDetail])
+
+  const handlePublishApproved = useCallback(async () => {
+    if (!currentSessionId) {
+      toast.error('Open a generation session before publishing')
+      return
+    }
+
+    const publishReadyQuestions = questions.filter(
+      (question) => question.status === 'approved' && !question.published_question_id,
+    )
+
+    if (publishReadyQuestions.length === 0) {
+      toast.error('No approved questions are ready to publish')
+      return
+    }
+
+    try {
+      const token = await getToken()
+      const response = await fetch(
+        `${API_BASE_URL}/question-generator/sessions/${currentSessionId}/save-to-question-bank`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            question_ids: publishReadyQuestions.map((question) => question.question_id),
+          }),
+        },
+      )
+
+      if (!response.ok) {
+        throw new Error(await getErrorDetail(response, 'Failed to publish approved questions'))
+      }
+
+      const data = await response.json() as {
+        published_count?: number
+        published_items?: Record<string, string>
+      }
+      const publishedAt = new Date().toISOString()
+
+      setQuestions((previous) =>
+        previous.map((question) => {
+          const publishedQuestionId = data.published_items?.[question.question_id]
+          if (!publishedQuestionId) {
+            return question
+          }
+
+          return {
+            ...question,
+            published_question_id: publishedQuestionId,
+            published_at: publishedAt,
+          }
+        }),
+      )
+
+      toast.success(
+        data.published_count && data.published_count > 0
+          ? `Published ${data.published_count} question(s) to the question bank.`
+          : 'Published approved questions to the question bank.',
+      )
+      await fetchSessions()
+    } catch (error) {
+      console.error('Publish approved error:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to publish approved questions')
+    }
+  }, [currentSessionId, questions, getToken, fetchSessions, getErrorDetail])
 
   const handleApproveAll = useCallback(async () => {
-    const pendingQuestions = questions.filter(q => (q.status ?? 'pending') !== 'approved')
+    const pendingQuestions = questions.filter(q => (q.status ?? 'pending') === 'pending')
     if (pendingQuestions.length === 0) {
       toast.success('All questions are already approved')
       return
     }
 
     const snapshot = questions
-    setQuestions(prev => prev.map(q => ({ ...q, status: 'approved' })))
+    setQuestions(prev => prev.map(q => (
+      (q.status ?? 'pending') === 'pending'
+        ? { ...q, status: 'approved', rejection_reason: null }
+        : q
+    )))
 
     try {
       const token = await getToken()
@@ -769,8 +1042,9 @@ export function OpenCanvasGenerator() {
     setStreamingContent('')
     setGenerationProgressCurrent(0)
     setSelectedQuestionId(null)
+    resetAgentStatus()
     toast.success('Started new conversation')
-  }, [currentSessionId, questions, chatMessages])
+  }, [currentSessionId, questions, chatMessages, resetAgentStatus])
 
   const handleDeleteSessions = useCallback(async (sessionIds: string[]) => {
     const uniqueSessionIds = Array.from(new Set(sessionIds.filter(Boolean)))
@@ -819,6 +1093,7 @@ export function OpenCanvasGenerator() {
           setGenerationProgressCurrent(0)
           setChatMessages([])
           setSelectedQuestionId(null)
+          resetAgentStatus()
         }
       }
 
@@ -843,7 +1118,7 @@ export function OpenCanvasGenerator() {
     } finally {
       setIsDeletingSessions(false)
     }
-  }, [currentSessionId, fetchSessions, getToken])
+  }, [currentSessionId, fetchSessions, getToken, resetAgentStatus])
 
   // Handle delete conversation
   const handleDeleteConversation = useCallback(async () => {
@@ -891,7 +1166,7 @@ export function OpenCanvasGenerator() {
         const data = await response.json()
 
         const loadedQuestions: GeneratedQuestion[] = Array.isArray(data.questions)
-          ? data.questions
+          ? data.questions.map((question: GeneratedQuestion) => mapSessionQuestion(question, sessionId))
           : cachedSession?.questions || []
 
         const loadedChatMessages: ChatMessage[] = Array.isArray(data.chat_messages)
@@ -907,6 +1182,15 @@ export function OpenCanvasGenerator() {
 
         setQuestions(loadedQuestions)
         setChatMessages(loadedChatMessages)
+        setThinkingSteps(
+          Array.isArray(data.thinking_steps)
+            ? data.thinking_steps
+                .map((step: { content?: string }) => step.content)
+                .filter((step: string | undefined): step is string => Boolean(step))
+            : [],
+        )
+        setCurrentAction(data.status === 'completed' ? 'Generation complete' : null)
+        setFoundSources([])
 
         setSessionSnapshots((previous) => ({
           ...previous,
@@ -929,6 +1213,7 @@ export function OpenCanvasGenerator() {
     questions,
     chatMessages,
     getToken,
+    mapSessionQuestion,
     mapPersistedChatMessages,
     sessionSnapshots,
   ])
@@ -1003,6 +1288,15 @@ export function OpenCanvasGenerator() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => void runGeneration()}
+            disabled={isGenerating || isChatResponding}
+            className="gap-2"
+          >
+            <Sparkles className="h-4 w-4" />
+            Generate Drafts
+          </Button>
 
           <Button
             variant="outline"
@@ -1068,19 +1362,21 @@ export function OpenCanvasGenerator() {
           ) : (
             <QuestionCanvas
               isGenerating={isGenerating}
-              currentAction={isGenerating ? 'Generating questions...' : null}
-              thinkingSteps={[]}
+              currentAction={currentAction}
+              thinkingSteps={thinkingSteps}
               progress={{
                 current: isGenerating ? generationProgressCurrent : questions.length,
                 total: settings.questionCount,
               }}
-              foundSources={[]}
+              foundSources={foundSources}
               questions={questions}
               streamingContent={streamingContent}
+              onEdit={handleInlineEdit}
               onApprove={handleApprove}
               onReject={handleReject}
               onDelete={handleDelete}
               onApproveAll={handleApproveAll}
+              onPublishApproved={handlePublishApproved}
               onExport={handleExport}
               onRequestRegenerate={handleRequestRegenerate}
             />

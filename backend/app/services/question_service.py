@@ -82,11 +82,10 @@ class QuestionService:
         """Create a new question"""
         try:
             question_dict = question_data.dict()
-            if extra_fields:
-                question_dict.update(extra_fields)
+            now = datetime.now(timezone.utc)
             question_dict["tutor_id"] = tutor_id
-            question_dict["created_at"] = datetime.now(timezone.utc)
-            question_dict["updated_at"] = datetime.now(timezone.utc)
+            question_dict["created_at"] = now
+            question_dict["updated_at"] = now
             question_dict["times_used"] = 0
             question_dict["ai_generated"] = ai_generated
 
@@ -96,6 +95,9 @@ class QuestionService:
                 question_dict["generation_id"] = generation_id
             else:
                 question_dict["status"] = QuestionStatus.ACTIVE.value
+
+            if extra_fields:
+                question_dict.update(extra_fields)
 
             result = await self.collection.insert_one(question_dict)
             question_dict["_id"] = str(result.inserted_id)

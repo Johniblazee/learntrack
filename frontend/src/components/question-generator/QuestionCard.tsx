@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { MathText } from '@/components/ui/math-text'
-import { ChevronLeft, ChevronRight, Check, X, Trash2, RefreshCw, Edit3 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Check, X, Trash2, RefreshCw, Edit3, BookCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface QuestionCardProps {
@@ -20,7 +20,9 @@ interface QuestionCardProps {
     options?: string[]
     correct_answer: string
     explanation?: string
-    status?: 'pending' | 'approved' | 'rejected'
+    status?: 'pending' | 'approved' | 'rejected' | 'edited'
+    published_question_id?: string | null
+    published_at?: string | null
     versions?: any[]
     currentVersionIndex?: number
   }
@@ -240,10 +242,16 @@ export function QuestionCard({
                     <Check className="h-4 w-4" />
                   </div>
                 )}
-                {question.status === 'rejected' && (
+            {question.status === 'rejected' && (
                   <div className="flex items-center gap-1 text-red-400">
                     <X className="h-4 w-4" />
                   </div>
+                )}
+                {question.published_question_id && (
+                  <Badge variant="secondary" className="h-6 gap-1 px-2 text-[10px] uppercase tracking-wide">
+                    <BookCheck className="h-3 w-3" />
+                    Published
+                  </Badge>
                 )}
 
                 {/* Edit Button */}

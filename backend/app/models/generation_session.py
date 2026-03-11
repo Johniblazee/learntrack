@@ -41,9 +41,16 @@ class StoredQuestion(BaseModel):
     correct_answer: str
     explanation: str
     source_citations: List[Dict[str, Any]] = Field(default_factory=list)
+    source_ids: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     quality_score: Optional[float] = None
     status: QuestionStatus = QuestionStatus.PENDING
+    review_comments: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    published_question_id: Optional[str] = None
+    published_at: Optional[datetime] = None
     edit_history: List[Dict[str, Any]] = Field(default_factory=list)
 
 

@@ -40,6 +40,9 @@ interface Question {
   reviewedBy?: string
   reviewedAt?: string
   reviewComments?: string
+  rejectionReason?: string
+  publishedQuestionId?: string
+  publishedAt?: string
   rating?: number
   usageCount: number
   successRate: number
@@ -88,6 +91,9 @@ const mapQuestionFromApi = (q: any): Question => ({
   reviewedBy: q.reviewed_by,
   reviewedAt: q.reviewed_at,
   reviewComments: q.review_comments,
+  rejectionReason: q.rejection_reason,
+  publishedQuestionId: q.published_question_id,
+  publishedAt: q.published_at,
   rating: q.rating,
   usageCount: Number(q.usage_count || 0),
   successRate: Number(q.success_rate || 0),
@@ -282,7 +288,7 @@ export default function QuestionReviewer() {
 
       if (response.ok) {
         toast.success('Question approved', {
-          description: 'The question has been approved and added to your question bank'
+          description: 'The question is approved and ready to publish to your question bank.'
         })
 
         if (question) {
@@ -386,11 +392,17 @@ export default function QuestionReviewer() {
 
   const handleRequestRevision = async (questionId: string, notes: string) => {
     try {
+      const question = questions.find(q => q.id === questionId || q.question_id === questionId)
+      if (!question?.session_id) {
+        toast.error('Session ID not found for this question')
+        return
+      }
+
       const token = await getToken()
       const response = await fetch(
-        `${API_BASE_URL}/questions/${questionId}/request-revision?notes=${encodeURIComponent(notes)}`,
+        `${API_BASE_URL}/question-generator/sessions/${question.session_id}/questions/${questionId}/request-revision?notes=${encodeURIComponent(notes)}`,
         {
-          method: 'PUT',
+          method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -399,14 +411,84 @@ export default function QuestionReviewer() {
       )
 
       if (response.ok) {
-        console.log('Revision requested for question:', questionId)
-        // Optionally refresh the list
-        fetchPendingQuestions()
+        setQuestions((previous) =>
+          previous.map((item) =>
+            item.id === questionId
+              ? {
+                  ...item,
+                  status: 'pending',
+                  reviewComments: notes,
+                }
+              : item,
+          ),
+        )
+        toast.success('Revision requested', {
+          description: 'The draft stays in the review queue with your notes attached.',
+        })
       } else {
-        console.error('Failed to request revision')
+        throw new Error('Failed to request revision')
       }
     } catch (error) {
       console.error('Error requesting revision:', error)
+      toast.error('Failed to request revision')
+    }
+  }
+
+  const handlePublishApprovedQuestion = async (question: Question) => {
+    if (!question.session_id) {
+      toast.error('Session ID not found for this question')
+      return
+    }
+
+    if (question.publishedQuestionId) {
+      toast.success('This draft has already been published to the question bank.')
+      return
+    }
+
+    try {
+      const token = await getToken()
+      const response = await fetch(
+        `${API_BASE_URL}/question-generator/sessions/${question.session_id}/save-to-question-bank`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ question_ids: [question.id] }),
+        },
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to publish question')
+      }
+
+      const data = await response.json() as { published_items?: Record<string, string> }
+      const publishedQuestionId = data.published_items?.[question.id]
+      const publishedAt = new Date().toISOString()
+
+      if (publishedQuestionId) {
+        setApprovedQuestions((previous) =>
+          previous.map((item) =>
+            item.id === question.id
+              ? {
+                  ...item,
+                  publishedQuestionId,
+                  publishedAt,
+                }
+              : item,
+          ),
+        )
+      }
+
+      toast.success('Question published', {
+        description: 'The approved draft is now available in your question bank.',
+      })
+    } catch (error: any) {
+      console.error('Failed to publish approved question:', error)
+      toast.error('Failed to publish question', {
+        description: error.message || 'Please try again later',
+      })
     }
   }
 
@@ -484,20 +566,36 @@ export default function QuestionReviewer() {
         correctAnswer: editForm.correct_answer.trim(),
         correct_answer: editForm.correct_answer.trim(),
         explanation: editForm.explanation.trim(),
+        status: 'pending',
+        reviewComments: undefined,
+        rejectionReason: undefined,
+        publishedQuestionId: undefined,
+        publishedAt: undefined,
       }
 
-      setQuestions((previous) =>
-        previous.map((question) =>
-          question.id === updatedQuestion.id ? updatedQuestion : question,
-        ),
-      )
+      setQuestions((previous) => {
+        const exists = previous.some((question) => question.id === updatedQuestion.id)
+        if (exists) {
+          return previous.map((question) =>
+            question.id === updatedQuestion.id ? updatedQuestion : question,
+          )
+        }
+        return [updatedQuestion, ...previous]
+      })
       setApprovedQuestions((previous) =>
-        previous.map((question) =>
-          question.id === updatedQuestion.id ? updatedQuestion : question,
-        ),
+        previous.filter((question) => question.id !== updatedQuestion.id),
       )
+      if (editingQuestion.status === 'approved') {
+        setGenerationStats((previous) => {
+          if (!previous) return previous
+          return {
+            ...previous,
+            approved_questions: Math.max(previous.approved_questions - 1, 0),
+          }
+        })
+      }
 
-      toast.success('Question updated successfully')
+      toast.success('Question updated and moved back into the review queue')
       setEditDialogOpen(false)
       setEditingQuestion(null)
     } catch (error: any) {
@@ -824,7 +922,6 @@ export default function QuestionReviewer() {
                       <SelectItem value="pending">Pending</SelectItem>
                       <SelectItem value="approved">Approved</SelectItem>
                       <SelectItem value="rejected">Rejected</SelectItem>
-                      <SelectItem value="needs-revision">Needs Revision</SelectItem>
                     </SelectContent>
                   </Select>
                   <Select value={subjectFilter} onValueChange={setSubjectFilter}>
@@ -1187,7 +1284,7 @@ export default function QuestionReviewer() {
                 Approved Questions ({filteredApprovedQuestions.length})
               </CardTitle>
               <CardDescription className="text-muted-foreground">
-                Questions that have been reviewed and approved for use
+                Approved drafts are ready to publish into the reusable question bank.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-8">
@@ -1222,6 +1319,11 @@ export default function QuestionReviewer() {
                                 Approved
                               </div>
                             </Badge>
+                            {question.publishedQuestionId && (
+                              <Badge className="bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400 border-0">
+                                Published
+                              </Badge>
+                            )}
                             <Badge className={getDifficultyColor(question.difficulty)}>
                               <span className="capitalize">{question.difficulty}</span>
                             </Badge>
@@ -1296,6 +1398,18 @@ export default function QuestionReviewer() {
                                 <MathText className="text-inherit text-sm">{question.correctAnswer}</MathText>
                               </div>
                             </div>
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                                Publish Status
+                              </p>
+                              <p className="text-sm font-medium text-foreground">
+                                {question.publishedQuestionId
+                                  ? question.publishedAt
+                                    ? `Published on ${new Date(question.publishedAt).toLocaleDateString()}`
+                                    : 'Published'
+                                  : 'Ready to publish'}
+                              </p>
+                            </div>
                           </div>
                         </div>
 
@@ -1312,6 +1426,22 @@ export default function QuestionReviewer() {
                             </div>
                           </div>
                         )}
+
+                        <div className="px-6 py-4 bg-muted/20 border-t border-border flex items-center justify-end gap-3">
+                          {!question.publishedQuestionId ? (
+                            <Button
+                              onClick={() => handlePublishApprovedQuestion(question)}
+                              className="bg-primary hover:bg-primary/90"
+                            >
+                              <BookOpen className="w-4 h-4 mr-2" />
+                              Publish to Question Bank
+                            </Button>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              This approved draft is already available in the question bank.
+                            </p>
+                          )}
+                        </div>
                       </CardContent>
                     </Card>
                   ))}

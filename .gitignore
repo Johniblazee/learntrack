@@ -61,6 +61,13 @@ build/*.toml
 # Development scripts and mock data (exclude from commits)
 # Note: Keep test scripts and reports for end-to-end testing
 tests/  
+!backend/tests/
+backend/tests/*
+!backend/tests/test_generation_session_service.py
+!backend/tests/test_question_service.py
+!frontend/src/tests/
+frontend/src/tests/*
+!frontend/src/tests/QuestionCanvas.test.tsx
 test_reports/  
 docs/
 scripts/
@@ -74,3 +81,5 @@ CLAUDE.md
 .claude/
 .ruff_cache
 pencil
+__pycache__/
+*.pyc

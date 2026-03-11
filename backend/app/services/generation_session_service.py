@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import uuid
 import structlog
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import ReturnDocument
 
 from app.models.generation_session import (
     GenerationSessionModel,
@@ -74,6 +75,26 @@ class GenerationSessionService:
 
         return GenerationSessionModel(**doc)
 
+    async def _persist_session(self, session: GenerationSessionModel) -> bool:
+        """Persist a fully materialized session document."""
+        payload = session.model_dump(by_alias=True, exclude_none=True)
+        payload["_id"] = session.id or session.session_id
+
+        result = await self.collection.replace_one(
+            {"_id": session.session_id, "user_id": session.user_id},
+            payload,
+        )
+        return result.matched_count > 0
+
+    @staticmethod
+    def _find_question_index(
+        session: GenerationSessionModel, question_id: str
+    ) -> Optional[int]:
+        for index, question in enumerate(session.questions):
+            if question.question_id == question_id:
+                return index
+        return None
+
     async def update_session(
         self, session_id: str, user_id: str, **updates
     ) -> Optional[GenerationSessionModel]:
@@ -83,7 +104,7 @@ class GenerationSessionService:
         result = await self.collection.find_one_and_update(
             {"_id": session_id, "user_id": user_id},
             {"$set": updates},
-            return_document=True,
+            return_document=ReturnDocument.AFTER,
         )
 
         if not result:
@@ -102,98 +123,197 @@ class GenerationSessionService:
         self, session_id: str, user_id: str, question: StoredQuestion
     ) -> bool:
         """Add a question to a session"""
+        session = await self.get_session(session_id, user_id)
+        if not session:
+            logger.error("Session not found for add_question", session_id=session_id)
+            return False
+
+        question_index = self._find_question_index(session, question.question_id)
+        if question_index is None:
+            session.questions.append(question)
+        else:
+            session.questions[question_index] = question
+
+        session.current_question_index = len(session.questions)
+        session.updated_at = datetime.now(timezone.utc)
+
         logger.info(
             "Adding question to session",
             session_id=session_id,
             user_id=user_id,
             question_id=question.question_id,
         )
-
-        # First verify the session exists
-        existing = await self.collection.find_one({"_id": session_id})
-        if not existing:
-            logger.error("Session not found for add_question", session_id=session_id)
-            return False
-
-        if existing.get("user_id") != user_id:
-            logger.error(
-                "User ID mismatch",
-                session_id=session_id,
-                expected_user_id=existing.get("user_id"),
-                provided_user_id=user_id,
-            )
-            return False
-
-        result = await self.collection.update_one(
-            {"_id": session_id, "user_id": user_id},
-            {
-                "$push": {"questions": question.model_dump()},
-                "$inc": {"current_question_index": 1},
-                "$set": {"updated_at": datetime.now(timezone.utc)},
-            },
-        )
-
-        logger.info(
-            "Add question result",
-            session_id=session_id,
-            matched_count=result.matched_count,
-            modified_count=result.modified_count,
-        )
-
-        return result.modified_count > 0
+        return await self._persist_session(session)
 
     async def append_chat_message(
         self, session_id: str, user_id: str, message: SessionChatMessage
     ) -> bool:
         """Append a chat message to a persisted session transcript."""
-        result = await self.collection.update_one(
-            {"_id": session_id, "user_id": user_id},
-            {
-                "$push": {"chat_messages": message.model_dump()},
-                "$set": {"updated_at": datetime.now(timezone.utc)},
-            },
-        )
-        return result.modified_count > 0
+        session = await self.get_session(session_id, user_id)
+        if not session:
+            return False
+
+        session.chat_messages.append(message)
+        session.updated_at = datetime.now(timezone.utc)
+        return await self._persist_session(session)
 
     async def update_question_status(
-        self, session_id: str, user_id: str, question_id: str, status: QuestionStatus
+        self,
+        session_id: str,
+        user_id: str,
+        question_id: str,
+        status: QuestionStatus,
+        review_comments: Optional[str] = None,
     ) -> bool:
         """Update a question's status"""
-        result = await self.collection.update_one(
-            {
-                "_id": session_id,
-                "user_id": user_id,
-                "questions.question_id": question_id,
-            },
-            {
-                "$set": {
-                    "questions.$.status": status.value,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
+        session = await self.get_session(session_id, user_id)
+        if not session:
+            return False
+
+        question_index = self._find_question_index(session, question_id)
+        if question_index is None:
+            return False
+
+        now = datetime.now(timezone.utc)
+        question = session.questions[question_index]
+        question.status = status
+        question.reviewed_by = user_id
+        question.reviewed_at = now
+
+        if review_comments is not None:
+            question.review_comments = review_comments
+
+        if status == QuestionStatus.APPROVED:
+            question.rejection_reason = None
+        elif status == QuestionStatus.REJECTED:
+            question.rejection_reason = review_comments
+        else:
+            question.rejection_reason = None
+
+        if status != QuestionStatus.APPROVED:
+            question.published_question_id = None
+            question.published_at = None
+
+        session.updated_at = now
+        return await self._persist_session(session)
+
+    async def request_question_revision(
+        self, session_id: str, user_id: str, question_id: str, notes: str
+    ) -> bool:
+        """Keep a draft in review with explicit revision guidance."""
+        return await self.update_question_status(
+            session_id=session_id,
+            user_id=user_id,
+            question_id=question_id,
+            status=QuestionStatus.PENDING,
+            review_comments=notes,
         )
-        return result.modified_count > 0
 
     async def update_question_content(
         self, session_id: str, user_id: str, question_id: str, update_data: dict
     ) -> bool:
         """Update a question's content (text, options, answer, explanation)"""
-        # Build the update fields with the positional operator
-        set_fields = {"updated_at": datetime.now(timezone.utc)}
-        for key, value in update_data.items():
-            set_fields[f"questions.$.{key}"] = value
-        # Also mark as EDITED status
-        set_fields["questions.$.status"] = QuestionStatus.EDITED.value
+        session = await self.get_session(session_id, user_id)
+        if not session:
+            return False
 
-        result = await self.collection.update_one(
+        question_index = self._find_question_index(session, question_id)
+        if question_index is None:
+            return False
+
+        now = datetime.now(timezone.utc)
+        question = session.questions[question_index]
+        question.edit_history.append(
             {
-                "_id": session_id,
-                "user_id": user_id,
-                "questions.question_id": question_id,
-            },
-            {"$set": set_fields},
+                "edited_at": now.isoformat(),
+                "edited_by": user_id,
+                "previous": {
+                    "type": question.type,
+                    "difficulty": question.difficulty,
+                    "blooms_level": question.blooms_level,
+                    "question_text": question.question_text,
+                    "options": question.options,
+                    "correct_answer": question.correct_answer,
+                    "explanation": question.explanation,
+                    "source_citations": question.source_citations,
+                    "source_ids": question.source_ids,
+                    "tags": question.tags,
+                    "quality_score": question.quality_score,
+                    "status": question.status.value,
+                    "review_comments": question.review_comments,
+                    "rejection_reason": question.rejection_reason,
+                    "published_question_id": question.published_question_id,
+                    "published_at": question.published_at.isoformat()
+                    if question.published_at
+                    else None,
+                },
+            }
         )
-        return result.modified_count > 0
+
+        for key, value in update_data.items():
+            setattr(question, key, value)
+
+        question.status = QuestionStatus.PENDING
+        question.review_comments = None
+        question.reviewed_by = None
+        question.reviewed_at = None
+        question.rejection_reason = None
+        question.published_question_id = None
+        question.published_at = None
+
+        session.updated_at = now
+        return await self._persist_session(session)
+
+    async def delete_question(
+        self, session_id: str, user_id: str, question_id: str
+    ) -> bool:
+        """Delete a single generated draft question from a session."""
+        session = await self.get_session(session_id, user_id)
+        if not session:
+            return False
+
+        original_count = len(session.questions)
+        session.questions = [
+            question
+            for question in session.questions
+            if question.question_id != question_id
+        ]
+        if len(session.questions) == original_count:
+            return False
+
+        session.current_question_index = len(session.questions)
+        session.updated_at = datetime.now(timezone.utc)
+        return await self._persist_session(session)
+
+    async def mark_questions_published(
+        self,
+        session_id: str,
+        user_id: str,
+        published_map: Dict[str, str],
+    ) -> bool:
+        """Attach published question ids back onto approved session drafts."""
+        if not published_map:
+            return True
+
+        session = await self.get_session(session_id, user_id)
+        if not session:
+            return False
+
+        now = datetime.now(timezone.utc)
+        updated = False
+        for question in session.questions:
+            published_question_id = published_map.get(question.question_id)
+            if not published_question_id:
+                continue
+            question.published_question_id = published_question_id
+            question.published_at = now
+            updated = True
+
+        if not updated:
+            return False
+
+        session.updated_at = now
+        return await self._persist_session(session)
 
     async def list_sessions(
         self,
@@ -293,7 +413,16 @@ class GenerationSessionService:
                         "options": "$questions.options",
                         "correct_answer": "$questions.correct_answer",
                         "explanation": "$questions.explanation",
+                        "source_citations": "$questions.source_citations",
+                        "tags": "$questions.tags",
+                        "quality_score": "$questions.quality_score",
                         "status": "$questions.status",
+                        "review_comments": "$questions.review_comments",
+                        "reviewed_by": "$questions.reviewed_by",
+                        "reviewed_at": "$questions.reviewed_at",
+                        "rejection_reason": "$questions.rejection_reason",
+                        "published_question_id": "$questions.published_question_id",
+                        "published_at": "$questions.published_at",
                     }
                 },
             ]

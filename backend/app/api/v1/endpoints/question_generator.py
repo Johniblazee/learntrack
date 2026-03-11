@@ -5,6 +5,7 @@ Provides streaming SSE endpoints for question generation using the
 LangGraph ReAct agent architecture.
 """
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
@@ -31,6 +32,7 @@ from app.models.generation_session import SessionStatus, QuestionStatus, StoredQ
 from app.models.generation_session import SessionChatMessage
 from app.models.question import (
     QuestionCreate,
+    QuestionStatus as BankQuestionStatus,
     QuestionType as BankQuestionType,
     QuestionDifficulty as BankQuestionDifficulty,
     QuestionOption,
@@ -96,6 +98,74 @@ def _create_default_ai_manager():
     from app.ai.services.ai_manager import AIManager
 
     return AIManager()
+
+
+async def _resolve_tenant_llm_provider(
+    tenant_id: str,
+    database: AsyncIOMotorDatabase,
+    requested_provider: Optional[str] = None,
+    requested_model: Optional[str] = None,
+):
+    """Resolve and validate the tenant's active LLM provider/model pair."""
+    config_service = _create_tenant_config_service(database)
+    tenant_config = await config_service.get_or_create_default(tenant_id)
+
+    ai_provider = (
+        normalize_provider(requested_provider)
+        if requested_provider
+        else tenant_config.default_provider
+    )
+    model_name = requested_model or tenant_config.default_model
+
+    if ai_provider not in tenant_config.enabled_providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider {ai_provider} is not enabled for this tenant",
+        )
+
+    provider_config = (
+        tenant_config.provider_configs.get(ai_provider)
+        if tenant_config.provider_configs
+        else None
+    )
+    if (
+        provider_config
+        and provider_config.enabled_models
+        and model_name not in provider_config.enabled_models
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {model_name} is not enabled for provider {ai_provider}",
+        )
+
+    ai_manager = await _get_tenant_ai_manager(tenant_id, database)
+    provider = ai_manager.get_provider(ai_provider)
+    if not provider:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider {ai_provider} is not available",
+        )
+
+    provider_any: Any = provider
+
+    if model_name and hasattr(provider_any, "set_model"):
+        try:
+            provider_any.set_model(model_name)
+        except ValueError:
+            logger.warning(
+                "Failed to set requested model, using provider default",
+                provider=ai_provider,
+                model=model_name,
+            )
+
+    llm = getattr(provider_any, "llm", None)
+    if llm is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Provider {ai_provider} has no active model configured",
+        )
+
+    return ai_provider, model_name, llm
 
 
 async def get_session_service(db=Depends(get_database)):
@@ -277,56 +347,12 @@ async def chat_about_question_generation(
 ):
     """Fast chat endpoint for planning requirements before running generation."""
     try:
-        config_service = _create_tenant_config_service(database)
-        tenant_config = await config_service.get_or_create_default(
-            current_user.tutor_id
+        ai_provider, model_name, llm = await _resolve_tenant_llm_provider(
+            tenant_id=current_user.tutor_id,
+            database=database,
+            requested_provider=request.ai_provider,
+            requested_model=request.model_name,
         )
-
-        ai_provider = (
-            normalize_provider(request.ai_provider)
-            if request.ai_provider
-            else tenant_config.default_provider
-        )
-        model_name = request.model_name or tenant_config.default_model
-
-        if ai_provider not in tenant_config.enabled_providers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Provider {ai_provider} is not enabled for this tenant",
-            )
-
-        provider_config = (
-            tenant_config.provider_configs.get(ai_provider)
-            if tenant_config.provider_configs
-            else None
-        )
-        if (
-            provider_config
-            and provider_config.enabled_models
-            and model_name not in provider_config.enabled_models
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Model {model_name} is not enabled for provider {ai_provider}",
-            )
-
-        ai_manager = await _get_tenant_ai_manager(current_user.tutor_id, database)
-        provider = ai_manager.get_provider(ai_provider)
-        if not provider:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Provider {ai_provider} is not available",
-            )
-
-        if model_name and hasattr(provider, "set_model"):
-            try:
-                provider.set_model(model_name)
-            except ValueError:
-                logger.warning(
-                    "Failed to set requested chat model, using provider default",
-                    provider=ai_provider,
-                    model=model_name,
-                )
 
         missing_fields = _get_missing_generation_fields(request)
         ready_to_generate = len(missing_fields) == 0
@@ -398,13 +424,6 @@ async def chat_about_question_generation(
                 messages.append(HumanMessage(content=content))
         messages.append(HumanMessage(content=planning_message))
 
-        llm = getattr(provider, "llm", None)
-        if llm is None:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Provider {ai_provider} has no active model configured",
-            )
-
         llm_response = await llm.ainvoke(messages)
         response_content = llm_response.content
         if isinstance(response_content, list):
@@ -469,8 +488,8 @@ async def generate_questions(
         question_types = request.question_types or ["multiple-choice"]
         config = GenerationConfig(
             question_count=request.question_count,
-            question_types=[normalize_question_type(t) for t in question_types],
-            difficulty=normalize_difficulty(request.difficulty),
+            question_types=[_normalize_graph_question_type(t) for t in question_types],
+            difficulty=_normalize_graph_difficulty(request.difficulty),
             blooms_levels=blooms,
             subject=request.subject,
             topic=request.topic,
@@ -478,8 +497,19 @@ async def generate_questions(
         )
 
         session_config = (
-            config.model_dump() if hasattr(config, "model_dump") else dict(config)
+            config.model_dump(mode="json")
+            if hasattr(config, "model_dump")
+            else dict(config)
         )
+
+        ai_provider, model_name, llm = await _resolve_tenant_llm_provider(
+            tenant_id=current_user.tutor_id,
+            database=database,
+            requested_provider=request.ai_provider,
+            requested_model=request.model_name,
+        )
+        session_config["ai_provider"] = ai_provider
+        session_config["model_name"] = model_name
 
         # Reuse existing planning session when provided, otherwise create new.
         session = None
@@ -496,7 +526,12 @@ async def generate_questions(
                 original_prompt=request.prompt,
                 config=session_config,
                 material_ids=request.material_ids or [],
+                questions=[],
+                current_question_index=0,
+                retrieved_chunks=[],
+                thinking_steps=[],
                 error_message=None,
+                completed_at=None,
             )
             if not session:
                 raise HTTPException(status_code=404, detail="Session not found")
@@ -515,54 +550,6 @@ async def generate_questions(
             _build_session_chat_message("user", request.prompt),
         )
 
-        # Get LLM with tenant-aware configuration
-        config_service = _create_tenant_config_service(database)
-        tenant_config = await config_service.get_or_create_default(
-            current_user.tutor_id
-        )
-
-        # Normalize provider name (handles legacy 'google' -> 'gemini' mapping)
-        ai_provider = (
-            normalize_provider(request.ai_provider)
-            if request.ai_provider
-            else tenant_config.default_provider
-        )
-        model_name = request.model_name or tenant_config.default_model
-
-        if ai_provider not in tenant_config.enabled_providers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Provider {ai_provider} is not enabled for this tenant",
-            )
-
-        provider_config = (
-            tenant_config.provider_configs.get(ai_provider)
-            if tenant_config.provider_configs
-            else None
-        )
-        if (
-            provider_config
-            and provider_config.enabled_models
-            and model_name not in provider_config.enabled_models
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Model {model_name} is not enabled for provider {ai_provider}",
-            )
-
-        ai_manager = await _get_tenant_ai_manager(current_user.tutor_id, database)
-        provider = ai_manager.get_provider(ai_provider)
-
-        # Set specific model if provided
-        if model_name and hasattr(provider, "set_model"):
-            try:
-                provider.set_model(model_name)
-                logger.info("Model set", model=model_name, provider=ai_provider)
-            except ValueError as e:
-                logger.warning("Failed to set model, using default", error=str(e))
-
-        llm = provider.llm
-
         # Create agent with web search service for fallback
         web_search_service = _create_web_search_service(database)
         question_generator_agent_class = _get_question_generator_agent_class()
@@ -575,7 +562,7 @@ async def generate_questions(
 
         # Helpers to normalize enum/string values
         def normalize_question_type_value(
-            val: Optional[str], default: str = "multiple-choice"
+            val: Optional[Any], default: str = "multiple-choice"
         ) -> str:
             if val is None:
                 return default
@@ -583,7 +570,7 @@ async def generate_questions(
             return normalize_question_type(raw).value
 
         def normalize_difficulty_value(
-            val: Optional[str], default: str = "medium"
+            val: Optional[Any], default: str = "medium"
         ) -> str:
             if val is None:
                 return default
@@ -602,7 +589,7 @@ async def generate_questions(
                 q_difficulty = normalize_difficulty_value(
                     question_data.get("difficulty"), "medium"
                 )
-                q_blooms = question_data.get("blooms_level")
+                q_blooms: Any = question_data.get("blooms_level")
                 if hasattr(q_blooms, "value"):
                     q_blooms = q_blooms.value
                 if not q_blooms:
@@ -697,10 +684,20 @@ async def generate_questions(
 
                 # Questions are now saved via callback as they're generated
                 # Just update the session status
+                serialized_thinking_steps = []
+                for step in result.thinking_steps or []:
+                    if hasattr(step, "model_dump"):
+                        serialized_thinking_steps.append(step.model_dump(mode="json"))
+                    elif isinstance(step, dict):
+                        serialized_thinking_steps.append(step)
+
                 await session_service.update_session(
                     session.session_id,
                     current_user.clerk_id,
                     status=SessionStatus.COMPLETED.value,
+                    enhanced_prompt=result.enhanced_prompt,
+                    thinking_steps=serialized_thinking_steps,
+                    completed_at=datetime.now(timezone.utc),
                 )
 
                 await session_service.append_chat_message(
@@ -824,15 +821,12 @@ async def edit_question(
             grade_level=config_data.get("grade_level"),
         )
 
-        config_service = _create_tenant_config_service(database)
-        tenant_config = await config_service.get_or_create_default(
-            current_user.tutor_id
+        _, _, llm = await _resolve_tenant_llm_provider(
+            tenant_id=current_user.tutor_id,
+            database=database,
+            requested_provider=(config_data.get("ai_provider") or None),
+            requested_model=(config_data.get("model_name") or None),
         )
-        ai_provider = normalize_provider(tenant_config.default_provider)
-
-        ai_manager = await _get_tenant_ai_manager(current_user.tutor_id, database)
-        provider = ai_manager.get_provider(ai_provider)
-        llm = provider.llm
 
         question_generator_agent_class = _get_question_generator_agent_class()
         agent = question_generator_agent_class(llm=llm, rag_service=rag_service)
@@ -1041,7 +1035,7 @@ async def get_pending_questions(
 @router.get("/all-questions")
 async def get_all_questions(
     status: Optional[str] = Query(
-        None, description="Filter by status: pending, approved, rejected, edited"
+        None, description="Filter by status: pending, approved, rejected"
     ),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -1093,7 +1087,7 @@ async def approve_question(
     current_user: ClerkUserContext = Depends(require_tutor),
     session_service: Any = Depends(get_session_service),
 ):
-    """Approve a generated question"""
+    """Approve a generated draft question for publishing."""
     success = await session_service.update_question_status(
         session_id=session_id,
         user_id=current_user.clerk_id,
@@ -1104,13 +1098,17 @@ async def approve_question(
     if not success:
         raise HTTPException(status_code=404, detail="Question not found")
 
-    return {"message": "Question approved", "question_id": question_id}
+    return {
+        "message": "Question approved for publishing",
+        "question_id": question_id,
+    }
 
 
 @router.post("/sessions/{session_id}/questions/{question_id}/reject")
 async def reject_question(
     session_id: str,
     question_id: str,
+    reason: Optional[str] = Query(None, description="Optional rejection reason"),
     current_user: ClerkUserContext = Depends(require_tutor),
     session_service: Any = Depends(get_session_service),
 ):
@@ -1120,12 +1118,39 @@ async def reject_question(
         user_id=current_user.clerk_id,
         question_id=question_id,
         status=QuestionStatus.REJECTED,
+        review_comments=reason,
     )
 
     if not success:
         raise HTTPException(status_code=404, detail="Question not found")
 
     return {"message": "Question rejected", "question_id": question_id}
+
+
+@router.post("/sessions/{session_id}/questions/{question_id}/request-revision")
+async def request_question_revision(
+    session_id: str,
+    question_id: str,
+    notes: str = Query(..., description="Revision guidance for the draft"),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    session_service: Any = Depends(get_session_service),
+):
+    """Attach review guidance while keeping the draft in the review queue."""
+    success = await session_service.request_question_revision(
+        session_id=session_id,
+        user_id=current_user.clerk_id,
+        question_id=question_id,
+        notes=notes,
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    return {
+        "message": "Revision requested",
+        "question_id": question_id,
+        "review_comments": notes,
+    }
 
 
 class SaveToQuestionBankRequest(BaseModel):
@@ -1203,6 +1228,7 @@ async def save_session_questions_to_bank(
         question
         for question in session.questions
         if question.status == QuestionStatus.APPROVED
+        and not question.published_question_id
         and (not selected_question_ids or question.question_id in selected_question_ids)
     ]
 
@@ -1230,14 +1256,21 @@ async def save_session_questions_to_bank(
         )
 
     topic = request.topic or (session.config or {}).get("topic") or "AI Generated"
+    ai_provider = (session.config or {}).get("ai_provider")
+    model_name = (session.config or {}).get("model_name")
+    generation_model = (
+        f"{ai_provider}/{model_name}" if ai_provider and model_name else model_name
+    )
 
     saved_count = 0
     failed_items = []
+    published_map: Dict[str, str] = {}
 
     for question in approved_questions:
         try:
             bank_type = _normalize_bank_question_type(question.type)
             bank_difficulty = _normalize_bank_difficulty(question.difficulty)
+            reference_materials = question.source_ids or session.material_ids
 
             option_payload = []
             correct_answer = question.correct_answer
@@ -1261,24 +1294,54 @@ async def save_session_questions_to_bank(
                 correct_answer=correct_answer,
             )
 
-            await question_service.create_question(
+            saved_question = await question_service.create_question(
                 question_data=payload,
                 tutor_id=current_user.clerk_id,
-                ai_generated=False,
+                ai_generated=True,
                 generation_id=session_id,
+                extra_fields={
+                    "status": BankQuestionStatus.ACTIVE.value,
+                    "approved_by": current_user.clerk_id,
+                    "approved_at": question.reviewed_at or datetime.now(timezone.utc),
+                    "ai_generated": True,
+                    "ai_provider": ai_provider,
+                    "ai_confidence": question.quality_score,
+                    "reference_materials": reference_materials,
+                    "source_documents": reference_materials,
+                    "source_chunks": question.source_citations,
+                    "generation_model": generation_model,
+                },
             )
+            published_map[question.question_id] = str(saved_question.id)
             saved_count += 1
         except Exception as exc:
             failed_items.append(
                 {"question_id": question.question_id, "reason": str(exc)}
             )
 
+    if published_map:
+        await session_service.mark_questions_published(
+            session_id=session_id,
+            user_id=current_user.clerk_id,
+            published_map=published_map,
+        )
+        await session_service.append_chat_message(
+            session_id,
+            current_user.clerk_id,
+            _build_session_chat_message(
+                "assistant",
+                f"Published {len(published_map)} approved question(s) to the question bank.",
+            ),
+        )
+
     return {
         "session_id": session_id,
         "requested": len(approved_questions),
         "saved_count": saved_count,
+        "published_count": saved_count,
         "failed_count": len(failed_items),
         "failed_items": failed_items,
+        "published_items": published_map,
     }
 
 
@@ -1325,6 +1388,26 @@ async def update_question(
         raise HTTPException(status_code=404, detail="Question not found")
 
     return {"message": "Question updated", "question_id": question_id}
+
+
+@router.delete("/sessions/{session_id}/questions/{question_id}")
+async def delete_session_question(
+    session_id: str,
+    question_id: str,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    session_service: Any = Depends(get_session_service),
+):
+    """Delete a generated draft question from a session."""
+    success = await session_service.delete_question(
+        session_id=session_id,
+        user_id=current_user.clerk_id,
+        question_id=question_id,
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    return {"message": "Question deleted", "question_id": question_id}
 
 
 @router.delete("/sessions/{session_id}")
