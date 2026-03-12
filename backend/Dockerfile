@@ -11,6 +11,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 # Set the environment to production
 ENV ENVIRONMENT=production
+# Make the uv-managed virtualenv available to later build steps and the final CMD.
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Install system dependencies
 # - gcc: needed for compiling some Python packages
@@ -32,10 +34,11 @@ COPY pyproject.toml .
 # Copy explicit lockfile if present (optional - keep wildcard to avoid build failures when lock not committed)
 COPY uv.lock* .
 
-# Install Python dependencies using UV into the system Python environment so
-# `uvicorn` launched from CMD can import installed packages.
+# Install Python dependencies into uv's project virtualenv. We skip installing the
+# project package here because the application source is copied in the next layer
+# and `uvicorn app.main:app` imports directly from /app.
 # Do not require a lockfile at build time so builds don't fail when uv.lock is not committed.
-RUN uv sync --system --no-dev --frozen
+RUN if [ -f uv.lock ]; then uv sync --no-dev --frozen --no-install-project; else uv sync --no-dev --no-install-project; fi
 
 # Copy the rest of the application code
 COPY . .
