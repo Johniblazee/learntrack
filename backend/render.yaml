@@ -22,7 +22,10 @@ services:
         value: "false"
       - key: LOG_LEVEL
         value: INFO
+      - key: WEB_CONCURRENCY
+        value: "1"
       # These should be set in Render dashboard as secrets:
+      # - SECRET_KEY (required in production; use a secure random value, 32+ chars)
       # - MONGODB_URL
       # - DATABASE_NAME
       # - CLERK_SECRET_KEY
@@ -37,4 +40,3 @@ services:
       # - UPLOADTHING_SECRET
       # - UPLOADTHING_APP_ID
       # - BACKEND_CORS_ORIGINS (your Vercel frontend URL)
-

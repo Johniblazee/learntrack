@@ -50,6 +50,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Command to run the application
-# Render provides PORT environment variable, so we use that
-CMD uvicorn app.main:app --workers 4 --host 0.0.0.0 --port ${PORT:-8000}
+# Command to run the application.
+# Validate config once before spawning workers so misconfigured secrets fail fast
+# with a single clear error instead of timing out after repeated worker crashes.
+# Render provides PORT; default worker count is kept low for small instances.
+CMD ["sh", "-c", "python -c 'from app.core.config import settings' && exec uvicorn app.main:app --workers ${WEB_CONCURRENCY:-1} --host 0.0.0.0 --port ${PORT:-8000}"]

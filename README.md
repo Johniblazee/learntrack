@@ -102,7 +102,7 @@ learntrack-mvp/
    DATABASE_NAME=learntrack_mvp
 
    # App Security
-   SECRET_KEY=change-me-in-production
+   SECRET_KEY=replace-with-a-secure-random-32-char-min-secret
 
    # Authentication (Clerk)
    CLERK_SECRET_KEY=your_clerk_secret_key

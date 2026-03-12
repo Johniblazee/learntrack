@@ -42,7 +42,8 @@ class Settings(BaseSettings):
         if env == "production":
             if not v or len(v) < 32:
                 raise ValueError(
-                    "SECRET_KEY must be at least 32 characters in production"
+                    "SECRET_KEY must be at least 32 characters in production. "
+                    "Set a secure random SECRET_KEY in your deployment environment."
                 )
             placeholders = [
                 "your-secret",
@@ -52,7 +53,8 @@ class Settings(BaseSettings):
             ]
             if any(p in v.lower() for p in placeholders):
                 raise ValueError(
-                    "SECRET_KEY appears to be a placeholder. Set a secure random key."
+                    "SECRET_KEY appears to be a placeholder. "
+                    "Set a secure random SECRET_KEY in your deployment environment."
                 )
         return v
 
