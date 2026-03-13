@@ -52,7 +52,10 @@ _clerk_api_failure_cache: Dict[str, tuple] = {}
 def _get_clerk_http_client() -> httpx.AsyncClient:
     global _clerk_http_client
     if _clerk_http_client is None:
-        _clerk_http_client = httpx.AsyncClient(timeout=10.0)
+        _clerk_http_client = httpx.AsyncClient(
+            timeout=10.0,
+            limits=httpx.Limits(keepalive_expiry=30),
+        )
     return _clerk_http_client
 
 
@@ -192,33 +195,49 @@ class EnhancedClerkJWTBearer:
             return self._jwks_cache
 
         jwks_url = f"{self.issuer}/.well-known/jwks.json"
-        try:
-            # Reuse the module-level shared client for connection pooling
-            response = await _get_clerk_http_client().get(jwks_url)
-            response.raise_for_status()
+        client = _get_clerk_http_client()
+        last_exc: Optional[Exception] = None
 
-            jwks_data = response.json()
-            self._jwks_cache = jwks_data
-            self._cache_expiry = current_time + timedelta(hours=1)
+        for attempt in range(2):
+            try:
+                response = await client.get(jwks_url)
+                response.raise_for_status()
 
-            logger.info("JWKS fetched successfully", url=jwks_url)
-            return jwks_data
+                jwks_data = response.json()
+                self._jwks_cache = jwks_data
+                self._cache_expiry = current_time + timedelta(hours=1)
 
-        except Exception as e:
-            logger.error(
-                "Failed to fetch JWKS",
-                error=str(e) or repr(e),
-                exc_type=type(e).__name__,
-                jwks_url=jwks_url,
-                exc_info=True,
-            )
-            # Stale-cache fallback: expired keys are better than no keys for
-            # transient connectivity blips. Real key rotation invalidates tokens
-            # at the JWT level anyway.
-            if self._jwks_cache:
-                logger.warning("Using stale JWKS cache due to fetch failure")
-                return self._jwks_cache
-            return {}
+                logger.info("JWKS fetched successfully", url=jwks_url)
+                return jwks_data
+
+            except (httpx.TimeoutException, httpx.NetworkError) as e:
+                last_exc = e
+                if attempt == 0:
+                    logger.warning(
+                        "JWKS fetch failed (retrying)",
+                        error=str(e) or repr(e),
+                        exc_type=type(e).__name__,
+                        jwks_url=jwks_url,
+                    )
+                    continue
+            except Exception as e:
+                last_exc = e
+                break
+
+        logger.error(
+            "Failed to fetch JWKS",
+            error=str(last_exc) or repr(last_exc),
+            exc_type=type(last_exc).__name__,
+            jwks_url=jwks_url,
+            exc_info=True,
+        )
+        # Stale-cache fallback: expired keys are better than no keys for
+        # transient connectivity blips. Real key rotation invalidates tokens
+        # at the JWT level anyway.
+        if self._jwks_cache:
+            logger.warning("Using stale JWKS cache due to fetch failure")
+            return self._jwks_cache
+        return {}
 
     async def verify_token(self, token: str) -> ClerkUserContext:
         """Verify Clerk JWT token and extract user context"""
