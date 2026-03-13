@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuth, useUser, SignIn } from '@clerk/clerk-react'
+import { useAuth, useUser, SignIn, SignUp } from '@clerk/clerk-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -34,6 +34,7 @@ export default function AcceptInvitationPage() {
   const [accepting, setAccepting] = useState(false)
   const [invitationDetails, setInvitationDetails] = useState<InvitationDetails | null>(null)
   const [showSignIn, setShowSignIn] = useState(false)
+  const [showSignUp, setShowSignUp] = useState(false)
 
   useEffect(() => {
     if (token) {
@@ -152,6 +153,8 @@ export default function AcceptInvitationPage() {
   }
 
   if (showSignIn || !isSignedIn) {
+    const invitationRedirectUrl = `/accept-invitation/${token}`
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
         <div className="w-full max-w-md space-y-6">
@@ -187,11 +190,44 @@ export default function AcceptInvitationPage() {
           </Card>
 
           <div className="flex justify-center">
-            <SignIn 
-              routing="hash"
-              signUpUrl="/sign-up"
-              afterSignInUrl={`/accept-invitation/${token}`}
-            />
+            {showSignUp ? (
+              <SignUp
+                routing="hash"
+                signInUrl="/sign-in"
+                forceRedirectUrl={invitationRedirectUrl}
+              />
+            ) : (
+              <SignIn
+                routing="hash"
+                forceRedirectUrl={invitationRedirectUrl}
+              />
+            )}
+          </div>
+
+          <div className="text-center">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              {showSignUp ? (
+                <>
+                  Already have an account?{' '}
+                  <button
+                    onClick={() => setShowSignUp(false)}
+                    className="text-purple-600 hover:text-purple-700 font-semibold transition-colors"
+                  >
+                    Sign in instead
+                  </button>
+                </>
+              ) : (
+                <>
+                  Don't have an account?{' '}
+                  <button
+                    onClick={() => setShowSignUp(true)}
+                    className="text-purple-600 hover:text-purple-700 font-semibold transition-colors"
+                  >
+                    Sign up
+                  </button>
+                </>
+              )}
+            </p>
           </div>
         </div>
       </div>

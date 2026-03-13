@@ -1,16 +1,7 @@
 import { SignUp } from '@clerk/clerk-react'
-import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 
 export default function SignUpPage() {
-  const [selectedRole, setSelectedRole] = useState<string>('student')
-
-  useEffect(() => {
-    // Get the selected role from sessionStorage
-    const storedRole = sessionStorage.getItem('selectedRole')
-    if (storedRole) {
-      setSelectedRole(storedRole)
-    }
-  }, [])
 
   return (
     <div className="min-h-screen flex">
@@ -52,9 +43,6 @@ export default function SignUpPage() {
             path="/sign-up"
             fallbackRedirectUrl="/dashboard"
             signInUrl="/sign-in"
-            unsafeMetadata={{
-              role: selectedRole
-            }}
             appearance={{
               variables: {
                 colorBackground: '#ffffff',
@@ -106,12 +94,12 @@ export default function SignUpPage() {
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Already have an account?{' '}
-              <a
-                href="/sign-in"
+              <Link
+                to="/sign-in"
                 className="text-[#C8A882] hover:text-[#B89872] font-semibold transition-colors"
               >
                 Sign In
-              </a>
+              </Link>
             </p>
           </div>
         </div>

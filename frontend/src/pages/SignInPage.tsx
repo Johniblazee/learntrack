@@ -1,4 +1,5 @@
 import { SignIn } from '@clerk/clerk-react'
+import { Link } from 'react-router-dom'
 
 export default function SignInPage() {
   return (
@@ -124,12 +125,12 @@ export default function SignInPage() {
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Don't have an account?{' '}
-              <a
-                href="/sign-up"
+              <Link
+                to="/sign-up"
                 className="text-[#5c4a38] hover:text-[#4a3a2a] font-semibold transition-colors"
               >
                 Sign Up
-              </a>
+              </Link>
             </p>
           </div>
         </div>
