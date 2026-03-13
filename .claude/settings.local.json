@@ -1,8 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "WebFetch(domain:clerk.com)"
     ]
   },
-  "outputStyle": "Explanatory"
+  "outputStyle": "default"
 }
