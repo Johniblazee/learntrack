@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     TAVILY_API_KEY: Optional[str] = None
     MAX_RAG_TOKEN_BUDGET: int = 3000  # Default max tokens for RAG context
 
+    # PostHog Configuration
+    POSTHOG_API_KEY: Optional[str] = None
+    POSTHOG_API_HOST: str = "https://us.i.posthog.com"
+
     # UploadThing Configuration
     UPLOADTHING_SECRET: Optional[str] = None
     UPLOADTHING_APP_ID: Optional[str] = None

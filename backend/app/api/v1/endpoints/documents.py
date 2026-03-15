@@ -284,7 +284,7 @@ async def get_document_detail(
 
     try:
         oid = to_object_id(document_id)
-    except:
+    except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid document ID")
 
     doc = await files_collection.find_one({"_id": oid, "tutor_id": tutor_id})
@@ -398,7 +398,7 @@ async def batch_get_status(
                         "error": doc.get("embedding_error"),
                     }
                 )
-        except:
+        except Exception:
             pass
 
     return {"statuses": statuses, "count": len(statuses)}

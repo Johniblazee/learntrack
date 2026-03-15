@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { useUser, useAuth } from '@clerk/clerk-react'
+import posthog from '@/lib/posthog'
 import { ApiClient, IMPERSONATION_SESSION_CHANGED_EVENT, setTokenGetter } from '@/lib/api-client'
 
 // User role types matching backend
@@ -93,6 +94,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     if (!isSignedIn || !clerkUser) {
       setBackendUser(null)
       setIsBackendLoaded(true)
+      posthog.reset()
       return
     }
 
@@ -102,6 +104,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       if (response.data) {
         setBackendUser(response.data)
+        posthog.identify(response.data.clerk_id, {
+          role: response.data.role,
+          tutor_id: response.data.tutor_id,
+        })
       } else if (response.status === 404) {
         setBackendUser(null)
       } else {

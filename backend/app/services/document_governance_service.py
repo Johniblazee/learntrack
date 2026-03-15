@@ -358,7 +358,7 @@ class DocumentGovernanceService:
                         "$push": {"processing_history": failure_entry.dict()},
                     },
                 )
-            except:
+            except Exception:
                 pass
 
             logger.error("Failed to resync document", file_id=file_id, error=str(e))

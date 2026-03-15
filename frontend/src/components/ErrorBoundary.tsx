@@ -9,6 +9,7 @@
  */
 
 import { Component, ErrorInfo, ReactNode } from 'react'
+import posthog from '@/lib/posthog'
 import { AlertCircle, RefreshCw, Home, Bug } from 'lucide-react'
 import { Button } from './ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
@@ -43,10 +44,17 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     // Log error to console in development
     console.error('ErrorBoundary caught an error:', error, errorInfo)
-    
+
+    // Report to PostHog
+    posthog.capture('$exception', {
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+    })
+
     // Update state with error info
     this.setState({ errorInfo })
-    
+
     // Call optional error handler
     this.props.onError?.(error, errorInfo)
   }

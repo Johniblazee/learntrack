@@ -49,7 +49,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
             "img-src": "'self' data: https: blob: https://fastapi.tiangolo.com",
             "font-src": "'self' https://fonts.gstatic.com",
-            "connect-src": "'self' https://api.clerk.com https://*.clerk.accounts.dev wss://* https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.groq.com",
+            "connect-src": "'self' https://api.clerk.com https://*.clerk.accounts.dev wss://* https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.groq.com https://us.i.posthog.com",
             "frame-ancestors": "'self'",
             "form-action": "'self'",
             "base-uri": "'self'",

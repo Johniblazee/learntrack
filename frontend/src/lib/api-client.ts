@@ -93,10 +93,16 @@ export class ApiClient {
         path = pathWithoutQuery + '/' + queryPart
       }
 
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
+
       const response = await fetch(`${API_ROOT}${path}`, {
         ...options,
         headers,
+        signal: controller.signal,
       })
+
+      clearTimeout(timeoutId)
 
       const data = await response.json().catch(() => null)
 
@@ -114,6 +120,9 @@ export class ApiClient {
         status: response.status,
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return { error: 'Request timed out', status: 0 }
+      }
       console.error('API Request Error:', error)
       return {
         error: error instanceof Error ? error.message : 'Unknown error occurred',

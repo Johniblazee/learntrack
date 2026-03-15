@@ -20,3 +20,6 @@ export const API_HOST = NORMALIZED_BASE.replace(/\/api\/v\d+$/, '')
 // Clerk configuration
 export const CLERK_PUBLISHABLE_KEY = (import.meta as any).env?.VITE_CLERK_PUBLISHABLE_KEY || ''
 
+// PostHog configuration
+export const POSTHOG_API_KEY = (import.meta as any).env?.VITE_POSTHOG_API_KEY || ''
+

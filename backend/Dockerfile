@@ -26,6 +26,9 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user
+RUN useradd -m -s /bin/bash appuser
+
 # Install UV
 RUN pip install --no-cache-dir uv
 
@@ -42,6 +45,10 @@ RUN if [ -f uv.lock ]; then uv sync --no-dev --frozen --no-install-project; else
 
 # Copy the rest of the application code
 COPY . .
+
+# Give non-root user ownership and switch to it
+RUN chown -R appuser:appuser /app
+USER appuser
 
 # Expose the port the app runs on
 EXPOSE 8000

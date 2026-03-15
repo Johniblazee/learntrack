@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from app.core.database import database
 from app.core.config import settings
 from app.core.enhanced_auth import close_clerk_http_client
+from app.core.posthog import shutdown as posthog_shutdown
 from app.models.responses import HealthResponse
 from app.core.exceptions import (
     LearnTrackException,
@@ -132,8 +133,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-LearnTrack-Impersonation-Session"],
 )
 
 
@@ -171,6 +172,7 @@ async def shutdown_event():
                 task.cancel()
         await database.close_database_connection()
         await close_clerk_http_client()
+        posthog_shutdown()
         logger.info("FastAPI application shutdown successfully")
     except Exception as e:
         logger.error("Error during FastAPI application shutdown", error=str(e))

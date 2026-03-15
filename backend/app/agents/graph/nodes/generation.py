@@ -149,7 +149,7 @@ Enhanced Prompt: {state.get("enhanced_prompt", state["original_prompt"])}
                             except json.JSONDecodeError:
                                 sanitized_item = sanitize_json_string(item_str)
                                 items.append(json.loads(sanitized_item))
-                        except:
+                        except (json.JSONDecodeError, ValueError, TypeError):
                             continue
 
             for i, item in enumerate(items):
