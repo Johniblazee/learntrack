@@ -39,7 +39,7 @@ class SubjectService:
             if existing:
                 raise ValidationError(f"Subject '{subject_data.name}' already exists")
 
-            subject_dict = subject_data.dict(exclude_none=True)
+            subject_dict = subject_data.model_dump(exclude_none=True)
             subject_dict["tutor_id"] = tutor_id
             subject_dict["topics"] = subject_dict.get("topics", [])
             subject_dict["created_at"] = datetime.now(timezone.utc)
@@ -147,7 +147,7 @@ class SubjectService:
                 student_count_result[0]["total"] if student_count_result else 0
             )
 
-            subject_dict = subject.dict()
+            subject_dict = subject.model_dump()
             subject_dict.update(
                 {
                     "total_questions": question_count,
@@ -179,7 +179,7 @@ class SubjectService:
             if subject.tutor_id != tutor_id:
                 raise AuthorizationError("Not authorized to update this subject")
 
-            update_data = subject_update.dict(exclude_unset=True)
+            update_data = subject_update.model_dump(exclude_unset=True)
             if not update_data:
                 return subject
 

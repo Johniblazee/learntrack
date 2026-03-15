@@ -183,7 +183,7 @@ class MaterialService:
     ) -> Material:
         """Create a new material for a tutor."""
         try:
-            material_dict = material_data.dict(exclude_none=True)
+            material_dict = material_data.model_dump(exclude_none=True)
             folder_payload = await self._resolve_folder_placement(
                 tutor_id=tutor_id,
                 folder_id=material_dict.get("folder_id"),
@@ -330,7 +330,7 @@ class MaterialService:
             existing = await self.get_material_by_id(material_id, tutor_id=tutor_id)
             owner_tutor_id = existing.tutor_id
 
-            update_dict = update_data.dict(exclude_unset=True)
+            update_dict = update_data.model_dump(exclude_unset=True)
             if "folder_id" in update_dict:
                 update_dict.update(
                     await self._resolve_folder_placement(
@@ -645,7 +645,7 @@ class MaterialService:
         """Rename and/or move a folder."""
         try:
             folder = await self._get_folder_doc(folder_id, tutor_id)
-            payload = update_data.dict(exclude_unset=True)
+            payload = update_data.model_dump(exclude_unset=True)
 
             current_name = str(folder.get("name") or "")
             current_parent_id = folder.get("parent_id")

@@ -8,7 +8,7 @@ from typing import Dict
 
 from app.websocket.socket_manager import sio, connected_users
 from app.websocket.auth import authenticate_socket, get_user_room, get_conversation_room
-from app.core.database import get_database_sync
+from app.core.database import get_database as get_database_sync
 from app.models.activity import ActivityCreate, ActivityType
 from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService

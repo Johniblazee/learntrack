@@ -64,7 +64,7 @@ class UserService:
                 return User(**existing_email_user)
 
             # Create new user
-            user_dict = user_data.dict()
+            user_dict = user_data.model_dump()
             user_dict["created_at"] = datetime.now(timezone.utc)
             user_dict["updated_at"] = datetime.now(timezone.utc)
 

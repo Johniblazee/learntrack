@@ -56,6 +56,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "object-src": "'none'",
         }
 
+        # Pre-compute static header values once to avoid per-request string building
+        self._hsts_header_value = self._build_hsts_header()
+        self._csp_header_value = self._build_csp_header()
+
     def _build_hsts_header(self) -> str:
         """Build HSTS header value"""
         value = f"max-age={self.hsts_max_age}"
@@ -76,10 +80,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Only add HSTS in production (requires HTTPS)
         if settings.ENVIRONMENT == "production":
-            response.headers["Strict-Transport-Security"] = self._build_hsts_header()
+            response.headers["Strict-Transport-Security"] = self._hsts_header_value
 
         # Content Security Policy
-        response.headers["Content-Security-Policy"] = self._build_csp_header()
+        response.headers["Content-Security-Policy"] = self._csp_header_value
 
         # X-Frame-Options - prevent clickjacking
         response.headers["X-Frame-Options"] = self.frame_options

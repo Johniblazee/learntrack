@@ -23,12 +23,22 @@ class GroqProvider(BaseAIProvider):
         super().__init__(api_key)
         # Use centralized config for default model
         self.model = model or get_default_model("groq") or "llama-3.3-70b-versatile"
-        self.llm = ChatGroq(api_key=api_key, model_name=self.model, temperature=0.7)
+        self.llm = ChatGroq(
+            api_key=api_key,
+            model_name=self.model,
+            temperature=0.7,
+            max_tokens=4096,
+        )
 
     def set_model(self, model: str):
         """Change the active model"""
         self.model = model
-        self.llm = ChatGroq(api_key=self.api_key, model_name=model, temperature=0.7)
+        self.llm = ChatGroq(
+            api_key=self.api_key,
+            model_name=model,
+            temperature=0.7,
+            max_tokens=4096,
+        )
 
     async def extract_text_from_content(self, content: str, file_type: str) -> str:
         """Extract and clean text from file content"""
@@ -137,12 +147,4 @@ Respond with JSON: {{"is_valid": true/false, "issues": [], "suggestions": [], "q
                 "quality_score": 5,
             }
 
-    async def health_check(self) -> bool:
-        """Check if Groq is available"""
-        try:
-            messages = [HumanMessage(content="Hello")]
-            await self.llm.ainvoke(messages)
-            return True
-        except Exception as e:
-            logger.error(f"Groq health check failed: {e}")
-            return False
+    # health_check() inherited from BaseAIProvider — uses lightweight HTTP check

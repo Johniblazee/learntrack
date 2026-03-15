@@ -37,6 +37,8 @@ class Database:
                     serverSelectionTimeoutMS=settings.MONGODB_SERVER_SELECTION_TIMEOUT_MS,
                     connectTimeoutMS=settings.MONGODB_CONNECT_TIMEOUT_MS,
                     socketTimeoutMS=settings.MONGODB_SOCKET_TIMEOUT_MS,
+                    maxPoolSize=settings.MONGODB_MAX_POOL_SIZE,
+                    minPoolSize=settings.MONGODB_MIN_POOL_SIZE,
                 )
                 self.database = self.client[settings.DATABASE_NAME]
                 self._connection_verified = False
@@ -282,8 +284,8 @@ class Database:
                 [("tutor_id", 1), ("created_at", -1)]
             )
 
-        except Exception as e:
-            raise e
+        except Exception:
+            raise
 
 
 # Global database instance
@@ -292,15 +294,6 @@ database = Database()
 
 async def get_database() -> AsyncIOMotorDatabase:
     """Dependency to get database instance"""
-    if database.database is None:
-        await database.init_client()
-    assert database.database is not None
-    db = database.database
-    return db
-
-
-async def get_database_sync() -> AsyncIOMotorDatabase:
-    """Get database instance synchronously (for WebSocket handlers)"""
     if database.database is None:
         await database.init_client()
     assert database.database is not None

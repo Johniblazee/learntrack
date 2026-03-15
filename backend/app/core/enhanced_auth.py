@@ -262,13 +262,24 @@ class EnhancedClerkJWTBearer:
                             break
 
                     if key:
+                        decode_options = {"verify_exp": True}
+                        decode_kwargs: Dict[str, Any] = {
+                            "algorithms": ["RS256"],
+                            "issuer": self.issuer,
+                            "leeway": 60,  # Allow 60 seconds clock skew tolerance
+                        }
+                        # 4.1: Enable audience verification when configured
+                        if settings.CLERK_JWT_AUDIENCE:
+                            decode_options["verify_aud"] = True
+                            decode_kwargs["audience"] = settings.CLERK_JWT_AUDIENCE
+                        else:
+                            decode_options["verify_aud"] = False
+
                         payload = jwt.decode(
                             token,
                             key,
-                            algorithms=["RS256"],
-                            issuer=self.issuer,
-                            options={"verify_exp": True, "verify_aud": False},
-                            leeway=60,  # Allow 60 seconds clock skew tolerance
+                            options=decode_options,
+                            **decode_kwargs,
                         )
                         return await self._extract_user_context(payload)
                     else:
@@ -444,19 +455,19 @@ class EnhancedClerkJWTBearer:
                     metadata = metadata or user_data.get("public_metadata", {})
 
             # Ensure we have at least basic info
-            email = email or f"{user_id}@placeholder.com"  # Fallback email
+            email = email or f"{user_id}@noreply.learntrack.app"  # Fallback email
             name = name or "Unknown User"
 
             # Extract role from metadata
-            role_str = metadata.get("role", "tutor")  # Default to tutor for now
+            role_str = metadata.get("role", "student")  # Default to least-privileged role
 
             # Convert role string to UserRole enum
             try:
                 role = UserRole(role_str.lower())
             except ValueError:
-                role = UserRole.TUTOR  # Default to tutor
+                role = UserRole.STUDENT  # Default to least-privileged role
                 logger.warning(
-                    "Invalid role in metadata, defaulting to tutor",
+                    "Invalid role in metadata, defaulting to student",
                     role=role_str,
                     user_id=user_id,
                 )
@@ -554,7 +565,9 @@ class EnhancedClerkJWTBearer:
 
         except Exception as e:
             logger.error(
-                "Failed to extract user context", error=str(e), payload=payload
+                "Failed to extract user context",
+                error=str(e),
+                user_id=payload.get("sub"),
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"

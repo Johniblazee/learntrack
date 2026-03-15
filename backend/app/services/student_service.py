@@ -133,7 +133,7 @@ class StudentService:
     ) -> StudentGroup:
         """Create a new group (with tenant isolation)"""
         try:
-            doc = data.dict()
+            doc = data.model_dump()
             doc["tutor_id"] = tutor_id  # Set tutor_id for tenant isolation
             doc["created_at"] = datetime.now(timezone.utc)
             doc["updated_at"] = datetime.now(timezone.utc)
@@ -174,7 +174,7 @@ class StudentService:
     ) -> Optional[StudentGroup]:
         """Update a group (only if owned by tutor)"""
         try:
-            update_data = update.dict(exclude_unset=True)
+            update_data = update.model_dump(exclude_unset=True)
             update_data["updated_at"] = datetime.now(timezone.utc)
             oid = to_object_id(group_id)
             # Filter by tutor_id for tenant isolation

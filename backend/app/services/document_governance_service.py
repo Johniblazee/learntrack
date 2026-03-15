@@ -91,7 +91,7 @@ class DocumentGovernanceService:
                             "qdrant_collection_id": None,
                             "updated_at": datetime.now(timezone.utc),
                         },
-                        "$push": {"processing_history": history_entry.dict()},
+                        "$push": {"processing_history": history_entry.model_dump()},
                     },
                 )
                 logger.info("Soft deleted file", file_id=file_id)
@@ -283,7 +283,7 @@ class DocumentGovernanceService:
                         "embedding_status": EmbeddingStatus.PROCESSING.value,
                         "updated_at": datetime.now(timezone.utc),
                     },
-                    "$push": {"processing_history": history_entry.dict()},
+                    "$push": {"processing_history": history_entry.model_dump()},
                     "$inc": {"processing_attempts": 1},
                 },
             )
@@ -323,7 +323,7 @@ class DocumentGovernanceService:
                         "processing_attempts": 0,  # Reset on success
                     },
                     "$inc": {"embedding_version": 1},
-                    "$push": {"processing_history": completion_entry.dict()},
+                    "$push": {"processing_history": completion_entry.model_dump()},
                 },
             )
 
@@ -355,7 +355,7 @@ class DocumentGovernanceService:
                             "last_error_category": error_category.value,
                             "embedding_error": str(e),
                         },
-                        "$push": {"processing_history": failure_entry.dict()},
+                        "$push": {"processing_history": failure_entry.model_dump()},
                     },
                 )
             except Exception:

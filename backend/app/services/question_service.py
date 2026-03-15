@@ -81,7 +81,7 @@ class QuestionService:
     ) -> Question:
         """Create a new question"""
         try:
-            question_dict = question_data.dict()
+            question_dict = question_data.model_dump()
             now = datetime.now(timezone.utc)
             question_dict["tutor_id"] = tutor_id
             question_dict["created_at"] = now
@@ -374,7 +374,7 @@ class QuestionService:
             if question.tutor_id != tutor_id:
                 raise AuthorizationError("Not authorized to update this question")
 
-            update_data = question_update.dict(exclude_unset=True)
+            update_data = question_update.model_dump(exclude_unset=True)
             if not update_data:
                 return question
 
@@ -621,44 +621,78 @@ class QuestionService:
             raise DatabaseException(f"Failed to bulk approve questions: {str(e)}")
 
     async def update_average_score(self, question_id: str, new_score: float) -> bool:
-        """Update question average score using running average calculation.
+        """Update question average score using atomic aggregation pipeline update.
 
-        Uses the formula: new_average = (old_average * attempt_count + new_score) / (attempt_count + 1)
-        This provides accurate historical average tracking.
+        Uses an aggregation pipeline in update_one to atomically compute:
+            new_average = (old_average * attempt_count + new_score) / (attempt_count + 1)
+        This avoids the read-modify-write race condition.
         """
         try:
-            # Get current question to calculate new average
-            question = await self.get_question_by_id(question_id)
-
-            current_attempt_count = getattr(question, "attempt_count", 0) or 0
-            current_average = question.average_score or 0.0
-
-            # Calculate running average
-            new_attempt_count = current_attempt_count + 1
-            if current_attempt_count == 0:
-                new_average = new_score
-            else:
-                # Running average formula: (old_avg * count + new_value) / (count + 1)
-                total_score = current_average * current_attempt_count + new_score
-                new_average = total_score / new_attempt_count
-
             oid = to_object_id(question_id)
             result = await self.collection.update_one(
                 {"_id": oid},
-                {
-                    "$set": {
-                        "average_score": new_average,
-                        "attempt_count": new_attempt_count,
+                [
+                    {
+                        "$set": {
+                            "attempt_count": {
+                                "$add": [{"$ifNull": ["$attempt_count", 0]}, 1]
+                            },
+                            "average_score": {
+                                "$cond": {
+                                    "if": {
+                                        "$gt": [
+                                            {"$ifNull": ["$attempt_count", 0]},
+                                            0,
+                                        ]
+                                    },
+                                    "then": {
+                                        "$divide": [
+                                            {
+                                                "$add": [
+                                                    {
+                                                        "$multiply": [
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$average_score",
+                                                                    0,
+                                                                ]
+                                                            },
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$attempt_count",
+                                                                    0,
+                                                                ]
+                                                            },
+                                                        ]
+                                                    },
+                                                    new_score,
+                                                ]
+                                            },
+                                            {
+                                                "$add": [
+                                                    {
+                                                        "$ifNull": [
+                                                            "$attempt_count",
+                                                            0,
+                                                        ]
+                                                    },
+                                                    1,
+                                                ]
+                                            },
+                                        ]
+                                    },
+                                    "else": new_score,
+                                }
+                            },
+                        }
                     }
-                },
+                ],
             )
 
             logger.debug(
-                "Updated average score",
+                "Updated average score atomically",
                 question_id=question_id,
                 new_score=new_score,
-                new_average=new_average,
-                attempt_count=new_attempt_count,
             )
 
             return result.matched_count > 0

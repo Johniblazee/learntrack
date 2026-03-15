@@ -24,14 +24,20 @@ class GeminiProvider(BaseAIProvider):
         # Use centralized config for default model
         self.model = model or get_default_model("gemini") or "gemini-3-pro-preview"
         self.llm = ChatGoogleGenerativeAI(
-            google_api_key=api_key, model=self.model, temperature=0.7
+            google_api_key=api_key,
+            model=self.model,
+            temperature=0.7,
+            max_output_tokens=4096,
         )
 
     def set_model(self, model: str):
         """Change the active model"""
         self.model = model
         self.llm = ChatGoogleGenerativeAI(
-            google_api_key=self.api_key, model=model, temperature=0.7
+            google_api_key=self.api_key,
+            model=model,
+            temperature=0.7,
+            max_output_tokens=4096,
         )
 
     async def extract_text_from_content(self, content: str, file_type: str) -> str:
@@ -125,12 +131,4 @@ Respond with JSON only: {{"is_valid": true/false, "issues": [], "suggestions": [
                 "quality_score": 5,
             }
 
-    async def health_check(self) -> bool:
-        """Check if Gemini is available"""
-        try:
-            messages = [HumanMessage(content="Hello")]
-            await self.llm.ainvoke(messages)
-            return True
-        except Exception as e:
-            logger.error(f"Gemini health check failed: {e}")
-            return False
+    # health_check() inherited from BaseAIProvider — uses lightweight HTTP check

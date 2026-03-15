@@ -16,12 +16,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Install system dependencies
 # - gcc: needed for compiling some Python packages
-# - libpq-dev: PostgreSQL client library (in case needed)
 # - curl: for health checks
 # - libmagic1: required by python-magic for file type detection
 RUN apt-get update && apt-get install -y \
     gcc \
-    libpq-dev \
     curl \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*

@@ -208,27 +208,4 @@ class OpenAIProvider(BaseAIProvider):
                 "acceptable": False,
             }
 
-    async def health_check(self) -> bool:
-        """Check OpenAI API health"""
-        try:
-            # Use the configured model if available, otherwise fall back to a safe default
-            health_check_model = (
-                self.model or get_default_model("openai") or "gpt-4o-mini"
-            )
-
-            response = await self.client.chat.completions.create(
-                model=health_check_model,
-                messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=5,
-            )
-            # Defensive check before returning
-            choices = getattr(response, "choices", None)
-            if not choices or len(choices) == 0:
-                return False
-            message = getattr(choices[0], "message", None)
-            if not message:
-                return False
-            return getattr(message, "content", None) is not None
-        except Exception as e:
-            logger.error("OpenAI health check failed", error=str(e))
-            return False
+    # health_check() inherited from BaseAIProvider — uses lightweight HTTP check

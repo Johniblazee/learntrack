@@ -2,10 +2,9 @@
 Application configuration using pydantic-settings and python-dotenv
 """
 
-import os
 from pathlib import Path
 from typing import List, Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from dotenv import load_dotenv
 
@@ -31,7 +30,7 @@ class Settings(BaseSettings):
 
     # Environment
     ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    DEBUG: bool = False
     SECRET_KEY: str = ""  # Must be set via environment variable
 
     @field_validator("SECRET_KEY")
@@ -64,6 +63,8 @@ class Settings(BaseSettings):
     MONGODB_SERVER_SELECTION_TIMEOUT_MS: int = 500
     MONGODB_CONNECT_TIMEOUT_MS: int = 500
     MONGODB_SOCKET_TIMEOUT_MS: int = 2000
+    MONGODB_MAX_POOL_SIZE: int = 50
+    MONGODB_MIN_POOL_SIZE: int = 5
     STARTUP_PING_DATABASE: bool = False
     RUN_STARTUP_BOOTSTRAP: bool = False
 
@@ -171,9 +172,7 @@ class Settings(BaseSettings):
             raise ValueError("CLERK_JWT_AUDIENCE is required in production")
         return v
 
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
+    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
 
 
 # Global settings instance

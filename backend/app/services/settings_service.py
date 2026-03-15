@@ -114,7 +114,7 @@ class SettingsService:
                 current_settings.upload = update_request.upload
             
             # Save to database
-            settings_dict = current_settings.dict()
+            settings_dict = current_settings.model_dump()
             await self.collection.replace_one(
                 {"_id": "app_settings"},
                 {"_id": "app_settings", **settings_dict},

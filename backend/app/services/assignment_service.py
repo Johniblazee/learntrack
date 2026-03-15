@@ -161,7 +161,7 @@ class AssignmentService:
                 student_ids.update(subject_students)
 
             # Create assignment document
-            assignment_dict = assignment_data.dict(
+            assignment_dict = assignment_data.model_dump(
                 exclude={"group_ids", "subject_filter", "question_ids"}
             )
             questions = [
@@ -172,7 +172,7 @@ class AssignmentService:
             assignment_dict["created_at"] = datetime.now(timezone.utc)
             assignment_dict["updated_at"] = datetime.now(timezone.utc)
             assignment_dict["status"] = AssignmentStatus.PUBLISHED
-            assignment_dict["questions"] = [q.dict() for q in questions]
+            assignment_dict["questions"] = [q.model_dump() for q in questions]
             assignment_dict["student_ids"] = list(student_ids)
             assignment_dict["group_ids"] = group_ids
             assignment_dict["assigned_via_subject"] = assignment_data.subject_filter
@@ -651,7 +651,7 @@ class AssignmentService:
             # Validate ownership first
             await self.get_assignment_by_id(assignment_id, tutor_id=tutor_id)
 
-            update_data = assignment_update.dict(exclude_unset=True)
+            update_data = assignment_update.model_dump(exclude_unset=True)
             if not update_data:
                 return await self.get_assignment_by_id(assignment_id)
 
@@ -728,7 +728,7 @@ class AssignmentService:
                 QuestionAssignment(question_id=qid, order=i)
                 for i, qid in enumerate(question_ids)
             ]
-            question_dicts = [q.dict() for q in questions]
+            question_dicts = [q.model_dump() for q in questions]
 
             oid = to_object_id(assignment_id)
             result = await self.collection.update_one(

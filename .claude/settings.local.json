@@ -3,7 +3,11 @@
     "allow": [
       "Bash(cd:*)",
       "WebFetch(domain:clerk.com)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(find C:\\\\Users\\\\John Michael\\\\Desktop\\\\Remote Engineer\\\\sandbox\\\\learntrack-mvp\\\\backend:*)",
+      "Bash(find /c/Users/John\\\\ Michael/Desktop/Remote\\\\ Engineer/sandbox/learntrack-mvp -name \"pyproject.toml\" -o -name \".pre-commit-config.yaml\" -o -name \"tox.ini\" 2>/dev/null | xargs grep -l \"pip-audit\\\\|safety\\\\|bandit\" 2>/dev/null)",
+      "Bash(tail:*)",
+      "Bash(cd \"/c/Users/John Michael/Desktop/Remote Engineer/sandbox/learntrack-mvp/backend\" && uv run flake8 app/core/enhanced_auth.py app/core/config.py app/core/database.py app/core/security_middleware.py app/main.py app/ai/providers/base.py app/ai/services/ai_manager.py --max-line-length=120 2>&1)"
     ]
   },
   "outputStyle": "default"

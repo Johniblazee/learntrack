@@ -84,7 +84,7 @@ async def create_topic(
         if not subject:
             raise HTTPException(status_code=404, detail="Subject not found or access denied")
 
-        topic_dict = topic_data.dict()
+        topic_dict = topic_data.model_dump()
         topic_dict["tutor_id"] = current_user.clerk_id  # Set tutor_id for tenant isolation
         topic_dict["subject_name"] = subject["name"]
         topic_dict["question_count"] = 0
@@ -140,7 +140,7 @@ async def update_topic(
 ):
     """Update a topic (only if owned by authenticated tutor)"""
     try:
-        update_dict = topic_data.dict()
+        update_dict = topic_data.model_dump()
         update_dict["updated_at"] = datetime.now(timezone.utc)
 
         # Filter by tutor_id for tenant isolation

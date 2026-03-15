@@ -215,7 +215,7 @@ class ProgressService:
                 return Progress(**existing)
 
             # Create new progress record
-            progress_dict = progress_data.dict()
+            progress_dict = progress_data.model_dump()
             progress_dict["created_at"] = datetime.now(timezone.utc)
             progress_dict["updated_at"] = datetime.now(timezone.utc)
             progress_dict["started_at"] = datetime.now(timezone.utc)
@@ -273,7 +273,7 @@ class ProgressService:
     ) -> Progress:
         """Update progress"""
         try:
-            update_data = progress_update.dict(exclude_unset=True)
+            update_data = progress_update.model_dump(exclude_unset=True)
             if not update_data:
                 return await self.get_progress_by_id(progress_id)
 

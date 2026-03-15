@@ -229,16 +229,54 @@ Generate exactly {question_count} questions.
                 provider=self.provider_name,
                 response_length=len(response_text) if response_text else 0,
             )
-            return []
+            from app.core.exceptions import AIProviderError
+
+            raise AIProviderError(
+                f"Failed to parse AI response from {self.provider_name}: {e}"
+            )
+
+    # Health check endpoint URLs for lightweight connectivity verification.
+    # Subclasses can override with provider-specific URLs.
+    _HEALTH_CHECK_URLS: Dict[str, str] = {
+        "openai": "https://api.openai.com/v1/models",
+        "groq": "https://api.groq.com/openai/v1/models",
+        "gemini": "https://generativelanguage.googleapis.com/v1beta/models",
+        "anthropic": "https://api.anthropic.com/v1/messages",
+    }
 
     async def health_check(self) -> bool:
-        """Check if the AI provider is available"""
+        """Check if the AI provider is available using a lightweight HTTP request
+        instead of a real LLM call."""
+        import httpx
+        from cachetools import TTLCache
+
+        # Module-level cache — shared across all provider instances
+        if not hasattr(BaseAIProvider, "_health_cache"):
+            BaseAIProvider._health_cache = TTLCache(maxsize=16, ttl=60)
+
+        cache_key = self.provider_name
+        cached = BaseAIProvider._health_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        url = self._HEALTH_CHECK_URLS.get(self.provider_name)
+        if not url:
+            # Unknown provider — assume healthy to avoid blocking
+            return True
+
         try:
-            # Simple test to verify API connectivity
-            test_response = await self.extract_text_from_content(
-                "Test content", "text/plain"
-            )
-            return test_response is not None
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                )
+                # 200 = success, 401/403 = key invalid but service reachable
+                is_healthy = response.status_code < 500
+                BaseAIProvider._health_cache[cache_key] = is_healthy
+                return is_healthy
         except Exception as e:
-            logger.error(f"{self.provider_name} health check failed", error=str(e))
+            logger.warning(
+                f"{self.provider_name} health check failed", error=str(e)
+            )
+            BaseAIProvider._health_cache[cache_key] = False
             return False

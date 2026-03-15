@@ -4,7 +4,7 @@ Manages multiple AI providers with intelligent fallback and cost optimization
 """
 
 from importlib import import_module
-from typing import List, Dict, Any, Optional, Tuple, Type
+from typing import Callable, List, Dict, Any, Optional, Tuple, Type
 from decimal import Decimal
 import structlog
 import asyncio
@@ -208,23 +208,29 @@ class AIManager:
 
         raise AIProviderError("No AI providers configured")
 
-    async def extract_text_from_content(
+    async def _with_fallback(
         self,
-        content: str,
-        file_type: str,
+        operation: Callable[..., Any],
+        task_type: str,
         preferred_provider: Optional[str] = None,
-    ) -> str:
-        """Extract text using best available provider with fallback"""
+    ) -> Any:
+        """Execute an async operation on the best provider, falling back to others on failure.
+
+        Args:
+            operation: An async callable that takes a provider and returns the result.
+            task_type: A label for logging (e.g. "text_extraction").
+            preferred_provider: Optional preferred provider name.
+        """
         provider = await self.get_best_provider(
-            task_type="text_extraction",
+            task_type=task_type,
             preferred_provider=preferred_provider,
         )
 
         try:
-            return await provider.extract_text_from_content(content, file_type)
+            return await operation(provider)
         except Exception as e:
             logger.error(
-                "Text extraction failed with provider",
+                f"{task_type} failed with provider",
                 provider=provider.provider_name,
                 error=str(e),
             )
@@ -234,12 +240,10 @@ class AIManager:
                 if fallback_provider != provider:
                     try:
                         logger.info(
-                            "Trying fallback provider for text extraction",
+                            f"Trying fallback provider for {task_type}",
                             fallback=provider_name,
                         )
-                        return await fallback_provider.extract_text_from_content(
-                            content, file_type
-                        )
+                        return await operation(fallback_provider)
                     except Exception as fallback_error:
                         logger.warning(
                             "Fallback provider also failed",
@@ -249,8 +253,21 @@ class AIManager:
                         continue
 
             raise AIProviderError(
-                f"Text extraction failed with all providers: {str(e)}"
+                f"{task_type} failed with all providers: {str(e)}"
             )
+
+    async def extract_text_from_content(
+        self,
+        content: str,
+        file_type: str,
+        preferred_provider: Optional[str] = None,
+    ) -> str:
+        """Extract text using best available provider with fallback"""
+        return await self._with_fallback(
+            lambda p: p.extract_text_from_content(content, file_type),
+            task_type="text_extraction",
+            preferred_provider=preferred_provider,
+        )
 
     async def generate_questions(
         self,
@@ -263,55 +280,19 @@ class AIManager:
         preferred_provider: Optional[str] = None,
     ) -> List[QuestionCreate]:
         """Generate questions using best available provider with fallback"""
-        provider = await self.get_best_provider(
-            task_type="question_generation",
-            preferred_provider=preferred_provider,
-        )
-
-        try:
-            return await provider.generate_questions(
+        types = question_types or [QuestionType.MULTIPLE_CHOICE]
+        return await self._with_fallback(
+            lambda p: p.generate_questions(
                 text_content=text_content,
                 subject=subject,
                 topic=topic,
                 question_count=question_count,
                 difficulty=difficulty,
-                question_types=question_types or [QuestionType.MULTIPLE_CHOICE],
-            )
-        except Exception as e:
-            logger.error(
-                "Question generation failed with provider",
-                provider=provider.provider_name,
-                error=str(e),
-            )
-
-            # Try fallback providers
-            for provider_name, fallback_provider in self.providers.items():
-                if fallback_provider != provider:
-                    try:
-                        logger.info(
-                            "Trying fallback provider for question generation",
-                            fallback=provider_name,
-                        )
-                        return await fallback_provider.generate_questions(
-                            text_content=text_content,
-                            subject=subject,
-                            topic=topic,
-                            question_count=question_count,
-                            difficulty=difficulty,
-                            question_types=question_types
-                            or [QuestionType.MULTIPLE_CHOICE],
-                        )
-                    except Exception as fallback_error:
-                        logger.warning(
-                            "Fallback provider also failed",
-                            fallback=provider_name,
-                            error=str(fallback_error),
-                        )
-                        continue
-
-            raise AIProviderError(
-                f"Question generation failed with all providers: {str(e)}"
-            )
+                question_types=types,
+            ),
+            task_type="question_generation",
+            preferred_provider=preferred_provider,
+        )
 
     async def validate_question(
         self,
@@ -319,40 +300,11 @@ class AIManager:
         preferred_provider: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Validate question using best available provider with fallback"""
-        provider = await self.get_best_provider(
+        return await self._with_fallback(
+            lambda p: p.validate_question(question),
             task_type="question_validation",
             preferred_provider=preferred_provider,
         )
-
-        try:
-            return await provider.validate_question(question)
-        except Exception as e:
-            logger.error(
-                "Question validation failed with provider",
-                provider=provider.provider_name,
-                error=str(e),
-            )
-
-            # Try fallback providers
-            for provider_name, fallback_provider in self.providers.items():
-                if fallback_provider != provider:
-                    try:
-                        logger.info(
-                            "Trying fallback provider for question validation",
-                            fallback=provider_name,
-                        )
-                        return await fallback_provider.validate_question(question)
-                    except Exception as fallback_error:
-                        logger.warning(
-                            "Fallback provider also failed",
-                            fallback=provider_name,
-                            error=str(fallback_error),
-                        )
-                        continue
-
-            raise AIProviderError(
-                f"Question validation failed with all providers: {str(e)}"
-            )
 
     def get_available_providers(self) -> List[str]:
         """Get list of available providers"""
@@ -466,40 +418,28 @@ class AIManager:
     def get_available_models(
         self, provider_name: Optional[str] = None
     ) -> Dict[str, List[str]]:
-        """Get available models for providers. If provider_name is provided, return only that provider's models."""
-        models_map = {
-            "openai": [
-                "gpt-4o",
-                "gpt-4o-mini",
-                "gpt-4-turbo",
-                "gpt-3.5-turbo",
-            ],
-            "groq": [
-                "mixtral-8x7b-32768",
-                "llama3-70b-8192",
-                "llama3-8b-8192",
-            ],
-            "gemini": [
-                "gemini-1.5-pro",
-                "gemini-1.5-flash",
-                "gemini-pro",
-            ],
-        }
+        """Get available models for providers from centralized config.
+        If provider_name is provided, return only that provider's models."""
+        from app.core.ai_models_config import get_model_ids, ALL_PROVIDER_MODELS
+
         if provider_name:
             key = provider_name.lower()
-            if key in models_map:
-                return {key: models_map[key]}
-            return {}
-        return models_map
+            ids = get_model_ids(key, active_only=True)
+            return {key: ids} if ids else {}
+        return {
+            provider: get_model_ids(provider, active_only=True)
+            for provider in ALL_PROVIDER_MODELS
+        }
 
 
 async def get_ai_manager_for_tenant(
     tenant_id: str,
     tenant_config: Optional[Dict[str, Any]] = None,
 ) -> AIManager:
-    """Get or create AI manager for a specific tenant (async and guarded). If tenant_config differs, recreate the manager.
+    """Get or create AI manager for a specific tenant (async and guarded).
 
-    Uses per-tenant creation futures to prevent multiple coroutines from concurrently constructing AIManager.
+    If tenant_config differs, recreate the manager.
+    Uses per-tenant creation futures to prevent concurrent AIManager construction.
     """
     # First check: see if we can return existing without any heavy work
     creation_future = None
