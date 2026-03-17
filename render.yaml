@@ -42,3 +42,15 @@ services:
       # - UPLOADTHING_SECRET
       # - UPLOADTHING_APP_ID
       # - BACKEND_CORS_ORIGINS (your Vercel frontend URL)
+      - key: REDIS_URL
+        fromService:
+          name: learntrack-redis
+          type: keyvalue
+          property: connectionString
+
+# Redis instance for rate limiting, caching, and future Celery task queue
+keyValues:
+  - name: learntrack-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
