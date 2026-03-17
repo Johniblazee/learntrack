@@ -1,246 +1,81 @@
 # LearnTrack MVP
 
-A comprehensive learning management system built with **React SPA** and **FastAPI**.
+A learning management system for tutors, students, and parents — with AI-powered question generation.
 
-## 🚀 Architecture
+## Tech Stack
 
-This application has been **migrated from Next.js to React SPA** for improved flexibility and separation of concerns:
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite, React Router, TanStack Query, Tailwind CSS |
+| Backend | FastAPI, MongoDB (Motor), LangGraph |
+| Auth | Clerk (RS256 JWTs) |
+| AI | OpenAI, Anthropic, Google Gemini, Groq |
 
-- **Frontend**: React SPA with Vite (port 3000)
-- **Backend**: FastAPI with MongoDB (port 8000)
-- **Authentication**: Clerk React integration
-- **Routing**: React Router for client-side navigation
-
-## ✨ Features
-
-- **Multi-Role Support**: Tutors, Students, and Parents with role-specific dashboards
-- **Question Generation**: AI-powered question generation using multiple LLM providers
-- **Assignment Management**: Create, assign, and track student assignments
-- **Progress Tracking**: Monitor student learning progress and performance
-- **File Upload**: Support for document uploads using UploadThing
-- **Authentication**: Secure authentication with Clerk
-
-## 🛠 Tech Stack
-
-### Frontend (React SPA)
-- **React 18** - Modern React with hooks
-- **Vite** - Fast build tool and development server
-- **React Router v6** - Client-side routing
-- **TypeScript** - Type-safe development
-- **Tailwind CSS** - Utility-first CSS framework
-- **Shadcn/ui** - Modern UI components
-- **Clerk React** - Authentication and user management
-
-### Backend (FastAPI)
-- **FastAPI** - Modern Python web framework
-- **MongoDB** - NoSQL database
-- **Pydantic** - Data validation and serialization
-- **Motor** - Async MongoDB driver
-- **Multiple LLM Providers** - OpenAI, Anthropic, Google
-
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
-- **Node.js 18+** and **pnpm**
-- **Python 3.11+**
-- **uv** (Python package manager)
-- **MongoDB** (local or cloud)
+- Node.js 20+ and [pnpm](https://pnpm.io/)
+- Python 3.11+ and [uv](https://docs.astral.sh/uv/)
+- MongoDB (local or [Atlas](https://www.mongodb.com/atlas))
+- [Clerk](https://clerk.com/) account
 
-### 📁 Project Structure
+### Setup
 
-```
-learntrack-mvp/
-├── frontend/              # React SPA application
-│   ├── src/
-│   │   ├── components/    # React components
-│   │   ├── pages/         # Page components
-│   │   ├── lib/           # Utilities and API client
-│   │   ├── App.tsx        # Main app with routing
-│   │   └── main.tsx       # Entry point
-│   ├── package.json
-│   └── vite.config.ts
-├── backend/               # FastAPI backend
-│   ├── app/
-│   │   ├── api/           # API routes
-│   │   ├── core/          # Core configuration
-│   │   ├── models/        # Pydantic models
-│   │   ├── services/      # Business logic
-│   │   └── main.py        # FastAPI app
-│   ├── pyproject.toml
-│   └── uv.lock
-└── docs/                  # Documentation
-```
-
-### 🔧 Environment Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd learntrack-mvp
-   ```
-
-2. **Frontend Environment**
-   Create `frontend/.env.local`:
-   ```env
-   # Clerk Authentication
-   VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-   VITE_CLERK_TOKEN_TEMPLATE=fastapi
-
-   # API Configuration
-   VITE_API_BASE_URL=http://localhost:8000
-
-   # Optional: UploadThing
-   VITE_UPLOADTHING_APP_ID=your_uploadthing_app_id
-   ```
-
-3. **Backend Environment**
-   Create `backend/.env` (or repo root `.env`):
-   ```env
-   # Database
-   MONGODB_URL=mongodb://localhost:27017
-   DATABASE_NAME=learntrack_mvp
-
-   # App Security
-   SECRET_KEY=replace-with-a-secure-random-32-char-min-secret
-
-   # Authentication (Clerk)
-   CLERK_SECRET_KEY=your_clerk_secret_key
-   CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-   CLERK_WEBHOOK_SECRET=your_clerk_webhook_secret
-   CLERK_JWT_ISSUER=https://clerk.your-app.clerk.accounts.dev
-   CLERK_JWT_AUDIENCE=fastapi
-
-   # LLM Providers
-   OPENAI_API_KEY=your_openai_api_key
-   ANTHROPIC_API_KEY=your_anthropic_api_key
-   GOOGLE_API_KEY=your_google_api_key
-   GROQ_API_KEY=your_groq_api_key
-   GEMINI_API_KEY=your_gemini_api_key
-
-   # Email Provider (Plunk)
-   PLUNK_API_KEY=your_plunk_api_key
-
-   # UploadThing
-   UPLOADTHING_SECRET=your_uploadthing_secret
-   UPLOADTHING_APP_ID=your_uploadthing_app_id
-   ```
-   Note: `CLERK_JWT_AUDIENCE` should match `VITE_CLERK_TOKEN_TEMPLATE`.
-
-### 🏃‍♂️ Installation and Running
-
-1. **Install Frontend Dependencies**
-   ```bash
-   cd frontend
-   pnpm install
-   ```
-
-2. **Install Backend Dependencies**
-   ```bash
-   cd backend
-   uv sync --dev
-   ```
-
-3. **Start MongoDB**
-   Make sure MongoDB is running on your system.
-
-4. **Run the Application**
-
-   **Terminal 1 - Backend (FastAPI):**
-   ```bash
-   cd backend
-   uv run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-   **Terminal 2 - Frontend (React):**
-   ```bash
-   cd frontend
-   pnpm run dev
-   ```
-
-5. **Access the Application**
-   - **Frontend**: http://localhost:3000
-   - **Backend API**: http://localhost:8000
-   - **API Documentation**: http://localhost:8000/docs
-
-## 🌐 Application URLs
-
-### Frontend Routes (React Router)
-- `/` - Homepage
-- `/sign-in` - Sign in page
-- `/sign-up` - Sign up page
-- `/dashboard` - Role-based dashboard
-- `/assignments` - Assignment management
-- `/questions` - Question generation
-- `/students` - Student management
-
-### Backend API Endpoints
-- `GET /health` - Health check
-- `GET /api/v1/users/me` - Get current user profile
-- `GET /api/v1/students/` - List students
-- `POST /api/v1/students/` - Create student
-- `GET /api/v1/assignments/` - List assignments
-- `POST /api/v1/assignments/` - Create assignment
-- `POST /api/v1/questions/generate` - Generate questions using AI
-
-## 🔄 Migration Notes
-
-This application was successfully migrated from **Next.js** to **React SPA**:
-
-### ✅ Completed Changes:
-- ✅ Converted Next.js App Router to React Router v6
-- ✅ Replaced Next.js specific hooks (`useRouter` → `useNavigate`)
-- ✅ Updated Clerk integration (`@clerk/nextjs` → `@clerk/clerk-react`)
-- ✅ Migrated from Next.js build system to Vite
-- ✅ Updated environment variables (`NEXT_PUBLIC_*` → `VITE_*`)
-- ✅ Preserved all UI components and styling
-- ✅ Maintained FastAPI backend compatibility
-- ✅ Updated API client for React environment
-
-### 🎯 Benefits of Migration:
-- **Faster Development**: Vite provides instant hot reload
-- **Simpler Architecture**: Clear separation between frontend and backend
-- **Better Performance**: Optimized React SPA with code splitting
-- **Easier Deployment**: Independent frontend and backend deployments
-- **More Flexibility**: Standard React patterns and ecosystem
-
-## 🧪 Development
-
-### Code Style
-- **Frontend**: ESLint (no Prettier)
-- **Backend**: Black + isort + flake8
-
-### Testing
 ```bash
-# Frontend tests
-cd frontend
-pnpm run test
-
-# Backend tests
-cd backend
-uv run pytest
+git clone <repository-url>
+cd learntrack-mvp
 ```
 
-## 🚀 Deployment
+Copy the example env files and fill in your values:
 
-### Frontend (Vercel/Netlify)
-1. Build the React app: `cd frontend && pnpm run build`
-2. Deploy the `dist` folder
-3. Set environment variables in hosting platform
+```bash
+cp frontend/.env.example frontend/.env.local
+cp backend/.env.example backend/.env
+```
 
-### Backend (Railway/Heroku/DigitalOcean)
-1. Create a new app
-2. Set environment variables
-3. Deploy from `backend` directory
+Install dependencies:
 
-## 🤝 Contributing
+```bash
+# Frontend
+cd frontend && pnpm install
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+# Backend
+cd backend && uv sync
+```
 
-## 📄 License
+### Run
 
-This project is licensed under the MIT License.
+```bash
+# Terminal 1 — Backend
+cd backend
+uv run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2 — Frontend
+cd frontend
+pnpm run dev
+```
+
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API docs: http://localhost:8000/docs
+
+## Testing
+
+```bash
+# Frontend
+cd frontend && pnpm test
+
+# Backend
+cd backend && uv run pytest
+```
+
+## Deployment
+
+- **Frontend** deploys to Vercel
+- **Backend** deploys to Render (Docker) — see `render.yaml`
+- CI runs on GitHub Actions — Render auto-deploys after checks pass
+
+## License
+
+MIT
