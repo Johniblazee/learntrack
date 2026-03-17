@@ -1,24 +1,3 @@
-# ---------- build stage ----------
-FROM python:3.11-slim AS builder
-
-WORKDIR /app
-
-# Install build-only system deps (gcc for C extensions)
-RUN apt-get update && apt-get install -y --no-install-recommends gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv from official image instead of pip install
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# Install Python deps (cached unless pyproject.toml/uv.lock change)
-COPY pyproject.toml uv.lock* ./
-RUN if [ -f uv.lock ]; then \
-      uv sync --no-dev --frozen --no-install-project; \
-    else \
-      uv sync --no-dev --no-install-project; \
-    fi
-
-# ---------- runtime stage ----------
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -28,17 +7,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ENVIRONMENT=production \
     PATH="/app/.venv/bin:$PATH"
 
-# Runtime-only system deps (no gcc)
+# uv from official image (no pip install needed)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Runtime system deps only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user before copying files (avoids chown -R)
 RUN useradd -m -s /bin/bash appuser
 
-# Copy venv from builder
-COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+# Install Python deps (cached layer unless pyproject.toml/uv.lock change)
+COPY --chown=appuser:appuser pyproject.toml uv.lock* ./
+RUN if [ -f uv.lock ]; then \
+      uv sync --no-dev --frozen --no-install-project; \
+    else \
+      uv sync --no-dev --no-install-project; \
+    fi
 
 # Copy application code
 COPY --chown=appuser:appuser . .
