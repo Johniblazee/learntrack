@@ -12,7 +12,11 @@ Implements the CRAG (Corrective RAG) pattern with:
 """
 
 from typing import Optional, Dict, Any, List
+import asyncio
 import uuid
+
+# Overall timeout for the entire RAG graph execution (seconds)
+GRAPH_TIMEOUT = 300
 from datetime import datetime, timezone
 import structlog
 
@@ -226,9 +230,11 @@ class AgenticRAGAgent:
             await sse_handler.send(StreamEvent.rag_start(session_id, query))
 
         try:
-            # Build and run graph
+            # Build and run graph with overall timeout
             graph = self._build_graph(sse_handler)
-            final_state = await graph.ainvoke(initial_state)
+            final_state = await asyncio.wait_for(
+                graph.ainvoke(initial_state), timeout=GRAPH_TIMEOUT
+            )
 
             # Determine status
             if final_state.get("error"):

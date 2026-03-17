@@ -3,7 +3,7 @@ Dependency injection for FastAPI endpoints
 Provides singleton service instances to avoid per-request instantiation
 """
 
-from functools import lru_cache
+import asyncio
 from typing import Annotated
 
 from fastapi import Depends
@@ -20,18 +20,22 @@ logger = structlog.get_logger()
 class ServiceContainer:
     """
     Container for service instances.
-    Services are lazily initialized and cached per database instance.
+    Services are lazily initialized and cached by service class name only.
     """
 
     _instances: dict = {}
+    _lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
-    def get_service(cls, service_class, database: AsyncIOMotorDatabase):
-        """Get or create a service instance"""
-        key = (service_class.__name__, id(database))
+    async def get_service(cls, service_class, database: AsyncIOMotorDatabase):
+        """Get or create a service instance (thread-safe)"""
+        key = service_class.__name__
         if key not in cls._instances:
-            cls._instances[key] = service_class(database)
-            logger.debug(f"Created new {service_class.__name__} instance")
+            async with cls._lock:
+                # Double-check after acquiring lock
+                if key not in cls._instances:
+                    cls._instances[key] = service_class(database)
+                    logger.debug(f"Created new {service_class.__name__} instance")
         return cls._instances[key]
 
     @classmethod
@@ -45,7 +49,7 @@ async def get_question_service(database: AsyncIOMotorDatabase = Depends(get_data
     """Dependency to get QuestionService instance"""
     from app.services.question_service import QuestionService
 
-    return ServiceContainer.get_service(QuestionService, database)
+    return await ServiceContainer.get_service(QuestionService, database)
 
 
 # Assignment Service Dependency
@@ -55,7 +59,7 @@ async def get_assignment_service(
     """Dependency to get AssignmentService instance"""
     from app.services.assignment_service import AssignmentService
 
-    return ServiceContainer.get_service(AssignmentService, database)
+    return await ServiceContainer.get_service(AssignmentService, database)
 
 
 # Subject Service Dependency
@@ -63,7 +67,7 @@ async def get_subject_service(database: AsyncIOMotorDatabase = Depends(get_datab
     """Dependency to get SubjectService instance"""
     from app.services.subject_service import SubjectService
 
-    return ServiceContainer.get_service(SubjectService, database)
+    return await ServiceContainer.get_service(SubjectService, database)
 
 
 # User Service Dependency
@@ -71,7 +75,7 @@ async def get_user_service(database: AsyncIOMotorDatabase = Depends(get_database
     """Dependency to get UserService instance"""
     from app.services.user_service import UserService
 
-    return ServiceContainer.get_service(UserService, database)
+    return await ServiceContainer.get_service(UserService, database)
 
 
 # Invitation Service Dependency
@@ -81,7 +85,7 @@ async def get_invitation_service(
     """Dependency to get InvitationService instance"""
     from app.services.invitation_service import InvitationService
 
-    return ServiceContainer.get_service(InvitationService, database)
+    return await ServiceContainer.get_service(InvitationService, database)
 
 
 # Material Service Dependency
@@ -89,7 +93,7 @@ async def get_material_service(database: AsyncIOMotorDatabase = Depends(get_data
     """Dependency to get MaterialService instance"""
     from app.services.material_service import MaterialService
 
-    return ServiceContainer.get_service(MaterialService, database)
+    return await ServiceContainer.get_service(MaterialService, database)
 
 
 # Message Service Dependency
@@ -97,7 +101,7 @@ async def get_message_service(database: AsyncIOMotorDatabase = Depends(get_datab
     """Dependency to get MessageService instance"""
     from app.services.message_service import MessageService
 
-    return ServiceContainer.get_service(MessageService, database)
+    return await ServiceContainer.get_service(MessageService, database)
 
 
 # Progress Service Dependency
@@ -105,7 +109,7 @@ async def get_progress_service(database: AsyncIOMotorDatabase = Depends(get_data
     """Dependency to get ProgressService instance"""
     from app.services.progress_service import ProgressService
 
-    return ServiceContainer.get_service(ProgressService, database)
+    return await ServiceContainer.get_service(ProgressService, database)
 
 
 # RAG Service Dependency (special case - may need API keys)
@@ -113,7 +117,7 @@ async def get_rag_service(database: AsyncIOMotorDatabase = Depends(get_database)
     """Dependency to get RAGService instance"""
     from app.rag.services.rag_service import RAGService
 
-    return ServiceContainer.get_service(RAGService, database)
+    return await ServiceContainer.get_service(RAGService, database)
 
 
 # Type aliases for cleaner endpoint signatures

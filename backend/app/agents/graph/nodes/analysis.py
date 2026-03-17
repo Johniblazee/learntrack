@@ -2,9 +2,13 @@
 Prompt analysis node for LangGraph agent.
 """
 
+import asyncio
 import json
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
+
+# Timeout for individual LLM calls (seconds)
+LLM_CALL_TIMEOUT = 60
 
 from app.agents.graph.state import AgentState, PromptAnalysis
 from app.core.prompt_manager import get_prompt
@@ -23,14 +27,20 @@ class PromptAnalyzerNode(BaseNode):
 
         try:
             system_prompt = await get_prompt("prompt_analyzer")
+            # Validate prompt length
+            user_prompt = state["original_prompt"]
+            if len(user_prompt) > 2000:
+                user_prompt = user_prompt[:2000]
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(
-                    content=f"Analyze this prompt: {state['original_prompt']}"
+                    content=f"Analyze this prompt: <user_prompt>{user_prompt}</user_prompt>"
                 ),
             ]
 
-            response = await self.llm.ainvoke(messages)
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+            )
             content = response.content
 
             # Parse JSON from response

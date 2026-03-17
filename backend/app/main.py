@@ -53,6 +53,25 @@ def _track_background_task(task, task_name: str):
     return task
 
 
+async def _db_health_monitor():
+    """Periodic background task to log MongoDB connection pool health."""
+    while True:
+        await asyncio.sleep(300)  # Check every 5 minutes
+        try:
+            if database.client is not None:
+                server_info = await database.client.admin.command("ping")
+                pool = database.client.options.pool_options
+                logger.info(
+                    "MongoDB health check OK",
+                    max_pool_size=pool.max_pool_size,
+                    min_pool_size=pool.min_pool_size,
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("MongoDB health check failed", error=str(e))
+
+
 async def _run_startup_bootstrap(db_ref):
     """Run non-critical schema bootstrap work outside request-serving startup."""
     from app.bootstrap import run_bootstrap_tasks
@@ -81,6 +100,10 @@ async def lifespan(app: FastAPI):
                 "database_bootstrap",
             )
             app.state.startup_tasks["database_bootstrap"] = task
+
+        # Start background DB health monitor
+        health_task = asyncio.create_task(_db_health_monitor())
+        app.state.startup_tasks["db_health_monitor"] = health_task
 
         logger.info("FastAPI application started successfully")
     except Exception as e:

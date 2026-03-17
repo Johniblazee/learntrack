@@ -181,9 +181,9 @@ class GenerationConfig(BaseModel):
     question_types: List[QuestionType] = [QuestionType.MULTIPLE_CHOICE]
     difficulty: Difficulty = Difficulty.MEDIUM
     blooms_levels: List[BloomsLevel] | Literal["AUTO"] = "AUTO"
-    subject: Optional[str] = None
-    topic: Optional[str] = None
-    grade_level: Optional[str] = None
+    subject: Optional[str] = Field(None, max_length=500)
+    topic: Optional[str] = Field(None, max_length=500)
+    grade_level: Optional[str] = Field(None, max_length=100)
     special_requirements: List[str] = []
     # ReAct agent iteration limit
     max_iterations: int = 3  # Maximum reasoning/action loops before forcing completion

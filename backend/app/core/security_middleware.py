@@ -43,13 +43,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self.frame_options = frame_options
 
         # Default CSP policy
+        # Note: 'unsafe-inline' kept for style-src (needed for dynamic styles);
+        # nonce-based CSP requires frontend changes and should be phased in later.
         self.csp_policy = csp_policy or {
             "default-src": "'self'",
-            "script-src": "'self' 'unsafe-inline' 'unsafe-eval' https://clerk.com https://*.clerk.accounts.dev https://cdn.jsdelivr.net",
+            "script-src": "'self' 'unsafe-inline' https://clerk.com https://*.clerk.accounts.dev https://cdn.jsdelivr.net",
             "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
             "img-src": "'self' data: https: blob: https://fastapi.tiangolo.com",
             "font-src": "'self' https://fonts.gstatic.com",
-            "connect-src": "'self' https://api.clerk.com https://*.clerk.accounts.dev wss://* https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.groq.com https://us.i.posthog.com",
+            "connect-src": "'self' https://api.clerk.com https://*.clerk.accounts.dev wss://*.clerk.accounts.dev https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.groq.com https://us.i.posthog.com",
             "frame-ancestors": "'self'",
             "form-action": "'self'",
             "base-uri": "'self'",

@@ -4,9 +4,13 @@ Includes follow-up generation, reflection, query response, and cleanup nodes.
 """
 
 from datetime import datetime
+import asyncio
 import json
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
+
+# Timeout for individual LLM calls (seconds)
+LLM_CALL_TIMEOUT = 60
 
 from app.agents.graph.state import (
     AgentState,
@@ -171,13 +175,15 @@ Consider:
                 ),
             ]
 
-            response = await self.llm.ainvoke(messages)
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+            )
             content = response.content
 
             if not content or not content.strip():
                 logger.warning("Empty response from LLM in reflect node, using default")
                 reflection = ReflectionResult(
-                    overall_quality=0.85,
+                    overall_quality=0.0,
                     strengths=["Questions generated successfully"],
                     improvements=[],
                     should_regenerate=False,
@@ -198,7 +204,7 @@ Consider:
             if not json_content:
                 logger.warning("Empty JSON content in reflect node, using default")
                 reflection = ReflectionResult(
-                    overall_quality=0.85,
+                    overall_quality=0.0,
                     strengths=["Questions generated successfully"],
                     improvements=[],
                     should_regenerate=False,
@@ -234,12 +240,21 @@ Consider:
                 f"Quality assessment: {reflection.overall_quality:.0%}",
             )
 
+        except asyncio.TimeoutError:
+            logger.error("Reflection LLM call timed out")
+            state["reflection_result"] = ReflectionResult(
+                overall_quality=0.0,
+                strengths=[],
+                improvements=["Quality evaluation timed out"],
+                should_regenerate=False,
+                regenerate_indices=[],
+            )
         except Exception as e:
             logger.error("reflect failed", error=str(e))
             state["reflection_result"] = ReflectionResult(
-                overall_quality=0.8,
-                strengths=["Questions generated"],
-                improvements=[],
+                overall_quality=0.0,
+                strengths=[],
+                improvements=["Quality evaluation failed"],
                 should_regenerate=False,
                 regenerate_indices=[],
             )
@@ -284,14 +299,16 @@ Be clear, concise, and educational."""
 {questions_context}
 
 ## User Question
-{query}
+<user_query>{query[:1000]}</user_query>
 
 Provide a helpful response.
 """
                 ),
             ]
 
-            response = await self.llm.ainvoke(messages)
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+            )
             state["response_to_query"] = response.content
 
             self.add_thinking_step(state, "observation", "Responded to query")

@@ -106,11 +106,9 @@ async def learntrack_exception_handler(request: Request, exc: LearnTrackExceptio
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "error": {
-                "type": exc.__class__.__name__,
-                "message": exc.message,
-                "details": exc.details
-            }
+            "detail": exc.message,
+            "code": exc.__class__.__name__,
+            "status_code": exc.status_code,
         }
     )
 
@@ -163,12 +161,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "error": {
-                "type": error_type,
-                "message": message,
-                "details": details,
-                "status_code": exc.status_code
-            }
+            "detail": message,
+            "code": error_type,
+            "status_code": exc.status_code,
         }
     )
 
@@ -184,13 +179,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
-            "error": {
-                "type": "ValidationError",
-                "message": "Request validation failed",
-                "details": {
-                    "errors": exc.errors()
-                }
-            }
+            "detail": "Request validation failed",
+            "code": "ValidationError",
+            "status_code": status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "errors": exc.errors(),
         }
     )
 
@@ -208,10 +200,8 @@ async def general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            "error": {
-                "type": "InternalServerError",
-                "message": "An unexpected error occurred",
-                "details": {}
-            }
+            "detail": "An unexpected error occurred",
+            "code": "InternalServerError",
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
         }
     )

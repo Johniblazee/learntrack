@@ -4,10 +4,14 @@ Includes QuestionGeneratorNode and GenerateArtifactNode.
 """
 
 from typing import List, Optional
+import asyncio
 import json
 import re
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
+
+# Timeout for individual LLM calls (seconds)
+LLM_CALL_TIMEOUT = 60
 
 from app.agents.graph.state import (
     AgentState,
@@ -62,7 +66,9 @@ IMPORTANT: Your response must contain exactly {total} question objects in a sing
                 ),
             ]
 
-            response = await self.llm.ainvoke(messages)
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+            )
             questions = self._parse_questions(response.content, state)
 
             state["questions"] = questions
@@ -73,13 +79,16 @@ IMPORTANT: Your response must contain exactly {total} question objects in a sing
                     await self.sse_handler.send_question_complete(
                         question_id=q.question_id,
                         question_data=q.model_dump(mode="json"),
-                        score=q.quality_score or 0.85,
+                        score=q.quality_score or 0.0,
                     )
 
             self.add_thinking_step(
                 state, "observation", f"Generated {len(questions)} questions"
             )
 
+        except asyncio.TimeoutError:
+            logger.error("Question generation timed out")
+            state["error"] = "Question generation timed out"
         except Exception as e:
             logger.error("Question generation failed", error=str(e))
             state["error"] = str(e)
@@ -100,19 +109,19 @@ IMPORTANT: Your response must contain exactly {total} question objects in a sing
         return "\n".join(context_parts)
 
     def _build_request(self, state: AgentState) -> str:
-        """Build the generation request"""
+        """Build the generation request with user input clearly delimited"""
         config = state["generation_config"]
         types = ", ".join([t.value for t in config.question_types])
 
         return f"""
-Subject: {config.subject or "Not specified"}
-Topic: {config.topic or "From prompt"}
+<user_subject>{config.subject or "Not specified"}</user_subject>
+<user_topic>{config.topic or "From prompt"}</user_topic>
 Question Types: {types}
 Difficulty: {config.difficulty.value}
 Bloom's Levels: {config.blooms_levels}
 Count: {config.question_count}
 Special Requirements: {", ".join(config.special_requirements) or "None"}
-Enhanced Prompt: {state.get("enhanced_prompt", state["original_prompt"])}
+<user_prompt>{state.get("enhanced_prompt", state["original_prompt"])}</user_prompt>
 """
 
     def _parse_questions(
@@ -174,7 +183,7 @@ Enhanced Prompt: {state.get("enhanced_prompt", state["original_prompt"])}
                     if item.get("source_citations")
                     else [],
                     tags=item.get("tags", []),
-                    quality_score=0.85,
+                    quality_score=None,
                     is_valid=True,
                 )
                 questions.append(q)
@@ -242,7 +251,7 @@ class GenerateArtifactNode(BaseNode):
                         await self.sse_handler.send_question_complete(
                             question_id=question.question_id,
                             question_data=question.model_dump(mode="json"),
-                            score=question.quality_score or 0.85,
+                            score=question.quality_score or 0.0,
                         )
 
             artifact = ArtifactContent(
@@ -378,12 +387,12 @@ class GenerateArtifactNode(BaseNode):
 {context}
 
 ## Generation Request
-Subject: {config.subject or "Not specified"}
-Topic: {config.topic or state["original_prompt"]}
+<user_subject>{config.subject or "Not specified"}</user_subject>
+<user_topic>{config.topic or state["original_prompt"]}</user_topic>
 Question Type: {q_type.value}
 Difficulty: {config.difficulty.value}
 Bloom's Levels: {config.blooms_levels}
-Enhanced Prompt: {state.get("enhanced_prompt", state["original_prompt"])}
+<user_prompt>{state.get("enhanced_prompt", state["original_prompt"])}</user_prompt>
 
 ## Already Generated Questions (do not repeat):
 {existing_str}
@@ -413,7 +422,9 @@ Output as a single JSON object (not an array).
                                 question_number=question_number,
                             )
             else:
-                response = await self.llm.ainvoke(messages)
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
                 streamed_content = response.content
 
             question = self._parse_single_question(
@@ -475,7 +486,7 @@ Output as a single JSON object (not an array).
                 if item.get("source_citations")
                 else [],
                 tags=item.get("tags", []),
-                quality_score=0.85,
+                quality_score=None,
                 is_valid=True,
             )
             return question

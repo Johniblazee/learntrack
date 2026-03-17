@@ -54,30 +54,17 @@ class BaseAIProvider(ABC):
         """Validate a question for quality and correctness"""
         pass
 
-    def _sanitize_input(self, text: str) -> str:
-        """Sanitize user input to reduce prompt injection risks.
+    def _sanitize_input(self, text: str, max_length: int = 2000) -> str:
+        """Sanitize user input for LLM prompts.
 
-        Strips common directive-like phrases that could alter prompt behavior.
-        Note: This provides defense-in-depth but cannot fully eliminate prompt
-        injection risks from determined adversaries with full control over inputs.
+        Truncates to max_length to prevent context stuffing.
+        User input should always be placed in clearly delimited sections
+        (e.g. XML tags) within prompts rather than relying on blocklists.
         """
         if not text:
             return text
-        # Strip/escape common directive patterns (case-insensitive)
-        dangerous_patterns = [
-            "ignore previous instructions",
-            "ignore all previous instructions",
-            "disregard previous",
-            "forget everything",
-            "system prompt:",
-            "new instructions:",
-            "you are now",
-            "role:",
-        ]
-        import re
-
-        for pattern in dangerous_patterns:
-            text = re.sub(pattern, "[FILTERED]", text, flags=re.IGNORECASE)
+        if len(text) > max_length:
+            text = text[:max_length]
         return text
 
     def _build_question_prompt(

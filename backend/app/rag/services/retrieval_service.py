@@ -84,8 +84,8 @@ class RetrievalService:
 
     def _create_qdrant_client(self) -> QdrantClient:
         if self.qdrant_api_key:
-            return QdrantClient(url=self.qdrant_url, api_key=self.qdrant_api_key)
-        return QdrantClient(url=self.qdrant_url)
+            return QdrantClient(url=self.qdrant_url, api_key=self.qdrant_api_key, timeout=10)
+        return QdrantClient(url=self.qdrant_url, timeout=10)
 
     @property
     def qdrant_client(self) -> QdrantClient:

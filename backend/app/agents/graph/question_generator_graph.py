@@ -10,8 +10,12 @@ Architecture:
 """
 
 from typing import Optional, Dict, Any, AsyncGenerator
+import asyncio
 import uuid
 from datetime import datetime, timezone
+
+# Overall timeout for the entire graph execution (seconds)
+GRAPH_TIMEOUT = 300
 import structlog
 
 from langgraph.graph import StateGraph, END
@@ -277,9 +281,11 @@ class QuestionGeneratorAgent:
             )
 
         try:
-            # Build and run graph
+            # Build and run graph with overall timeout
             graph = self._build_graph(sse_handler)
-            final_state = await graph.ainvoke(initial_state)
+            final_state = await asyncio.wait_for(
+                graph.ainvoke(initial_state), timeout=GRAPH_TIMEOUT
+            )
 
             # Create session result
             session = GenerationSession(
@@ -302,6 +308,11 @@ class QuestionGeneratorAgent:
 
             return session
 
+        except asyncio.TimeoutError:
+            logger.error("Generation timed out", session_id=session_id, timeout=GRAPH_TIMEOUT)
+            if sse_handler:
+                await sse_handler.send_error("Generation timed out", code="TIMEOUT")
+            raise
         except Exception as e:
             logger.error("Generation failed", session_id=session_id, error=str(e))
             if sse_handler:

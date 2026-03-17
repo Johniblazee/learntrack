@@ -242,11 +242,7 @@ class EnhancedClerkJWTBearer:
     async def verify_token(self, token: str) -> ClerkUserContext:
         """Verify Clerk JWT token and extract user context"""
         try:
-            # Development mode fallback
-            if token == "dev_token" and settings.ENVIRONMENT == "development":
-                return self._create_dev_user_context()
-
-            # Try JWKS verification first (RS256)
+            # Try JWKS verification (RS256)
             try:
                 jwks = await self.get_jwks()
                 if jwks and "keys" in jwks:
@@ -531,11 +527,10 @@ class EnhancedClerkJWTBearer:
             if role == UserRole.TUTOR or role == UserRole.SUPER_ADMIN:
                 tutor_id = user_id  # Tutors and super admins use their own clerk_id as tutor_id
             else:
-                # For students and parents, we'll need to look up their tutor_id from the database
-                # For now, use a placeholder - this will be set by _sync_user_to_database
+                # For students and parents, look up their tutor_id from the database
                 tutor_id = (
-                    db_user.get("tutor_id", "placeholder") if db_user else "placeholder"
-                )
+                    db_user.get("tutor_id") if db_user else None
+                ) or user_id  # Fall back to own ID rather than a shared placeholder
 
             # Create user context
             user_context = ClerkUserContext(
@@ -592,19 +587,23 @@ class EnhancedClerkJWTBearer:
         return permission_map.get(role, ["read"])
 
     async def _get_user_from_database(self, clerk_id: str) -> Optional[dict]:
-        """Get user from database by clerk_id to check for super admin status"""
+        """Get user from database by clerk_id.
+
+        Uses sequential queries with early return: most users are tutors,
+        so we check that collection first to avoid three parallel queries.
+        """
         if clerk_id in _user_db_cache:
             return _user_db_cache[clerk_id]
         try:
             db = await get_database()
-            results = await asyncio.gather(
-                db["tutors"].find_one({"clerk_id": clerk_id}),
-                db["students"].find_one({"clerk_id": clerk_id}),
-                db["parents"].find_one({"clerk_id": clerk_id}),
-            )
-            user = next((r for r in results if r), None)
-            _user_db_cache[clerk_id] = user
-            return user
+            # Sequential with early return — tutors are the most common role
+            for collection_name in ("tutors", "students", "parents"):
+                user = await db[collection_name].find_one({"clerk_id": clerk_id})
+                if user:
+                    _user_db_cache[clerk_id] = user
+                    return user
+            _user_db_cache[clerk_id] = None
+            return None
         except Exception as e:
             logger.error(
                 "Failed to get user from database", error=str(e), clerk_id=clerk_id
@@ -660,24 +659,6 @@ class EnhancedClerkJWTBearer:
         except Exception as e:
             logger.error("Failed to sync user to database", error=str(e))
             # Don't fail authentication if database sync fails
-
-    def _create_dev_user_context(self) -> ClerkUserContext:
-        """Create development user context for local testing."""
-        return ClerkUserContext(
-            user_id="dev_user_123",
-            clerk_id="dev_user_123",
-            email="dev@test.com",
-            name="Development User",
-            role=UserRole.TUTOR,
-            roles=[UserRole.TUTOR],
-            permissions=["read", "write", "create", "delete", "manage_students"],
-            session_id="dev_session",
-            created_at=datetime.now(timezone.utc),
-            last_sign_in=datetime.now(timezone.utc),
-            tutor_id="dev_user_123",
-            student_ids=[],
-        )
-
 
 _enhanced_clerk_bearer: Optional[EnhancedClerkJWTBearer] = None
 security = HTTPBearer()

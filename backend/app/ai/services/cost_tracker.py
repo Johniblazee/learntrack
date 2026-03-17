@@ -113,11 +113,26 @@ class CostTrackingService:
     QUOTA_COLLECTION = "cost_quotas"
     ALERTS_COLLECTION = "cost_alerts"
 
+    # Rough chars-per-token ratio for pre-flight estimation (conservative)
+    _CHARS_PER_TOKEN = 4
+
     def __init__(self, database: AsyncIOMotorDatabase):
         self.db = database
         self.cost_collection = database[self.COLLECTION_NAME]
         self.quota_collection = database[self.QUOTA_COLLECTION]
         self.alerts_collection = database[self.ALERTS_COLLECTION]
+
+    def estimate_tokens(self, text: str) -> int:
+        """Rough pre-flight token estimate (~4 chars per token)."""
+        return max(1, len(text) // self._CHARS_PER_TOKEN)
+
+    def estimate_cost(self, provider: str, model: str, input_chars: int, output_chars: int = 0) -> Decimal:
+        """Estimate cost before making an LLM call for quota pre-checks."""
+        input_tokens = max(1, input_chars // self._CHARS_PER_TOKEN)
+        output_tokens = max(0, output_chars // self._CHARS_PER_TOKEN) if output_chars else input_tokens  # assume similar output
+        input_cost = self._calculate_cost(provider, model, input_tokens, "input")
+        output_cost = self._calculate_cost(provider, model, output_tokens, "output")
+        return input_cost + output_cost
 
     async def track_usage(
         self,

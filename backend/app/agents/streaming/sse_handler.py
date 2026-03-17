@@ -36,7 +36,7 @@ class SSEHandler:
         on_question_complete: Optional[QuestionSaveCallback] = None,
     ):
         self.session_id = session_id
-        self._queue: asyncio.Queue[StreamEventData] = asyncio.Queue()
+        self._queue: asyncio.Queue[StreamEventData] = asyncio.Queue(maxsize=1000)
         self._is_closed = False
         self._event_count = 0
         self._on_question_complete = on_question_complete
@@ -50,7 +50,16 @@ class SSEHandler:
             return
 
         self._event_count += 1
-        await self._queue.put(event)
+        try:
+            await asyncio.wait_for(self._queue.put(event), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.error(
+                "SSE queue full, closing stream",
+                session_id=self.session_id,
+                queue_size=self._queue.qsize(),
+            )
+            self._is_closed = True
+            return
         logger.debug(
             "Event queued",
             session_id=self.session_id,

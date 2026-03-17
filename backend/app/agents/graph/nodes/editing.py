@@ -5,9 +5,13 @@ Includes nodes for editing, updating, and rewriting questions.
 
 from typing import Dict, List, Optional
 from datetime import datetime
+import asyncio
 import json
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
+
+# Timeout for individual LLM calls (seconds)
+LLM_CALL_TIMEOUT = 60
 
 from app.agents.graph.state import (
     AgentState,
@@ -73,6 +77,10 @@ class QuestionEditorNode(BaseNode):
             )
             source_context = "\n".join([c.content for c in chunks])
 
+        # Validate edit instruction length
+        if len(edit_instruction) > 1000:
+            edit_instruction = edit_instruction[:1000]
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(
@@ -81,7 +89,7 @@ class QuestionEditorNode(BaseNode):
 {json.dumps(original.model_dump(), indent=2)}
 
 ## Edit Instruction
-{edit_instruction}
+<user_instruction>{edit_instruction}</user_instruction>
 
 ## New Source Materials
 {source_context or "Use existing sources"}
@@ -91,7 +99,7 @@ Apply the edit and return the updated question as JSON.
             ),
         ]
 
-        response = await self.llm.ainvoke(messages)
+        response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
 
         try:
             content = response.content
@@ -126,7 +134,7 @@ Apply the edit and return the updated question as JSON.
                 explanation=edited_data.get("explanation", original.explanation),
                 source_citations=original.source_citations,
                 tags=edited_data.get("tags", original.tags),
-                quality_score=0.85,
+                quality_score=None,
                 is_valid=True,
             )
 
@@ -173,6 +181,9 @@ class UpdateArtifactNode(BaseNode):
 
             system_prompt = await get_prompt("question_editor")
 
+            # Validate instruction length
+            safe_instruction = instruction[:1000] if len(instruction) > 1000 else instruction
+
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(
@@ -181,14 +192,14 @@ class UpdateArtifactNode(BaseNode):
 {json.dumps(original.model_dump(), indent=2)}
 
 ## Edit Instruction
-{instruction}
+<user_instruction>{safe_instruction}</user_instruction>
 
 Apply the edit and return the updated question as JSON.
 """
                 ),
             ]
 
-            response = await self.llm.ainvoke(messages)
+            response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
             edited = self._parse_edited_question(response.content, original)
 
             state["questions"][original_idx] = edited
@@ -206,7 +217,7 @@ Apply the edit and return the updated question as JSON.
                 await self.sse_handler.send_question_complete(
                     question_id=edited.question_id,
                     question_data=edited.model_dump(mode="json"),
-                    score=edited.quality_score or 0.85,
+                    score=edited.quality_score or 0.0,
                 )
 
             self.add_thinking_step(
@@ -255,7 +266,7 @@ Apply the edit and return the updated question as JSON.
                 explanation=edited_data.get("explanation", original.explanation),
                 source_citations=original.source_citations,
                 tags=edited_data.get("tags", original.tags),
-                quality_score=0.85,
+                quality_score=None,
                 is_valid=True,
             )
         except Exception as e:
@@ -312,7 +323,7 @@ Create a NEW, DIFFERENT question that replaces this one:
 - Type: {original.type.value}
 - Difficulty: {original.difficulty.value}
 - Bloom's Level: {original.blooms_level.value}
-- Topic: {state.get("enhanced_prompt", state["original_prompt"])}
+- Topic: <user_topic>{state.get("enhanced_prompt", state["original_prompt"])}</user_topic>
 
 The new question should cover similar concepts but be distinctly different from:
 "{original.question_text}"
@@ -322,7 +333,7 @@ Output a single question as JSON.
                 ),
             ]
 
-            response = await self.llm.ainvoke(messages)
+            response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
             new_question = self._parse_single_question(response.content, original)
 
             state["questions"][original_idx] = new_question
@@ -340,7 +351,7 @@ Output a single question as JSON.
                 await self.sse_handler.send_question_complete(
                     question_id=new_question.question_id,
                     question_data=new_question.model_dump(mode="json"),
-                    score=new_question.quality_score or 0.85,
+                    score=new_question.quality_score or 0.0,
                 )
 
             self.add_thinking_step(
@@ -390,7 +401,7 @@ Output a single question as JSON.
                 correct_answer=data.get("correct_answer", ""),
                 explanation=data.get("explanation", ""),
                 tags=data.get("tags", []),
-                quality_score=0.85,
+                quality_score=None,
                 is_valid=True,
             )
         except Exception as e:
@@ -455,7 +466,7 @@ NEW PARAMETERS:
 - Question Type: {new_type}
 - Difficulty: {new_difficulty}
 - Bloom's Level: {new_blooms}
-- Topic: {state.get("enhanced_prompt", state["original_prompt"])}
+- Topic: <user_topic>{state.get("enhanced_prompt", state["original_prompt"])}</user_topic>
 
 Create a question that tests the same concept but with the new parameters.
 Output as JSON.
@@ -463,7 +474,7 @@ Output as JSON.
                 ),
             ]
 
-            response = await self.llm.ainvoke(messages)
+            response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
             new_question = self._parse_question(response.content, original, new_theme)
 
             state["questions"][original_idx] = new_question
@@ -481,7 +492,7 @@ Output as JSON.
                 await self.sse_handler.send_question_complete(
                     question_id=new_question.question_id,
                     question_data=new_question.model_dump(mode="json"),
-                    score=new_question.quality_score or 0.85,
+                    score=new_question.quality_score or 0.0,
                 )
 
             self.add_thinking_step(
@@ -540,7 +551,7 @@ Output as JSON.
                 correct_answer=data.get("correct_answer", ""),
                 explanation=data.get("explanation", ""),
                 tags=data.get("tags", []),
-                quality_score=0.85,
+                quality_score=None,
                 is_valid=True,
             )
         except Exception as e:

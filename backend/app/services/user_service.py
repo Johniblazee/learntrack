@@ -295,8 +295,8 @@ class UserService:
                 )  # Tutors and super admins use their own clerk_id
             else:
                 tutor_id = (
-                    user_context.tutor_id or "placeholder"
-                )  # Will be updated later
+                    user_context.tutor_id or user_context.clerk_id
+                )  # Fall back to own ID; updated when linked to a tutor
 
             user_data = UserCreate(
                 clerk_id=user_context.clerk_id,

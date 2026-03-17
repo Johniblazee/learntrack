@@ -1,20 +1,22 @@
 # Render Blueprint - Infrastructure as Code
-# This file tells Render how to build and deploy your backend
-# Docs: https://docs.render.com/blueprint-spec
+# This file tells Render how to build and deploy the backend.
+# Docs: https://render.com/docs/blueprint-spec
 
 services:
   - type: web
     name: learntrack-api
     runtime: docker
-    # Use the Dockerfile in this directory
-    dockerfilePath: ./Dockerfile
-    # The root directory for the build context
+    branch: main
+    # rootDir sets the Docker build context to backend/
     rootDir: ./backend
-    # Free tier (512 MB RAM, shared CPU)
+    # dockerfilePath is relative to rootDir
+    dockerfilePath: ./Dockerfile
     plan: free
-    # Health check endpoint
+    # Wait for GitHub Actions CI checks to pass before deploying
+    autoDeployTrigger: checksPass
+    # Zero-downtime deploy health check
     healthCheckPath: /health
-    # Environment variables (set these in Render dashboard for secrets!)
+    # Non-secret environment variables
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -24,8 +26,8 @@ services:
         value: INFO
       - key: WEB_CONCURRENCY
         value: "1"
-      # These should be set in Render dashboard as secrets:
-      # - SECRET_KEY (required in production; use a secure random value, 32+ chars)
+      # Secrets: set these in Render dashboard, NOT here.
+      # - SECRET_KEY (required, 32+ chars random string)
       # - MONGODB_URL
       # - DATABASE_NAME
       # - CLERK_SECRET_KEY

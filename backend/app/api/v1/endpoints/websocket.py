@@ -65,6 +65,8 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+# DEPRECATED: Use Socket.IO (/ws/socket.io) for new integrations.
+# This raw WebSocket endpoint is kept for backward compatibility.
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,

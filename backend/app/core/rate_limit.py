@@ -33,11 +33,16 @@ def get_request_identifier(request: Request) -> str:
     return get_remote_address(request)
 
 
+# Use Redis when available for shared rate limiting across workers, else fall back to memory
+from app.core.config import settings as _settings
+
+_storage_uri = _settings.REDIS_URL or "memory://"
+
 # Create limiter with custom key function
 limiter = Limiter(
     key_func=get_request_identifier,
     default_limits=["100/minute"],  # Default limit for all endpoints
-    storage_uri="memory://",  # Use in-memory storage (consider Redis for production)
+    storage_uri=_storage_uri,
     strategy="fixed-window",
 )
 

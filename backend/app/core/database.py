@@ -102,12 +102,31 @@ class Database:
         except Exception as e:
             logger.warning("Failed to create some indexes", error=str(e))
 
+    # Bump this version whenever indexes are added/changed to trigger re-creation
+    SCHEMA_VERSION = 2
+
     async def _create_indexes(self):
-        """Create database indexes for better performance."""
+        """Create database indexes for better performance.
+
+        Uses a schema version stored in the database to skip index creation
+        when the schema hasn't changed, avoiding ~100 sequential create_index
+        calls on every application restart.
+        """
         if self.database is None:
             raise RuntimeError("Database is not initialized")
 
         db = self.database
+
+        # Check current schema version
+        meta = await db.schema_meta.find_one({"_id": "schema_version"})
+        if meta and meta.get("version") == self.SCHEMA_VERSION:
+            logger.info(
+                "Indexes already up to date",
+                schema_version=self.SCHEMA_VERSION,
+            )
+            return
+
+        logger.info("Creating/updating indexes", schema_version=self.SCHEMA_VERSION)
 
         try:
             # Tutors collection indexes
@@ -282,6 +301,13 @@ class Database:
             )
             await db.assignment_templates.create_index(
                 [("tutor_id", 1), ("created_at", -1)]
+            )
+
+            # Record schema version so subsequent restarts skip index creation
+            await db.schema_meta.update_one(
+                {"_id": "schema_version"},
+                {"$set": {"version": self.SCHEMA_VERSION}},
+                upsert=True,
             )
 
         except Exception:

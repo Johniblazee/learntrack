@@ -57,6 +57,9 @@ class Settings(BaseSettings):
                 )
         return v
 
+    # Redis (optional - used for rate limiting, caching)
+    REDIS_URL: Optional[str] = None
+
     # Database
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "learntrack_mvp"
