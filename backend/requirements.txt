@@ -19,21 +19,19 @@ pydantic[email]>=2.5.0,<3.0.0
 pydantic-settings>=2.1.0,<3.0.0
 
 # AI Providers
-openai>=1.109.0,<2.0.0
+openai>=1.12.0,<2.0.0
 anthropic>=0.18.0,<1.0.0
 google-generativeai>=0.4.0,<1.0.0
 
-# LangChain for RAG (pinned compatible versions, loosened to allow 0.3.x)
-langchain>=0.1.0,<0.4.0
-langchain-core>=0.1.0,<0.4.0
-langchain-community>=0.0.20,<0.4.0
-langchain-groq>=0.1.0,<0.4.0
-langchain-google-genai>=0.0.11,<0.4.0
-langchain-openai>=0.0.8,<0.4.0
-langchain-text-splitters>=0.0.1,<0.4.0
-langchain-qdrant>=0.1.0,<0.4.0
-langchain-sentence-transformers>=0.0.1,<0.4.0
-langgraph>=0.0.20,<0.4.0
+# LangChain for RAG (pinned to tested minor versions)
+langchain>=0.3.0,<0.4.0
+langchain-core>=0.3.0,<0.4.0
+langchain-community>=0.3.0,<0.4.0
+langchain-groq>=0.2.0,<0.3.0
+langchain-google-genai>=2.0.0,<3.0.0
+langchain-openai>=0.2.0,<0.3.0
+langchain-text-splitters>=0.3.0,<0.4.0
+langgraph>=0.2.0,<0.3.0
 
 # CLI Tools
 rich>=13.0.0,<14.0.0
@@ -45,8 +43,8 @@ qdrant-client>=1.7.0,<2.0.0
 tavily-python>=0.3.0,<1.0.0
 
 # Document Processing - LangChain Integrations
-langchain-docling>=0.1.0,<0.2.0
-langchain-unstructured>=0.0.1,<0.2.0
+langchain-docling>=0.3.0,<0.4.0
+langchain-unstructured>=0.3.0,<0.4.0
 
 # HTTP Client
 httpx>=0.26.0,<1.0.0
@@ -90,9 +88,5 @@ python-engineio>=4.9.0,<5.0.0
 # Email provider
 plunk>=0.0.1,<1.0.0
 
-
-
-
-
-
-
+# PostHog Analytics
+posthog>=1.1.0,<2.0.0
