@@ -232,7 +232,7 @@ Generate exactly {question_count} questions.
             from app.core.exceptions import AIProviderError
 
             raise AIProviderError(
-                f"Failed to parse AI response from {self.provider_name}: {e}"
+                f"Failed to parse AI response from {self.provider_name}"
             )
 
     # Health check endpoint URLs for lightweight connectivity verification.

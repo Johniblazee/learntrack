@@ -253,7 +253,7 @@ class AIManager:
                         continue
 
             raise AIProviderError(
-                f"{task_type} failed with all providers: {str(e)}"
+                f"{task_type} failed with all available providers"
             )
 
     async def extract_text_from_content(
