@@ -2,8 +2,6 @@
 Reference material management endpoints.
 """
 
-import mimetypes
-import os
 import hashlib
 import re
 from datetime import datetime, timezone
@@ -13,7 +11,7 @@ from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
@@ -35,15 +33,11 @@ from app.models.material import (
 )
 from app.models.file import EmbeddingStatus, FileStatus, SyncStatus
 from app.services.material_service import MaterialService
+from app.services.r2_storage_service import generate_presigned_url, upload_file as r2_upload
 from app.utils.pagination import PaginatedResponse, paginate
 
 logger = structlog.get_logger()
 router = APIRouter()
-
-BACKEND_ROOT = FilePath(__file__).resolve().parents[4]
-MATERIAL_UPLOAD_DIR = BACKEND_ROOT / "uploads" / "materials"
-MATERIAL_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000")
 
 
 class MoveMaterialRequest(BaseModel):
@@ -80,7 +74,7 @@ async def _authorize_uploaded_file_access(
     current_user: ClerkUserContext,
     database: AsyncIOMotorDatabase,
 ) -> dict:
-    file_doc = await database.files.find_one({"uploadthing_key": file_name})
+    file_doc = await database.files.find_one({"storage_key": file_name})
     if file_doc:
         file_tutor_id = str(file_doc.get("tutor_id") or "").strip()
 
@@ -124,7 +118,7 @@ async def _authorize_uploaded_file_access(
     if not material:
         raise HTTPException(status_code=404, detail="File not found")
 
-    return {"storage_path": str(MATERIAL_UPLOAD_DIR / file_name)}
+    return {}
 
 
 @router.post("/", response_model=Material)
@@ -317,7 +311,7 @@ async def upload_material_file(
     current_user: ClerkUserContext = Depends(require_tutor),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Upload a material file and return a URL for material records."""
+    """Upload a material file to R2 cloud storage."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required")
 
@@ -331,28 +325,31 @@ async def upload_material_file(
 
     extension = FilePath(file.filename).suffix.lower()
     safe_name = f"{uuid4().hex}{extension}"
-    output_path = MATERIAL_UPLOAD_DIR / safe_name
+    tenant_path = f"{current_user.clerk_id}/{safe_name}"
+    content_type = file.content_type or "application/octet-stream"
 
+    # Upload to Cloudflare R2
     try:
-        output_path.write_bytes(content)
+        await r2_upload(content, tenant_path, content_type)
     except Exception as e:
-        logger.error("Failed to persist uploaded material file", error=str(e))
+        logger.error("Failed to upload file to R2", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to store uploaded file")
 
     source_path = f"/api/v1/materials/files/{safe_name}"
     uploaded_at = datetime.now(timezone.utc)
     file_doc = {
-        "uploadthing_key": safe_name,
-        "uploadthing_url": f"{BACKEND_PUBLIC_URL}{source_path}",
+        "storage_key": safe_name,
+        "file_url": source_path,
         "source_url": source_path,
-        "storage_path": str(output_path),
+        "storage_path": None,
+        "r2_key": tenant_path,
         "filename": file.filename,
-        "content_type": file.content_type or "application/octet-stream",
+        "content_type": content_type,
         "size": len(content),
         "uploaded_by": current_user.clerk_id,
         "uploaded_at": uploaded_at,
         "tutor_id": current_user.clerk_id,
-        "tenant_path": f"{current_user.clerk_id}/{safe_name}",
+        "tenant_path": tenant_path,
         "status": FileStatus.PROCESSING.value,
         "processing_started_at": uploaded_at,
         "embedding_status": EmbeddingStatus.PENDING.value,
@@ -373,11 +370,13 @@ async def upload_material_file(
         "error_message": "Document text extraction did not run",
     }
 
+    # Extract text from in-memory bytes using temp file
     try:
         from app.rag.processors.document_processor import get_document_processor
 
         processor = get_document_processor()
-        extracted_text = await processor.extract_text_only(output_path)
+        documents = await processor.load_from_bytes(content, file.filename)
+        extracted_text = "\n\n".join(doc.page_content for doc in documents).strip()
         completed_at = datetime.now(timezone.utc)
         processing_updates = {
             "status": FileStatus.PROCESSED.value,
@@ -426,7 +425,7 @@ async def get_uploaded_material_file(
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Serve uploaded material files."""
+    """Serve uploaded material files via R2 presigned URL redirect."""
     sanitized_name = FilePath(file_name).name
     if sanitized_name != file_name:
         raise HTTPException(status_code=400, detail="Invalid file name")
@@ -437,14 +436,16 @@ async def get_uploaded_material_file(
         database=database,
     )
 
-    file_path = FilePath(
-        str(file_doc.get("storage_path") or MATERIAL_UPLOAD_DIR / sanitized_name)
-    )
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
+    # Generate presigned URL from R2
+    r2_key = file_doc.get("r2_key") or file_doc.get("tenant_path")
+    if not r2_key:
+        raise HTTPException(status_code=404, detail="File not found in storage")
 
-    media_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
-    return FileResponse(path=file_path, media_type=media_type, filename=file_path.name)
+    presigned_url = generate_presigned_url(r2_key)
+    if not presigned_url:
+        raise HTTPException(status_code=503, detail="Storage service unavailable")
+
+    return RedirectResponse(url=presigned_url, status_code=302)
 
 
 @router.put("/{material_id}/move", response_model=Material)

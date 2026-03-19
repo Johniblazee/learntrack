@@ -129,7 +129,7 @@ class DocumentLibraryItem(BaseModel):
     category: Optional[str] = None
     subject_id: Optional[str] = None
     topic: Optional[str] = None
-    uploadthing_url: str
+    file_url: str
 
     model_config = ConfigDict(
         json_encoders={datetime: lambda v: v.isoformat() if v else None}

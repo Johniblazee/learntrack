@@ -293,7 +293,7 @@ class DocumentGovernanceService:
 
             # Get file URL from database if not provided
             if not file_url:
-                file_url = str(file.get("uploadthing_url", ""))
+                file_url = str(file.get("source_url") or file.get("file_url") or "")
 
             # Re-process document
             result = await self._get_rag_service().process_document(

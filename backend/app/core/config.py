@@ -110,9 +110,12 @@ class Settings(BaseSettings):
     POSTHOG_API_KEY: Optional[str] = None
     POSTHOG_API_HOST: str = "https://us.i.posthog.com"
 
-    # UploadThing Configuration
-    UPLOADTHING_SECRET: Optional[str] = None
-    UPLOADTHING_APP_ID: Optional[str] = None
+    # Cloudflare R2 Storage
+    R2_ACCESS_KEY_ID: Optional[str] = None
+    R2_SECRET_ACCESS_KEY: Optional[str] = None
+    R2_ENDPOINT_URL: Optional[str] = None
+    R2_BUCKET_NAME: str = "learntrack-uploads"
+    R2_PUBLIC_URL: Optional[str] = None
 
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
@@ -129,7 +132,7 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
-    # File Storage (UploadThing Configuration)
+    # File Storage
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_FILE_TYPES: List[str] = [
         "application/pdf",

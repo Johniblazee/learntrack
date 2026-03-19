@@ -1,11 +1,11 @@
 """
-File handling models for UploadThing integration
+File handling models for cloud storage integration (Cloudflare R2)
 """
 
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from enum import Enum
-from pydantic import BaseModel, Field, HttpUrl, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.models.user import PyObjectId
 
@@ -69,13 +69,14 @@ class ProcessingHistoryEntry(BaseModel):
 
 
 class UploadedFile(BaseModel):
-    """UploadThing file model"""
+    """Uploaded file model"""
 
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
 
-    # UploadThing specific fields
-    uploadthing_key: str  # UploadThing file key
-    uploadthing_url: HttpUrl  # UploadThing file URL
+    # Storage fields
+    storage_key: str  # Unique file key (e.g. uuid.ext)
+    file_url: str  # API path or cloud URL
+    r2_key: Optional[str] = None  # Cloudflare R2 object key (tenant_path)
     filename: str
     content_type: str
     size: int
@@ -90,7 +91,7 @@ class UploadedFile(BaseModel):
         description="Tutor ID - references the tutor's Clerk user ID for tenant isolation",
     )
     tenant_path: Optional[str] = Field(
-        None, description="Tenant-prefixed storage path for S3 migration readiness"
+        None, description="Tenant-prefixed R2 key (clerk_id/uuid.ext)"
     )
 
     # Processing metadata
@@ -140,18 +141,11 @@ class UploadedFile(BaseModel):
     )
 
 
-class UploadThingWebhookPayload(BaseModel):
-    """UploadThing webhook payload"""
-
-    eventType: str
-    data: Dict[str, Any]
-
-
 class FileMetadataRequest(BaseModel):
-    """Request to register file metadata after UploadThing upload"""
+    """Request to register file metadata after upload"""
 
-    uploadthing_key: str
-    uploadthing_url: HttpUrl
+    storage_key: str
+    file_url: str
     filename: str
     content_type: str
     size: int
@@ -169,7 +163,7 @@ class FileRegistrationResponse(BaseModel):
     filename: str
     size: int
     status: FileStatus
-    uploadthing_url: str
+    file_url: str
     message: str
 
 
@@ -183,20 +177,7 @@ class FileProcessingResult(BaseModel):
     error_message: Optional[str] = None
 
 
-class UploadThingFileCreate(BaseModel):
-    """Create file record from UploadThing data"""
-
-    uploadthing_key: str
-    uploadthing_url: HttpUrl
-    filename: str
-    content_type: str
-    size: int
-    uploaded_by: str
-    subject_id: Optional[str] = None
-    topic: Optional[str] = None
-
-
-class UploadThingFileUpdate(BaseModel):
+class FileUpdate(BaseModel):
     """Update file record"""
 
     status: Optional[FileStatus] = None

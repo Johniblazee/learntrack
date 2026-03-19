@@ -192,6 +192,92 @@ class RAGService:
                 "error": str(e),
             }
 
+    async def process_document_from_text(
+        self,
+        extracted_text: str,
+        filename: str,
+        tenant_id: str,
+        user_id: str,
+        chunk_type: str = "semantic",
+        file_id: Optional[str] = None,
+        **chunk_kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Process a document from already-extracted text (no file path needed).
+        Creates Document objects from the text and runs chunking + embedding.
+        """
+        try:
+            documents = [
+                Document(
+                    page_content=extracted_text,
+                    metadata={
+                        "filename": filename,
+                        "file_id": file_id or filename,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                        "id": str(uuid.uuid4()),
+                    },
+                )
+            ]
+
+            chunks = await self.chunking_service.chunk_documents(
+                documents, chunk_type=chunk_type, **chunk_kwargs
+            )
+
+            if not chunks:
+                raise ValueError("No chunks were created from the text")
+
+            chunk_ids = await self.retrieval_service.add_documents(chunks)
+
+            await self._update_file_status(
+                filename,
+                tenant_id,
+                EmbeddingStatus.COMPLETED,
+                {
+                    "chunks_count": len(chunks),
+                    "chunk_ids": chunk_ids,
+                    "embedding_model": self.embedding_service.model_name,
+                    "chunk_type": chunk_type,
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+            logger.info(
+                "Successfully processed document from text",
+                filename=filename,
+                chunks_created=len(chunks),
+            )
+
+            return {
+                "success": True,
+                "filename": filename,
+                "chunks_count": len(chunks),
+                "chunk_ids": chunk_ids,
+                "embedding_model": self.embedding_service.model_name,
+                "chunk_type": chunk_type,
+            }
+
+        except Exception as e:
+            logger.error(
+                "Failed to process document from text",
+                error=str(e),
+                filename=filename,
+                tenant_id=tenant_id,
+            )
+            try:
+                await self._update_file_status(
+                    filename, tenant_id, EmbeddingStatus.FAILED, {"error": str(e)}
+                )
+            except Exception:
+                pass
+
+            return {
+                "success": False,
+                "filename": filename,
+                "error": str(e),
+            }
+
     async def search_documents(
         self,
         query: str,

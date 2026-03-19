@@ -2,7 +2,12 @@
 RAG (Retrieval-Augmented Generation) endpoints
 """
 
+import asyncio
+import time
+import uuid
 from typing import List, Dict, Any, Optional
+
+import structlog
 from fastapi import (
     APIRouter,
     Depends,
@@ -13,9 +18,6 @@ from fastapi import (
     Request,
 )
 from motor.motor_asyncio import AsyncIOMotorDatabase
-import structlog
-import time
-import uuid
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
@@ -433,8 +435,8 @@ async def get_document_library(
                 category=f.get("category"),
                 subject_id=f.get("subject_id"),
                 topic=f.get("topic"),
-                uploadthing_url=str(
-                    f.get("source_url") or f.get("uploadthing_url") or ""
+                file_url=str(
+                    f.get("source_url") or f.get("file_url") or ""
                 ),
             )
             library_items.append(item)
@@ -466,25 +468,60 @@ async def process_document_for_rag(
             raise HTTPException(status_code=404, detail="File not found")
 
         rag_service = _create_rag_service(database)
-        storage_path = str(file_doc.get("storage_path") or "")
-        source_url = file_doc.get("source_url") or file_doc.get("uploadthing_url")
-        if not storage_path:
-            raise HTTPException(
-                status_code=400, detail="File is missing local storage path"
+        filename = file_doc.get("filename") or file_id
+        extracted_text = file_doc.get("extracted_text")
+
+        # Prefer pre-extracted text; fall back to downloading from R2
+        if extracted_text:
+            process_coro = rag_service.process_document_from_text(
+                extracted_text,
+                filename,
+                current_user.clerk_id,
+                file_doc.get("uploaded_by") or current_user.clerk_id,
+                file_id=file_id,
+            )
+        else:
+            # Download from R2 to a temp file for processing
+            r2_key = file_doc.get("r2_key") or file_doc.get("tenant_path")
+            if not r2_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="File has no extracted text and no R2 storage key",
+                )
+
+            from app.services.r2_storage_service import download_file as r2_download
+            from app.rag.processors.document_processor import DocumentProcessor
+
+            file_bytes = await r2_download(r2_key)
+            processor = DocumentProcessor()
+            documents = await processor.load_from_bytes(file_bytes, filename)
+
+            if not documents:
+                raise HTTPException(
+                    status_code=400, detail="No content extracted from file"
+                )
+
+            extracted_text = "\n\n".join(
+                doc.page_content for doc in documents
+            ).strip()
+
+            # Cache the extracted text for future use
+            await database.files.update_one(
+                {"_id": file_oid},
+                {"$set": {"extracted_text": extracted_text}},
+            )
+
+            process_coro = rag_service.process_document_from_text(
+                extracted_text,
+                filename,
+                current_user.clerk_id,
+                file_doc.get("uploaded_by") or current_user.clerk_id,
+                file_id=file_id,
             )
 
         # Process in background if background_tasks available
         if background_tasks:
-            background_tasks.add_task(
-                rag_service.process_document,
-                storage_path,
-                file_doc.get("filename") or file_id,
-                current_user.clerk_id,
-                file_doc.get("uploaded_by") or current_user.clerk_id,
-                file_id=file_id,
-                tutor_id=current_user.clerk_id,
-                file_url=source_url,
-            )
+            background_tasks.add_task(lambda: asyncio.ensure_future(process_coro))
             return DocumentProcessingStatus(
                 file_id=file_id,
                 status="processing",
@@ -492,15 +529,7 @@ async def process_document_for_rag(
                 current_step="Document processing started",
             )
         else:
-            result = await rag_service.process_document(
-                storage_path,
-                file_doc.get("filename") or file_id,
-                current_user.clerk_id,
-                file_doc.get("uploaded_by") or current_user.clerk_id,
-                file_id=file_id,
-                tutor_id=current_user.clerk_id,
-                file_url=source_url,
-            )
+            result = await process_coro
             return DocumentProcessingStatus(
                 file_id=file_id,
                 status="completed" if result.get("success") else "failed",

@@ -36,7 +36,7 @@ class MaterialBase(BaseModel):
     title: str
     description: Optional[str] = None
     material_type: MaterialType
-    file_url: Optional[str] = None  # UploadThing URL or external link
+    file_url: Optional[str] = None  # R2 storage URL or external link
     file_id: Optional[str] = None
     file_size: Optional[int] = None  # in bytes
     subject_id: Optional[str] = None

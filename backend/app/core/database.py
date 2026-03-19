@@ -194,12 +194,12 @@ class Database:
 
             # Files collection indexes (with tenant isolation)
             await db.files.create_index("userId")
-            await db.files.create_index("uploadthingUrl")
+            await db.files.create_index("file_url")
             await db.files.create_index("tutor_id")
             await db.files.create_index("uploaded_by")
             await db.files.create_index([("tutor_id", 1), ("status", 1)])
             await db.files.create_index([("tutor_id", 1), ("created_at", -1)])
-            await db.files.create_index("uploadthing_key", unique=True)
+            await db.files.create_index("storage_key", unique=True)
             await db.files.create_index([("tutor_id", 1), ("embedding_status", 1)])
             await db.files.create_index([("tutor_id", 1), ("sync_status", 1)])
 

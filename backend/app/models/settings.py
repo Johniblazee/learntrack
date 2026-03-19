@@ -88,8 +88,7 @@ class GeneralSettings(BaseModel):
 
 class UploadSettings(BaseModel):
     """File upload settings"""
-    uploadthing_secret: Optional[str] = None
-    uploadthing_app_id: Optional[str] = None
+    r2_configured: bool = False
     max_file_size: int = 10 * 1024 * 1024  # 10MB
     allowed_extensions: List[str] = [".pdf", ".txt", ".doc", ".docx", ".ppt", ".pptx"]
 
@@ -130,13 +129,5 @@ class SettingsResponse(BaseModel):
                     provider_config.api_key = f"{key[:8]}...{key[-4:]}"
                 else:
                     provider_config.api_key = "***"
-        
-        # Mask upload secrets
-        if self.upload.uploadthing_secret:
-            secret = self.upload.uploadthing_secret
-            if len(secret) > 12:
-                self.upload.uploadthing_secret = f"{secret[:8]}...{secret[-4:]}"
-            else:
-                self.upload.uploadthing_secret = "***"
         
         return self

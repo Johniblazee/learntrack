@@ -88,8 +88,7 @@ class SettingsService:
         )
         
         upload_settings = UploadSettings(
-            uploadthing_secret=app_config.UPLOADTHING_SECRET,
-            uploadthing_app_id=app_config.UPLOADTHING_APP_ID,
+            r2_configured=bool(app_config.R2_ENDPOINT_URL),
             max_file_size=app_config.MAX_FILE_SIZE
         )
         

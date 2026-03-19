@@ -65,6 +65,8 @@ dependencies = [
     "plunk>=0.0.1,<1.0.0",
     "langchain-experimental>=0.3.0,<0.4.0",
     "posthog>=7.9.12",
+    # Cloud Storage (Cloudflare R2 via S3-compatible API)
+    "boto3>=1.34.0,<2.0.0",
 ]
 
 [project.optional-dependencies]

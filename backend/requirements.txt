@@ -50,8 +50,8 @@ langchain-unstructured>=0.3.0,<0.4.0
 httpx>=0.26.0,<1.0.0
 aiohttp>=3.9.0,<4.0.0
 
-# UploadThing for file storage (optional - will add if needed)
-# uploadthing>=6.0.0,<7.0.0
+# Cloud Storage (Cloudflare R2)
+boto3>=1.34.0,<2.0.0
 
 # Utilities
 python-dateutil>=2.8.0,<3.0.0

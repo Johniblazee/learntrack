@@ -119,6 +119,9 @@ async def lifespan(app: FastAPI):
                 task.cancel()
         await database.close_database_connection()
         await close_clerk_http_client()
+        from app.services.r2_storage_service import close_r2_client
+
+        close_r2_client()
         posthog_shutdown()
         logger.info("FastAPI application shutdown successfully")
     except Exception as e:

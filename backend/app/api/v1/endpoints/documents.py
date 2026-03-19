@@ -74,7 +74,7 @@ class DocumentDetail(BaseModel):
     filename: str
     content_type: str
     size: int
-    uploadthing_url: str
+    file_url: str
     embedding_status: str
     sync_status: str
     chunk_count: int
@@ -297,7 +297,7 @@ async def get_document_detail(
         filename=doc.get("filename", ""),
         content_type=doc.get("content_type", ""),
         size=doc.get("size", 0),
-        uploadthing_url=str(doc.get("uploadthing_url", "")),
+        file_url=str(doc.get("source_url") or doc.get("file_url") or ""),
         embedding_status=doc.get("embedding_status", EmbeddingStatus.PENDING.value),
         sync_status=doc.get("sync_status", SyncStatus.NEVER_SYNCED.value),
         chunk_count=doc.get("chunk_count", 0),

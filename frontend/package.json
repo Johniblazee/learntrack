@@ -49,7 +49,6 @@
     "@tanstack/react-query": "^5.90.8",
     "@tanstack/react-query-devtools": "^5.90.2",
     "@tanstack/react-virtual": "^3.13.19",
-    "@uploadthing/react": "^7.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
@@ -76,7 +75,6 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    "uploadthing": "^7.7.4",
     "vaul": "^0.9.6",
     "zod": "^3.24.1"
   },
