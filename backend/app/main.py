@@ -133,9 +133,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     redirect_slashes=False,  # Disable automatic redirects to avoid auth issues with CORS
-    docs_url=None if _is_production else "/docs",
-    redoc_url=None if _is_production else "/redoc",
-    openapi_url=None if _is_production else "/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
     description="""
     ## LearnTrack - Smart Assignment & Progress Monitoring API
 
