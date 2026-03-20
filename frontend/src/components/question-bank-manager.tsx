@@ -3,12 +3,15 @@
  * Displays all questions in a table format with search and filters
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -42,6 +45,7 @@ import {
   Trash2,
   X,
   CheckCircle,
+  ClipboardList,
 } from "lucide-react"
 
 import { 
@@ -85,6 +89,8 @@ const getDifficultyColor = (difficulty: string) => {
 
 export default function QuestionBankManager() {
   const client = useApiClient()
+  const navigate = useNavigate()
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [searchTerm, setSearchTerm] = useState("")
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const [subjectFilter, setSubjectFilter] = useState("all")
@@ -155,6 +161,59 @@ export default function QuestionBankManager() {
   // Fetch subjects for dropdowns
   const { data: subjectsData } = useSubjects()
   const subjects = subjectsData || []
+
+  // Derive available topics from subjects
+  const availableTopics = useMemo(() => {
+    const source = Array.isArray(subjects) ? subjects : (subjects as any)?.items || []
+    if (subjectFilter === 'all') {
+      const allTopics = new Set<string>()
+      source.forEach((s: any) => {
+        if (Array.isArray(s.topics)) {
+          s.topics.forEach((t: string) => { if (t) allTopics.add(t) })
+        }
+      })
+      return Array.from(allTopics).sort()
+    }
+    const selected = source.find((s: any) => (s._id || s.id) === subjectFilter)
+    return Array.isArray(selected?.topics) ? selected.topics.filter(Boolean).sort() : []
+  }, [subjects, subjectFilter])
+
+  // Reset topic filter when subject changes
+  useEffect(() => {
+    setTopicFilter('all')
+  }, [subjectFilter])
+
+  // Selection handlers
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleSelectAll = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (currentPageAllSelected) {
+        currentQuestions.forEach(q => next.delete(q.id))
+      } else {
+        currentQuestions.forEach(q => next.add(q.id))
+      }
+      return next
+    })
+  }
+
+  const handleDeselectAll = () => {
+    setSelectedIds(new Set())
+  }
+
+  const handleAssignSelected = () => {
+    navigate('/dashboard/assignments/create', {
+      state: { questionBankIds: [...selectedIds] }
+    })
+  }
 
   // Reset form data
   const resetFormData = () => {
@@ -462,6 +521,10 @@ export default function QuestionBankManager() {
   // Current questions are just the questions state since it's already paginated by the server
   const currentQuestions = questions
 
+  // Selection derived values
+  const currentPageAllSelected = currentQuestions.length > 0 && currentQuestions.every(q => selectedIds.has(q.id))
+  const currentPageSomeSelected = currentQuestions.some(q => selectedIds.has(q.id)) && !currentPageAllSelected
+
   // Generate page numbers
   const getPageNumbers = () => {
     const pages = []
@@ -538,12 +601,15 @@ export default function QuestionBankManager() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={topicFilter} onValueChange={setTopicFilter}>
+            <Select value={topicFilter} onValueChange={setTopicFilter} disabled={availableTopics.length === 0}>
               <SelectTrigger className="w-[130px] h-10 border-border bg-background">
                 <SelectValue placeholder="Topic" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Topics</SelectItem>
+                {availableTopics.map((topic: string) => (
+                  <SelectItem key={topic} value={topic}>{topic}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
@@ -577,6 +643,13 @@ export default function QuestionBankManager() {
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={currentPageAllSelected ? true : currentPageSomeSelected ? "indeterminate" : false}
+                  onCheckedChange={handleSelectAll}
+                  aria-label="Select all on this page"
+                />
+              </TableHead>
               <TableHead>Question Text</TableHead>
               <TableHead>Subject</TableHead>
               <TableHead>Type</TableHead>
@@ -586,15 +659,46 @@ export default function QuestionBankManager() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {currentQuestions.length === 0 ? (
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <TableRow key={`skeleton-${i}`}>
+                  <TableCell><div className="h-4 w-4 rounded bg-muted animate-pulse" /></TableCell>
+                  <TableCell><div className="h-4 w-64 rounded bg-muted animate-pulse" /></TableCell>
+                  <TableCell><div className="h-4 w-24 rounded bg-muted animate-pulse" /></TableCell>
+                  <TableCell><div className="h-4 w-20 rounded bg-muted animate-pulse" /></TableCell>
+                  <TableCell><div className="h-5 w-16 rounded-full bg-muted animate-pulse" /></TableCell>
+                  <TableCell><div className="h-4 w-24 rounded bg-muted animate-pulse" /></TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1 justify-end">
+                      <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+                      <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+                      <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : currentQuestions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                   No questions found
                 </TableCell>
               </TableRow>
             ) : (
               currentQuestions.map((question) => (
-                <TableRow key={question.id} className="hover:bg-muted/30 transition-colors">
+                <TableRow
+                  key={question.id}
+                  className={cn(
+                    "hover:bg-muted/30 transition-colors",
+                    selectedIds.has(question.id) && "bg-primary/5"
+                  )}
+                >
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedIds.has(question.id)}
+                      onCheckedChange={() => handleToggleSelect(question.id)}
+                      aria-label={`Select question`}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium text-foreground max-w-sm">
                     <span className="line-clamp-2">{question.text}</span>
                   </TableCell>
@@ -687,6 +791,25 @@ export default function QuestionBankManager() {
             <span>Next</span>
             <span className="text-lg">→</span>
           </button>
+        </div>
+      )}
+
+      {/* Floating Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="sticky bottom-0 z-40 pt-2">
+          <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between">
+            <Badge variant="secondary">{selectedIds.size} question{selectedIds.size !== 1 ? 's' : ''} selected</Badge>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleDeselectAll}>
+                <X className="w-4 h-4 mr-1" />
+                Deselect All
+              </Button>
+              <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleAssignSelected}>
+                <ClipboardList className="w-4 h-4 mr-1" />
+                Assign Selected
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

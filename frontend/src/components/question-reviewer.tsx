@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CheckCircle, XCircle, AlertTriangle, Eye, Edit, ThumbsUp, ThumbsDown, Star, Search, BookOpen, BarChart3, MessageSquare, Flag, Clock } from "lucide-react"
+import { CheckCircle, XCircle, AlertTriangle, Eye, Edit, ThumbsUp, ThumbsDown, Star, Search, BookOpen, MessageSquare, Flag, Clock } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { toast } from '@/contexts/ToastContext'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -112,7 +112,6 @@ export default function QuestionReviewer() {
   const [loading, setLoading] = useState(false)
   const [approvedLoading, setApprovedLoading] = useState(false)
   const [rejectedLoading, setRejectedLoading] = useState(false)
-  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [selectedQuestions, setSelectedQuestions] = useState<Set<string>>(new Set())
   const [generationStats, setGenerationStats] = useState<GenerationStats | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -229,7 +228,6 @@ export default function QuestionReviewer() {
 
   const fetchAnalyticsData = async () => {
     try {
-      setAnalyticsLoading(true)
       const token = await getToken()
 
       const [statsResponse, questionsResponse] = await Promise.all([
@@ -258,8 +256,6 @@ export default function QuestionReviewer() {
       }
     } catch (error) {
       console.error('Error fetching analytics data:', error)
-    } finally {
-      setAnalyticsLoading(false)
     }
   }
 
@@ -743,28 +739,6 @@ export default function QuestionReviewer() {
     return matchesSearch && matchesSubject
   })
 
-  const statusBreakdown = analyticsQuestions.reduce<Record<string, number>>((acc, question) => {
-    const normalizedStatus = question.status?.toLowerCase() || 'pending'
-    acc[normalizedStatus] = (acc[normalizedStatus] || 0) + 1
-    return acc
-  }, {})
-
-  const topSubjects = Object.entries(
-    analyticsQuestions.reduce<Record<string, number>>((acc, question) => {
-      const subject = question.subject || 'Uncategorized'
-      acc[subject] = (acc[subject] || 0) + 1
-      return acc
-    }, {}),
-  )
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-
-  const approvalRate = generationStats
-    ? (generationStats.approved_questions + generationStats.rejected_questions) > 0
-      ? (generationStats.approved_questions / (generationStats.approved_questions + generationStats.rejected_questions)) * 100
-      : 0
-    : 0
-
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
@@ -942,64 +916,64 @@ export default function QuestionReviewer() {
             </CardContent>
           </Card>
 
-          {/* Bulk-action / select-all bar — only shown when there are pending questions */}
-          {!loading && filteredQuestions.length > 0 && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
-              <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                <Checkbox
-                  checked={
-                    filteredQuestions.filter((q) => q.status === 'pending').length > 0 &&
-                    filteredQuestions
-                      .filter((q) => q.status === 'pending')
-                      .every((q) => selectedQuestions.has(q.id))
-                  }
-                  onCheckedChange={(checked) => {
-                    const pendingIds = filteredQuestions
-                      .filter((q) => q.status === 'pending')
-                      .map((q) => q.id)
-                    if (checked) {
-                      setSelectedQuestions(new Set(pendingIds))
-                    } else {
-                      setSelectedQuestions(new Set())
-                    }
-                  }}
-                />
-                <span className="text-sm text-muted-foreground">
-                  {selectedQuestions.size > 0
-                    ? `${selectedQuestions.size} selected`
-                    : 'Select all pending'}
-                </span>
-              </label>
-              {selectedQuestions.size > 0 && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={handleBulkApprove}
-                    className="bg-green-600 hover:bg-green-700 text-white h-8"
-                  >
-                    <ThumbsUp className="w-3.5 h-3.5 mr-1.5" />
-                    Approve {selectedQuestions.size}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setSelectedQuestions(new Set())}
-                    className="h-8 text-muted-foreground"
-                  >
-                    Clear
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Questions List */}
           <Card className="border-border shadow-sm bg-card overflow-visible">
             <CardHeader className="border-b border-border">
-              <CardTitle className="flex items-center text-foreground">
-                <Eye className="w-5 h-5 mr-2 text-primary flex-shrink-0" />
-                Questions for Review ({filteredQuestions.length})
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center text-foreground">
+                  <Eye className="w-5 h-5 mr-2 text-primary flex-shrink-0" />
+                  Questions for Review ({filteredQuestions.length})
+                </CardTitle>
+                {!loading && filteredQuestions.length > 0 && (
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <Checkbox
+                        checked={
+                          filteredQuestions.filter((q) => q.status === 'pending').length > 0 &&
+                          filteredQuestions
+                            .filter((q) => q.status === 'pending')
+                            .every((q) => selectedQuestions.has(q.id))
+                        }
+                        onCheckedChange={(checked) => {
+                          const pendingIds = filteredQuestions
+                            .filter((q) => q.status === 'pending')
+                            .map((q) => q.id)
+                          if (checked) {
+                            setSelectedQuestions(new Set(pendingIds))
+                          } else {
+                            setSelectedQuestions(new Set())
+                          }
+                        }}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {selectedQuestions.size > 0
+                          ? `${selectedQuestions.size} selected`
+                          : 'Select all pending'}
+                      </span>
+                    </label>
+                    {selectedQuestions.size > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={handleBulkApprove}
+                          className="bg-green-600 hover:bg-green-700 text-white h-8"
+                        >
+                          <ThumbsUp className="w-3.5 h-3.5 mr-1.5" />
+                          Approve {selectedQuestions.size}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setSelectedQuestions(new Set())}
+                          className="h-8 text-muted-foreground"
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-6">
               {loading ? (
@@ -1615,118 +1589,6 @@ export default function QuestionReviewer() {
           </Card>
         </TabsContent>
       </Tabs>
-
-      <Card className="border-border shadow-sm bg-card">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="flex items-center text-foreground">
-            <BarChart3 className="w-5 h-5 mr-2 text-primary" />
-            Analytics Snapshot
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Performance overview for generated question reviews.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <Card className="border-border shadow-sm bg-card">
-              <CardContent className="p-5">
-                <p className="text-sm text-muted-foreground">Total Generated</p>
-                <p className="text-3xl font-bold text-foreground mt-1">
-                  {generationStats?.total_generated ?? analyticsQuestions.length}
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-border shadow-sm bg-card">
-              <CardContent className="p-5">
-                <p className="text-sm text-muted-foreground">This Month</p>
-                <p className="text-3xl font-bold text-foreground mt-1">
-                  {generationStats?.this_month ?? 0}
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-border shadow-sm bg-card">
-              <CardContent className="p-5">
-                <p className="text-sm text-muted-foreground">Approval Rate</p>
-                <p className="text-3xl font-bold text-foreground mt-1">
-                  {approvalRate.toFixed(1)}%
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-border shadow-sm bg-card">
-              <CardContent className="p-5">
-                <p className="text-sm text-muted-foreground">Session Success Rate</p>
-                <p className="text-3xl font-bold text-foreground mt-1">
-                  {generationStats?.success_rate?.toFixed(1) ?? '0.0'}%
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <Card className="border-border shadow-sm bg-card">
-              <CardHeader className="border-b border-border">
-                <CardTitle className="flex items-center text-foreground">
-                  <BarChart3 className="w-5 h-5 mr-2 text-primary" />
-                  Status Breakdown
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                {analyticsLoading ? (
-                  <div className="space-y-3">
-                    {Array.from({ length: 4 }).map((_, index) => (
-                      <Skeleton key={index} className="h-10 w-full" />
-                    ))}
-                  </div>
-                ) : Object.keys(statusBreakdown).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No review activity yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {Object.entries(statusBreakdown)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([status, count]) => (
-                        <div key={status} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-                          <span className="text-sm font-medium capitalize text-foreground">
-                            {status.replace('-', ' ')}
-                          </span>
-                          <Badge variant="secondary">{count}</Badge>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-border shadow-sm bg-card">
-              <CardHeader className="border-b border-border">
-                <CardTitle className="flex items-center text-foreground">
-                  <BookOpen className="w-5 h-5 mr-2 text-primary" />
-                  Top Subjects
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                {analyticsLoading ? (
-                  <div className="space-y-3">
-                    {Array.from({ length: 4 }).map((_, index) => (
-                      <Skeleton key={index} className="h-10 w-full" />
-                    ))}
-                  </div>
-                ) : topSubjects.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No subject data available yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {topSubjects.map(([subject, count]) => (
-                      <div key={subject} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-                        <span className="text-sm font-medium text-foreground">{subject}</span>
-                        <Badge variant="outline" className="border-border">{count} questions</Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </CardContent>
-      </Card>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-3xl">

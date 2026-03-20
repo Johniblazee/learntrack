@@ -9,7 +9,6 @@ import { OverviewView } from "./views/OverviewView"
 import InvitationsView from "./views/InvitationsView"
 import GroupsManagementView from "./views/GroupsManagementView"
 import StudentManager from "@/components/student-manager"
-import IntegratedSubjectsManager from "@/components/integrated-subjects-manager"
 import QuestionReviewer from "@/components/question-reviewer"
 import QuestionBankManager from "@/components/question-bank-manager"
 import MaterialManager from "@/components/MaterialManager"
@@ -74,7 +73,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       'content/review': 'review-questions',
       'content/bank': 'question-bank',
       'content/materials': 'resources',
-      'content/subjects': 'subjects',
       'assignments': 'active-assignments',
       'assignments/create': 'create-new',
       'assignments/templates': 'templates',
@@ -100,7 +98,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       'review-questions': '/dashboard/content/review',
       'question-bank': '/dashboard/content/bank',
       'resources': '/dashboard/content/materials',
-      'subjects': '/dashboard/content/subjects',
       'active-assignments': '/dashboard/assignments',
       'create-new': '/dashboard/assignments/create',
       'templates': '/dashboard/assignments/templates',
@@ -145,7 +142,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       "review-questions": "Review Questions",
       "question-bank": "Question Bank",
       "resources": "Materials",
-      "subjects": "Subjects",
       "active-assignments": "Active Assignments",
       "create-new": "Create Assignment",
       "templates": "Templates",
@@ -229,7 +225,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
             <Route path="content/review" element={<QuestionReviewer />} />
             <Route path="content/bank" element={<QuestionBankManager />} />
             <Route path="content/materials" element={<MaterialManager />} />
-            <Route path="content/subjects" element={<IntegratedSubjectsManager />} />
 
             {/* Assignments routes */}
             <Route path="assignments" element={<ActiveAssignmentsView />} />

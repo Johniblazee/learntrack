@@ -1,6 +1,7 @@
 import { StatsCards } from "../components/StatsCards"
 import { PerformanceChart } from "../components/PerformanceChart"
 import { SubjectPerformance } from "../components/SubjectPerformance"
+import { AnalyticsSnapshot } from "../components/AnalyticsSnapshot"
 import { RecentActivity } from "../components/RecentActivity"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
@@ -51,6 +52,9 @@ export function OverviewView({ dashboardStats, loading, onViewChange }: Overview
 
         {/* Stats Cards */}
         <StatsCards dashboardStats={dashboardStats} loading={loading} />
+
+        {/* Question Generation Analytics */}
+        <AnalyticsSnapshot />
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

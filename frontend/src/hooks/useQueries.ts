@@ -850,6 +850,24 @@ export function useGenerationStats() {
 }
 
 /**
+ * Hook to fetch all generated questions for analytics
+ */
+export function useAllGeneratedQuestions() {
+  const client = useApiClient()
+
+  return useQuery({
+    queryKey: ['all-generated-questions'],
+    queryFn: async () => {
+      const response = await client.get('/question-generator/all-questions?per_page=200')
+      if (response.error) throw new Error(response.error)
+      const data = response.data
+      return (data?.items || (Array.isArray(data) ? data : [])) as Array<Record<string, any>>
+    },
+    staleTime: 2 * 60 * 1000, // 2 minutes
+  })
+}
+
+/**
  * Hook to fetch student assignments list
  */
 export function useStudentAssignmentsList(studentId: string | undefined) {

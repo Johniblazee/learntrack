@@ -57,7 +57,6 @@ export function DashboardSidebar({ activeView, onViewChange }: DashboardSidebarP
       items: [
         { title: "Question Bank", icon: ChevronRight },
         { title: "Review Questions", icon: ChevronRight },
-        { title: "Subjects", icon: ChevronRight },
         { title: "AI Generator", icon: ChevronRight },
         { title: "Resources", icon: ChevronRight }
       ]

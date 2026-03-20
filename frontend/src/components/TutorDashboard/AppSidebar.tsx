@@ -64,11 +64,6 @@ const menuItems = [
         icon: FolderOpen,
         view: "resources",
       },
-      {
-        title: "Subjects",
-        icon: BookOpen,
-        view: "subjects",
-      },
     ],
   },
   {
@@ -129,7 +124,6 @@ export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
       'review-questions': '/dashboard/content/review',
       'question-bank': '/dashboard/content/bank',
       'resources': '/dashboard/content/materials',
-      'subjects': '/dashboard/content/subjects',
       'active-assignments': '/dashboard/assignments',
       'create-new': '/dashboard/assignments/create',
       'templates': '/dashboard/assignments/templates',

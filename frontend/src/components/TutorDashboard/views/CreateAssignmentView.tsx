@@ -42,61 +42,107 @@ export default function CreateAssignmentView() {
 
   useEffect(() => {
     const maybeTemplate = (location.state as any)?.template
-    if (!maybeTemplate) return
+    const maybeQuestionBankIds = (location.state as any)?.questionBankIds
 
-    const templateId = String(maybeTemplate.id || maybeTemplate._id || '')
-    if (!templateId || appliedTemplateId === templateId) return
+    if (maybeTemplate) {
+      const templateId = String(maybeTemplate.id || maybeTemplate._id || '')
+      if (!templateId || appliedTemplateId === templateId) return
 
-    const questionIds: string[] = Array.isArray(maybeTemplate.question_ids)
-      ? maybeTemplate.question_ids.map((questionId: any) => String(questionId))
-      : []
+      const questionIds: string[] = Array.isArray(maybeTemplate.question_ids)
+        ? maybeTemplate.question_ids.map((questionId: any) => String(questionId))
+        : []
 
-    setFormData((prev) => ({
-      ...prev,
-      title: prev.title || `${maybeTemplate.name || 'Template'} Assignment`,
-      description: maybeTemplate.instructions || maybeTemplate.description || prev.description,
-      selectedSubject: String(maybeTemplate.subject_id || ''),
-      selectedQuestions: questionIds,
-    }))
+      setFormData((prev) => ({
+        ...prev,
+        title: prev.title || `${maybeTemplate.name || 'Template'} Assignment`,
+        description: maybeTemplate.instructions || maybeTemplate.description || prev.description,
+        selectedSubject: String(maybeTemplate.subject_id || ''),
+        selectedQuestions: questionIds,
+      }))
 
-    const hydrateQuestionDetails = async () => {
-      if (questionIds.length === 0) {
-        setSelectedQuestionData([])
-        return
+      const hydrateQuestionDetails = async () => {
+        if (questionIds.length === 0) {
+          setSelectedQuestionData([])
+          return
+        }
+
+        try {
+          const questions = await Promise.all(
+            questionIds.map(async (questionId) => {
+              const response = await client.get(`/questions/${questionId}`)
+              if (response.error || !response.data) return null
+
+              const question = response.data as any
+              return {
+                id: String(question._id || question.id || questionId),
+                _id: question._id,
+                text: question.question_text || question.text || '',
+                subject_id: question.subject_id,
+                subject: typeof question.subject_id === 'object' ? question.subject_id?.name : question.subject_id,
+                topic: question.topic,
+                difficulty: question.difficulty,
+                type: question.question_type || question.type,
+                question_type: question.question_type,
+                options: question.options,
+                correct_answer: question.correct_answer,
+              } as QuestionItem
+            })
+          )
+
+          setSelectedQuestionData(questions.filter(Boolean) as QuestionItem[])
+        } catch (error) {
+          console.error('Failed to load template questions:', error)
+          toast.error('Some template questions could not be loaded')
+        }
       }
 
-      try {
-        const questions = await Promise.all(
-          questionIds.map(async (questionId) => {
-            const response = await client.get(`/questions/${questionId}`)
-            if (response.error || !response.data) return null
+      hydrateQuestionDetails()
+      setAppliedTemplateId(templateId)
+    } else if (maybeQuestionBankIds && Array.isArray(maybeQuestionBankIds)) {
+      if (appliedTemplateId === '__question_bank__') return
 
-            const question = response.data as any
-            return {
-              id: String(question._id || question.id || questionId),
-              _id: question._id,
-              text: question.question_text || question.text || '',
-              subject_id: question.subject_id,
-              subject: typeof question.subject_id === 'object' ? question.subject_id?.name : question.subject_id,
-              topic: question.topic,
-              difficulty: question.difficulty,
-              type: question.question_type || question.type,
-              question_type: question.question_type,
-              options: question.options,
-              correct_answer: question.correct_answer,
-            } as QuestionItem
-          })
-        )
+      const questionIds: string[] = maybeQuestionBankIds.map((id: any) => String(id))
+      setFormData((prev) => ({ ...prev, selectedQuestions: questionIds }))
 
-        setSelectedQuestionData(questions.filter(Boolean) as QuestionItem[])
-      } catch (error) {
-        console.error('Failed to load template questions:', error)
-        toast.error('Some template questions could not be loaded')
+      const hydrateQuestionDetails = async () => {
+        if (questionIds.length === 0) {
+          setSelectedQuestionData([])
+          return
+        }
+
+        try {
+          const questions = await Promise.all(
+            questionIds.map(async (questionId) => {
+              const response = await client.get(`/questions/${questionId}`)
+              if (response.error || !response.data) return null
+
+              const question = response.data as any
+              return {
+                id: String(question._id || question.id || questionId),
+                _id: question._id,
+                text: question.question_text || question.text || '',
+                subject_id: question.subject_id,
+                subject: typeof question.subject_id === 'object' ? question.subject_id?.name : question.subject_id,
+                topic: question.topic,
+                difficulty: question.difficulty,
+                type: question.question_type || question.type,
+                question_type: question.question_type,
+                options: question.options,
+                correct_answer: question.correct_answer,
+              } as QuestionItem
+            })
+          )
+
+          setSelectedQuestionData(questions.filter(Boolean) as QuestionItem[])
+        } catch (error) {
+          console.error('Failed to load question bank questions:', error)
+          toast.error('Some questions could not be loaded')
+        }
       }
+
+      hydrateQuestionDetails()
+      setAppliedTemplateId('__question_bank__')
     }
-
-    hydrateQuestionDetails()
-    setAppliedTemplateId(templateId)
   }, [appliedTemplateId, client, location.state])
 
   const handleSubmit = async (e: React.FormEvent) => {

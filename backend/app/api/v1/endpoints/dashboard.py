@@ -686,9 +686,25 @@ async def get_performance_chart(
             {
                 "$match": {
                     "tutor_id": current_user.clerk_id,
-                    "submitted_at": {"$gte": start_date, "$lte": end_date},
                     "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     "score": {"$ne": None},
+                    "$or": [
+                        {"submitted_at": {"$gte": start_date, "$lte": end_date}},
+                        {"graded_at": {"$gte": start_date, "$lte": end_date}},
+                        {"updated_at": {"$gte": start_date, "$lte": end_date}},
+                    ],
+                }
+            },
+            {
+                "$addFields": {
+                    "_effective_date": {
+                        "$ifNull": [
+                            "$submitted_at",
+                            "$graded_at",
+                            "$updated_at",
+                            "$created_at",
+                        ]
+                    }
                 }
             },
             {
@@ -697,7 +713,7 @@ async def get_performance_chart(
                         "date": {
                             "$dateToString": {
                                 "format": "%Y-%m-%d",
-                                "date": "$submitted_at",
+                                "date": "$_effective_date",
                             }
                         },
                     },
@@ -719,7 +735,15 @@ async def get_performance_chart(
                 "performance": avg_score,
             }
 
-        chart_data = list(date_map.values())
+        # Fill missing dates in range with performance: 0
+        current = start_date
+        while current <= end_date:
+            date_str = current.strftime("%Y-%m-%d")
+            if date_str not in date_map:
+                date_map[date_str] = {"period": date_str, "performance": 0}
+            current += timedelta(days=1)
+
+        chart_data = sorted(date_map.values(), key=lambda x: x["period"])
 
         return chart_data
     except Exception as e:
