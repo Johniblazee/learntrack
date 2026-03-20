@@ -354,7 +354,10 @@ export function ChatPanel({
                           >
                             <button
                               type="button"
-                              onClick={() => onSwitchSession?.(session.id)}
+                              onClick={() => {
+                                onSwitchSession?.(session.id)
+                                setHistorySheetOpen(false)
+                              }}
                               className="min-w-0 w-full pr-8 text-left"
                             >
                               <p className={cn('truncate text-sm', isActive ? 'font-semibold' : 'font-medium')}>

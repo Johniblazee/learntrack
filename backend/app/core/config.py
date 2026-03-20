@@ -174,8 +174,6 @@ class Settings(BaseSettings):
     @field_validator("CLERK_JWT_AUDIENCE")
     @classmethod
     def validate_clerk_audience(cls, v, info):
-        if info.data.get("ENVIRONMENT") == "production" and not v:
-            raise ValueError("CLERK_JWT_AUDIENCE is required in production")
         return v
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
