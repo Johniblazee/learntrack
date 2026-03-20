@@ -67,7 +67,7 @@ function AdminSidebar() {
               <Shield className="w-5 h-5 text-primary-foreground" />
             </div>
             <div className="group-data-[collapsible=icon]:hidden">
-              <h1 className="text-xl font-bold tracking-tight text-primary font-lufga">LearnTrack</h1>
+              <h1 className="text-xl font-bold tracking-tight text-primary font-display">LearnTrack</h1>
               <p className="text-xs text-muted-foreground">Admin Panel</p>
             </div>
           </div>

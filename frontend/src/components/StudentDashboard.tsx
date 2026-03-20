@@ -1669,7 +1669,7 @@ export default function StudentDashboard() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <Layers className="h-5 w-5" />
               </div>
-              <h1 className="text-xl font-bold tracking-tight text-primary font-lufga group-data-[collapsible=icon]:hidden">
+              <h1 className="text-xl font-bold tracking-tight text-primary font-display group-data-[collapsible=icon]:hidden">
                 LearnTrack
               </h1>
             </div>
