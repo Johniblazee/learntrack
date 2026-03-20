@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useUser } from '@clerk/clerk-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Bell, Globe, Lock, Palette, Save, User } from 'lucide-react'
+import { ArrowLeft, Bell, Brain, Globe, Lock, Palette, Save, User } from 'lucide-react'
 
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
@@ -15,6 +15,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import { toast } from '../contexts/ToastContext'
 import { useUserContext } from '@/contexts/UserContext'
 import { useApiClient } from '../lib/api-client'
+import { AIConfigTab } from '@/components/settings/AIConfigTab'
 
 type StudentDefaultTab = 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
 type ParentDefaultTab = 'overview' | 'children' | 'upcoming' | 'messages'
@@ -95,6 +96,7 @@ export default function SettingsPage() {
 
   const userRole = String(backendUser?.role || user?.publicMetadata?.role || '').toLowerCase()
   const isStudent = userRole === 'student'
+  const isTutor = userRole === 'tutor'
   const roleLabel = isStudent ? 'student workspace' : userRole === 'parent' ? 'parent account' : 'personal account'
 
   useEffect(() => {
@@ -222,7 +224,7 @@ export default function SettingsPage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto">
+          <TabsList className={`grid w-full ${isTutor ? 'grid-cols-6' : 'grid-cols-5'} lg:w-auto`}>
             <TabsTrigger value="profile">
               <User className="h-4 w-4 mr-2" />
               Profile
@@ -243,6 +245,12 @@ export default function SettingsPage() {
               <Globe className="h-4 w-4 mr-2" />
               Preferences
             </TabsTrigger>
+            {isTutor && (
+              <TabsTrigger value="ai">
+                <Brain className="h-4 w-4 mr-2" />
+                AI
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="profile" className="space-y-6">
@@ -511,6 +519,12 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {isTutor && (
+            <TabsContent value="ai" className="space-y-6">
+              <AIConfigTab />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

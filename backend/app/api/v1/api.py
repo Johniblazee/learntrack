@@ -29,6 +29,7 @@ from app.api.v1.endpoints import (
     settings,
     documents,
     cost_tracking,
+    tutor_ai_config,
 )
 
 # Import admin router
@@ -73,6 +74,9 @@ api_router.include_router(settings.router, prefix="/settings", tags=["settings"]
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
 api_router.include_router(
     cost_tracking.router, prefix="/cost-tracking", tags=["cost-tracking"]
+)
+api_router.include_router(
+    tutor_ai_config.router, prefix="/ai-config", tags=["ai-config"]
 )
 
 # Admin router (super admin only)

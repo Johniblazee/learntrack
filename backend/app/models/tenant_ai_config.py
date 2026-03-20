@@ -21,7 +21,9 @@ class ProviderConfig(BaseModel):
     provider_id: str  # groq, openai, gemini, anthropic
     enabled: bool = True
     enabled_models: List[str] = []  # List of enabled model IDs
-    custom_api_key: Optional[str] = None  # Optional tenant-specific API key
+    custom_api_key: Optional[str] = None  # DEPRECATED — kept for migration
+    encrypted_api_key: Optional[str] = None  # Fernet-encrypted BYOK key
+    has_custom_key: bool = False  # Frontend flag
     priority: int = 0  # Lower = higher priority for fallback
 
 
@@ -147,3 +149,42 @@ class ConfigChangeAuditLog(BaseModel):
     action: str  # "create", "update", "bulk_operation"
     changes: Dict[str, Any] = {}
     previous_values: Optional[Dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# Tutor-facing BYOK models
+# ---------------------------------------------------------------------------
+
+class TutorProviderKeyUpdate(BaseModel):
+    """Request to set/update a tutor's API key for a provider"""
+    provider_id: str
+    api_key: str
+
+
+class TutorProviderKeyDelete(BaseModel):
+    """Request to remove a tutor's API key for a provider"""
+    provider_id: str
+
+
+class TutorProviderStatus(BaseModel):
+    """Status of a single AI provider from the tutor's perspective"""
+    provider_id: str
+    name: str
+    has_system_key: bool = False
+    has_custom_key: bool = False
+    available: bool = False
+    masked_key: Optional[str] = None
+    enabled_models: List[str] = []
+
+
+class TutorAIConfigUpdate(BaseModel):
+    """Tutor request to update default provider/model"""
+    default_provider: Optional[str] = None
+    default_model: Optional[str] = None
+
+
+class TutorAIConfigResponse(BaseModel):
+    """Response for tutor AI config status"""
+    default_provider: str
+    default_model: str
+    providers: List[TutorProviderStatus] = []

@@ -66,16 +66,21 @@ def _create_question_service(database: AsyncIOMotorDatabase):
     return QuestionService(database)
 
 
-async def _get_ai_manager(tenant_id: str):
-    from app.ai.services.ai_manager import get_ai_manager_for_tenant
+def _create_litellm_chat_model_for_tenant(tenant_config, provider_id: str, model_id: str):
+    """Create a LiteLLM chat model using tenant config (BYOK → system key fallback)."""
+    from app.ai.litellm_provider import create_litellm_chat_model
 
-    return await get_ai_manager_for_tenant(tenant_id)
+    encrypted_key = None
+    if tenant_config and tenant_config.provider_configs:
+        pc = tenant_config.provider_configs.get(provider_id)
+        if pc and pc.encrypted_api_key:
+            encrypted_key = pc.encrypted_api_key
 
-
-def _create_default_ai_manager():
-    from app.ai.services.ai_manager import AIManager
-
-    return AIManager()
+    return create_litellm_chat_model(
+        provider_id=provider_id,
+        model_id=model_id,
+        encrypted_tutor_key=encrypted_key,
+    )
 
 
 def _build_basic_rag_context(
@@ -183,26 +188,13 @@ async def generate_questions_with_rag(
                 from app.agents.rag.graph import AgenticRAGAgent
                 from app.agents.rag.state import RAGConfig
 
-                manager = await _get_ai_manager(current_user.tutor_id)
-                rag_llm_provider = None
-                try:
-                    rag_llm_provider = manager.get_provider(ai_provider)
-                except Exception:
-                    rag_llm_provider = None
+                rag_llm = _create_litellm_chat_model_for_tenant(
+                    tenant_config, ai_provider, model_name
+                )
 
-                if not rag_llm_provider or not hasattr(rag_llm_provider, "llm"):
-                    rag_llm_provider = next(
-                        (
-                            provider
-                            for provider in manager.providers.values()
-                            if hasattr(provider, "llm")
-                        ),
-                        None,
-                    )
-
-                if rag_llm_provider and hasattr(rag_llm_provider, "llm"):
+                if rag_llm:
                     rag_agent = AgenticRAGAgent(
-                        llm=rag_llm_provider.llm, rag_service=rag_service
+                        llm=rag_llm, rag_service=rag_service
                     )
                     rag_config = RAGConfig(
                         top_k=body.context_chunks,
@@ -231,7 +223,7 @@ async def generate_questions_with_rag(
                             }
                         )
                 else:
-                    raise RuntimeError("No LangChain-compatible provider available")
+                    raise RuntimeError("Failed to create LLM for RAG")
             except Exception as rag_import_error:
                 logger.warning(
                     "Falling back to direct RAG retrieval",
@@ -260,14 +252,10 @@ async def generate_questions_with_rag(
                 )
                 web_results = [r.model_dump() for r in results]
 
-        # Generate questions with RAG context
-        manager = await _get_ai_manager(current_user.tutor_id)
-        if model_name:
-            try:
-                manager.set_provider_model(ai_provider, model_name)
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=str(e))
+        # Generate questions with RAG context via AIManager
+        from app.ai.services.ai_manager import AIManager
 
+        manager = AIManager()
         difficulty_value = body.difficulty or (
             body.difficulty_levels[0] if body.difficulty_levels else "medium"
         )
@@ -287,7 +275,7 @@ async def generate_questions_with_rag(
             question_count=body.question_count,
             difficulty=difficulty,
             question_types=normalized_types,
-            provider_name=ai_provider,
+            preferred_provider=ai_provider,
         )
 
         generation_id = str(uuid.uuid4())
@@ -341,7 +329,9 @@ async def regenerate_single_question(
 ):
     """Regenerate a single question with modifications"""
     try:
-        manager = await _get_ai_manager(current_user.tutor_id)
+        from app.ai.services.ai_manager import AIManager
+
+        manager = AIManager()
         question_service = _create_question_service(database)
         original = await question_service.get_question_by_id(
             body.question_id, current_user.clerk_id
@@ -397,7 +387,9 @@ async def get_available_models(
 ):
     """Get available models for a provider"""
     try:
-        manager = _create_default_ai_manager()
+        from app.ai.services.ai_manager import AIManager
+
+        manager = AIManager()
         models = manager.get_available_models(provider)
         return {"provider": provider, "models": models}
     except Exception as e:
@@ -661,8 +653,10 @@ async def get_available_providers(
     current_user: ClerkUserContext = Depends(require_tutor),
 ):
     """Get list of available AI providers"""
+    from app.ai.services.ai_manager import AIManager
+
     try:
-        manager = await _get_ai_manager(current_user.tutor_id)
+        manager = AIManager()
         return manager.get_available_providers()
     except Exception as e:
         logger.exception("Failed to get available providers")

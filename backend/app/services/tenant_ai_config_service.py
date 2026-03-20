@@ -11,7 +11,8 @@ from app.models.tenant_ai_config import (
     TenantAIConfig, TenantAIConfigCreate, TenantAIConfigUpdate,
     ProviderConfig, ProviderAvailability, ModelAvailability,
     ConfigChangeAuditLog, TenantAIConfigInDB,
-    EmbeddingProviderAvailability, EmbeddingModelAvailability
+    EmbeddingProviderAvailability, EmbeddingModelAvailability,
+    TutorProviderStatus,
 )
 from app.ai.services.models_fetcher import fetch_all_provider_models
 from app.core.config import settings
@@ -394,6 +395,92 @@ class TenantAIConfigService:
             await self._log_audit(admin_id, admin_email, tenant_id, "delete", {})
             return True
         return False
+
+    # ------------------------------------------------------------------
+    # BYOK key management
+    # ------------------------------------------------------------------
+
+    async def set_tutor_api_key(
+        self, tenant_id: str, provider_id: str, plaintext_key: str
+    ) -> None:
+        """Encrypt and store a tutor's BYOK API key."""
+        from app.core.encryption import encrypt_api_key
+
+        config = await self.get_or_create_default(tenant_id)
+        encrypted = encrypt_api_key(plaintext_key)
+
+        # Upsert provider_configs.<provider_id>
+        existing_pc = config.provider_configs.get(provider_id)
+        pc_dict = existing_pc.model_dump() if existing_pc else {
+            "provider_id": provider_id,
+            "enabled": True,
+            "enabled_models": [],
+            "priority": 0,
+        }
+        pc_dict["encrypted_api_key"] = encrypted
+        pc_dict["has_custom_key"] = True
+
+        await self.collection.update_one(
+            {"tenant_id": tenant_id},
+            {"$set": {
+                f"provider_configs.{provider_id}": pc_dict,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+        self._invalidate_cache(tenant_id)
+        logger.info("Stored BYOK key", tenant_id=tenant_id, provider=provider_id)
+
+    async def delete_tutor_api_key(self, tenant_id: str, provider_id: str) -> None:
+        """Remove a tutor's BYOK API key."""
+        await self.collection.update_one(
+            {"tenant_id": tenant_id},
+            {"$set": {
+                f"provider_configs.{provider_id}.encrypted_api_key": None,
+                f"provider_configs.{provider_id}.has_custom_key": False,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+        self._invalidate_cache(tenant_id)
+        logger.info("Deleted BYOK key", tenant_id=tenant_id, provider=provider_id)
+
+    async def get_tutor_provider_status(
+        self, tenant_id: str
+    ) -> List[TutorProviderStatus]:
+        """Return per-provider status visible to the tutor."""
+        from app.core.encryption import mask_api_key, decrypt_api_key
+
+        config = await self.get_or_create_default(tenant_id)
+
+        provider_info = {
+            "openai": "OpenAI",
+            "anthropic": "Anthropic",
+            "gemini": "Google Gemini",
+            "groq": "Groq",
+        }
+
+        statuses: List[TutorProviderStatus] = []
+        for pid, display_name in provider_info.items():
+            has_system = self._check_api_key(pid)
+            pc = config.provider_configs.get(pid)
+            has_custom = bool(pc and pc.encrypted_api_key)
+            masked = None
+            if has_custom and pc and pc.encrypted_api_key:
+                try:
+                    masked = mask_api_key(decrypt_api_key(pc.encrypted_api_key))
+                except Exception:
+                    masked = "***"
+
+            statuses.append(TutorProviderStatus(
+                provider_id=pid,
+                name=display_name,
+                has_system_key=has_system,
+                has_custom_key=has_custom,
+                available=has_system or has_custom,
+                masked_key=masked,
+                enabled_models=(pc.enabled_models if pc else []),
+            ))
+
+        return statuses
 
     async def _log_audit(
         self,

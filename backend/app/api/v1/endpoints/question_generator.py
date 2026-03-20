@@ -88,25 +88,15 @@ def _create_question_service(database: AsyncIOMotorDatabase):
     return QuestionService(database)
 
 
-async def _get_tenant_ai_manager(tenant_id: str, database: AsyncIOMotorDatabase):
-    from app.ai.services.ai_manager import get_tenant_ai_manager
-
-    return await get_tenant_ai_manager(tenant_id, database)
-
-
-def _create_default_ai_manager():
-    from app.ai.services.ai_manager import AIManager
-
-    return AIManager()
-
-
 async def _resolve_tenant_llm_provider(
     tenant_id: str,
     database: AsyncIOMotorDatabase,
     requested_provider: Optional[str] = None,
     requested_model: Optional[str] = None,
 ):
-    """Resolve and validate the tenant's active LLM provider/model pair."""
+    """Resolve the tenant's LLM via LiteLLM (BYOK key → system key fallback)."""
+    from app.ai.litellm_provider import create_litellm_chat_model
+
     config_service = _create_tenant_config_service(database)
     tenant_config = await config_service.get_or_create_default(tenant_id)
 
@@ -138,32 +128,20 @@ async def _resolve_tenant_llm_provider(
             detail=f"Model {model_name} is not enabled for provider {ai_provider}",
         )
 
-    ai_manager = await _get_tenant_ai_manager(tenant_id, database)
-    provider = ai_manager.get_provider(ai_provider)
-    if not provider:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Provider {ai_provider} is not available",
+    encrypted_key = (
+        provider_config.encrypted_api_key
+        if provider_config
+        else None
+    )
+
+    try:
+        llm = create_litellm_chat_model(
+            provider_id=ai_provider,
+            model_id=model_name,
+            encrypted_tutor_key=encrypted_key,
         )
-
-    provider_any: Any = provider
-
-    if model_name and hasattr(provider_any, "set_model"):
-        try:
-            provider_any.set_model(model_name)
-        except ValueError:
-            logger.warning(
-                "Failed to set requested model, using provider default",
-                provider=ai_provider,
-                model=model_name,
-            )
-
-    llm = getattr(provider_any, "llm", None)
-    if llm is None:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Provider {ai_provider} has no active model configured",
-        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     return ai_provider, model_name, llm
 
@@ -1506,39 +1484,38 @@ async def get_available_models(
     providers = []
 
     provider_info = [
-        (
-            "groq",
-            "Groq",
-            "Ultra-fast inference with open models",
-            settings.GROQ_API_KEY,
-        ),
-        ("openai", "OpenAI", "GPT models from OpenAI", settings.OPENAI_API_KEY),
-        (
-            "gemini",
-            "Google Gemini",
-            "Gemini models from Google",
-            settings.GEMINI_API_KEY,
-        ),
-        (
-            "anthropic",
-            "Anthropic",
-            "Claude models from Anthropic",
-            settings.ANTHROPIC_API_KEY,
-        ),
+        ("groq", "Groq", "Ultra-fast inference with open models"),
+        ("openai", "OpenAI", "GPT models from OpenAI"),
+        ("gemini", "Google Gemini", "Gemini models from Google"),
+        ("anthropic", "Anthropic", "Claude models from Anthropic"),
     ]
 
-    for provider_id, name, description, api_key in provider_info:
-        # Check if provider is enabled for this tenant
-        is_enabled = enabled_providers is None or provider_id in enabled_providers
-        is_available = bool(api_key) and is_enabled
+    # System-key check helper
+    _sys_key = {
+        "groq": settings.GROQ_API_KEY,
+        "openai": settings.OPENAI_API_KEY,
+        "gemini": settings.GEMINI_API_KEY,
+        "anthropic": settings.ANTHROPIC_API_KEY,
+    }
 
-        # Get models from fetched data, or use fallback if empty
+    for provider_id, name, description in provider_info:
+        is_enabled = enabled_providers is None or provider_id in enabled_providers
+        has_system_key = bool(_sys_key.get(provider_id))
+
+        # Check for BYOK key
+        has_byok_key = False
+        if tenant_config and tenant_config.provider_configs:
+            pc = tenant_config.provider_configs.get(provider_id)
+            if pc and pc.encrypted_api_key:
+                has_byok_key = True
+
+        is_available = (has_system_key or has_byok_key) and is_enabled
+
         models = fetched_models.get(provider_id, [])
         if not models and provider_id in fallback_models:
             models = fallback_models[provider_id]
             logger.info(f"Using fallback models for {provider_id}")
 
-        # If tenant has specific model restrictions, filter models
         if tenant_config and tenant_config.provider_configs:
             provider_config = tenant_config.provider_configs.get(provider_id)
             if provider_config and provider_config.enabled_models:
@@ -1552,6 +1529,7 @@ async def get_available_models(
                 "name": name,
                 "description": description,
                 "available": is_available,
+                "has_byok_key": has_byok_key,
                 "models": models,
             }
         )
