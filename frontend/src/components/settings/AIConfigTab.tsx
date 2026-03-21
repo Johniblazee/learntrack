@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
@@ -132,7 +133,7 @@ export function AIConfigTab() {
   if (loading || !config) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -151,18 +152,18 @@ export function AIConfigTab() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="defaultProvider">Provider</Label>
-              <select
-                id="defaultProvider"
-                value={config.default_provider}
-                onChange={(e) => handleUpdateDefaults('default_provider', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-              >
-                {availableProviders.map((p) => (
-                  <option key={p.provider_id} value={p.provider_id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <Select value={config.default_provider} onValueChange={(value) => handleUpdateDefaults('default_provider', value)}>
+                <SelectTrigger id="defaultProvider" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableProviders.map((p) => (
+                    <SelectItem key={p.provider_id} value={p.provider_id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="defaultModel">Model</Label>
@@ -203,7 +204,7 @@ export function AIConfigTab() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {provider.has_custom_key && provider.masked_key && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="h-4 w-4 text-blue-500" />
                     <span className="font-mono">{provider.masked_key}</span>
                     <Button
@@ -230,7 +231,7 @@ export function AIConfigTab() {
                     />
                     <button
                       type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                       onClick={() => setShowKeys((prev) => ({ ...prev, [provider.provider_id]: !showKey }))}
                     >
                       {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

@@ -10,6 +10,7 @@ import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { Switch } from '../components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
 import { toast } from '../contexts/ToastContext'
@@ -188,8 +189,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+    <div className="min-h-screen bg-muted">
+      <div className="bg-card border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -198,8 +199,8 @@ export default function SettingsPage() {
                 Back
               </Button>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+                  <p className="text-sm text-muted-foreground">
                   Manage your {roleLabel} settings and preferences
                   </p>
               </div>
@@ -272,29 +273,29 @@ export default function SettingsPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="email">Email Address</Label>
-                  <Input id="email" type="email" value={settings.email} disabled className="bg-gray-50 dark:bg-gray-800" />
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <Input id="email" type="email" value={settings.email} disabled className="bg-muted" />
+                  <p className="text-sm text-muted-foreground">
                     Email is managed by your authentication provider
                   </p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="timezone">Timezone</Label>
-                  <select
-                    id="timezone"
-                    value={settings.timezone}
-                    onChange={(event) => setSettings({ ...settings, timezone: event.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  >
-                    <option value="America/New_York">Eastern Time (ET)</option>
-                    <option value="America/Chicago">Central Time (CT)</option>
-                    <option value="America/Denver">Mountain Time (MT)</option>
-                    <option value="America/Los_Angeles">Pacific Time (PT)</option>
-                    <option value="Europe/London">London (GMT)</option>
-                    <option value="Europe/Paris">Paris (CET)</option>
-                    <option value="Asia/Tokyo">Tokyo (JST)</option>
-                    <option value="Asia/Shanghai">Shanghai (CST)</option>
-                  </select>
+                  <Select value={settings.timezone} onValueChange={(value) => setSettings({ ...settings, timezone: value })}>
+                    <SelectTrigger id="timezone" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="America/New_York">Eastern Time (ET)</SelectItem>
+                      <SelectItem value="America/Chicago">Central Time (CT)</SelectItem>
+                      <SelectItem value="America/Denver">Mountain Time (MT)</SelectItem>
+                      <SelectItem value="America/Los_Angeles">Pacific Time (PT)</SelectItem>
+                      <SelectItem value="Europe/London">London (GMT)</SelectItem>
+                      <SelectItem value="Europe/Paris">Paris (CET)</SelectItem>
+                      <SelectItem value="Asia/Tokyo">Tokyo (JST)</SelectItem>
+                      <SelectItem value="Asia/Shanghai">Shanghai (CST)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardContent>
             </Card>
@@ -310,7 +311,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Email Notifications</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Receive notifications via email</p>
+                    <p className="text-sm text-muted-foreground">Receive notifications via email</p>
                   </div>
                   <Switch
                     checked={settings.emailNotifications}
@@ -321,7 +322,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Assignment Reminders</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-muted-foreground">
                       Get reminded about upcoming assignment deadlines
                     </p>
                   </div>
@@ -334,7 +335,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Message Notifications</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Get notified when you receive new messages</p>
+                    <p className="text-sm text-muted-foreground">Get notified when you receive new messages</p>
                   </div>
                   <Switch
                     checked={settings.messageNotifications}
@@ -345,7 +346,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Weekly Digest</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Receive a weekly summary of your activity</p>
+                    <p className="text-sm text-muted-foreground">Receive a weekly summary of your activity</p>
                   </div>
                   <Switch
                     checked={settings.weeklyDigest}
@@ -369,7 +370,7 @@ export default function SettingsPage() {
                     id="profileVisibility"
                     value={settings.profileVisibility}
                     onChange={(event) => setSettings({ ...settings, profileVisibility: event.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
                   >
                     <option value="everyone">Everyone</option>
                     <option value="students">My Students Only</option>
@@ -380,7 +381,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Show Email Address</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Allow other users to see your email</p>
+                    <p className="text-sm text-muted-foreground">Allow other users to see your email</p>
                   </div>
                   <Switch checked={settings.showEmail} onCheckedChange={(checked) => setSettings({ ...settings, showEmail: checked })} />
                 </div>
@@ -388,7 +389,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Show Phone Number</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Allow other users to see your phone number</p>
+                    <p className="text-sm text-muted-foreground">Allow other users to see your phone number</p>
                   </div>
                   <Switch checked={settings.showPhone} onCheckedChange={(checked) => setSettings({ ...settings, showPhone: checked })} />
                 </div>
@@ -406,7 +407,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Dark Mode</Label>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Use dark theme for better visibility in low light</p>
+                    <p className="text-sm text-muted-foreground">Use dark theme for better visibility in low light</p>
                   </div>
                   <Switch checked={theme === 'dark'} onCheckedChange={toggleTheme} />
                 </div>
@@ -440,7 +441,7 @@ export default function SettingsPage() {
                             defaultStudentTab: normalizeDefaultStudentTab(event.target.value),
                           })
                         }
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
                       >
                         <option value="dashboard">Dashboard</option>
                         <option value="courses">My Courses</option>
@@ -448,7 +449,7 @@ export default function SettingsPage() {
                         <option value="grades">Grades</option>
                         <option value="library">Library</option>
                       </select>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="text-sm text-muted-foreground">
                         Choose which tab opens first when you enter the student dashboard.
                       </p>
                     </div>
@@ -456,7 +457,7 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label>Show Weekend in Weekly Schedule</Label>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Include Saturday and Sunday in the schedule view.</p>
+                        <p className="text-sm text-muted-foreground">Include Saturday and Sunday in the schedule view.</p>
                       </div>
                       <Switch
                         checked={settings.showWeekendSchedule}
@@ -467,7 +468,7 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label>Compact Assignment Cards</Label>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Reduce card spacing to fit more assignments on screen.</p>
+                        <p className="text-sm text-muted-foreground">Reduce card spacing to fit more assignments on screen.</p>
                       </div>
                       <Switch
                         checked={settings.compactAssignmentCards}
@@ -478,7 +479,7 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label>Auto-open Next Assignment</Label>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Open the next in-progress assignment from Resume Learning Session.</p>
+                        <p className="text-sm text-muted-foreground">Open the next in-progress assignment from Resume Learning Session.</p>
                       </div>
                       <Switch
                         checked={settings.autoOpenNextAssignment}
@@ -499,20 +500,20 @@ export default function SettingsPage() {
                             defaultParentTab: normalizeDefaultParentTab(event.target.value),
                           })
                         }
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
                       >
                         <option value="overview">Overview</option>
                         <option value="children">Children</option>
                         <option value="upcoming">Upcoming Work</option>
                         <option value="messages">Messages</option>
                       </select>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <p className="text-sm text-muted-foreground">
                         Choose which view opens first when you enter the parent dashboard.
                       </p>
                     </div>
                   </>
                 ) : (
-                  <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                  <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
                     Tutor-specific AI and system configuration is managed in the admin settings area. Personal controls here are handled through profile, notifications, privacy, and appearance.
                   </div>
                 )}

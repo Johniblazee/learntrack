@@ -60,7 +60,7 @@ export default function StudentOnboarding() {
 
   return (
     <OnboardingShell
-      backgroundClassName="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-slate-900 dark:to-slate-800"
+      backgroundClassName="bg-muted"
       title="Welcome to LearnTrack!"
       description="Let's set up your student profile"
       icon={BookOpen}
@@ -82,10 +82,10 @@ export default function StudentOnboarding() {
                   <User className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-semibold text-foreground">
                     What's your name?
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     This is how your teacher will see you
                   </p>
                 </div>
@@ -125,10 +125,10 @@ export default function StudentOnboarding() {
                   <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-semibold text-foreground">
                     What are you interested in?
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     This helps us personalize your learning experience
                   </p>
                 </div>
@@ -144,7 +144,7 @@ export default function StudentOnboarding() {
                   }
                   placeholder="e.g., Math, Science, Sports, Music"
                 />
-                <p className="text-xs text-gray-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Separate multiple interests with commas
                 </p>
               </div>

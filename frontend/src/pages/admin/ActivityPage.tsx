@@ -35,6 +35,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar as CalendarComponent } from '@/components/ui/calendar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { LoadingSpinner } from '@/components/ui/loading-state'
 
 interface ActivityLog {
@@ -87,7 +88,7 @@ const methodColors: Record<string, string> = {
   PATCH: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
   DELETE: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
   LOGIN: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-  LOGOUT: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400',
+  LOGOUT: 'bg-muted text-muted-foreground',
 }
 
 const statusColors: Record<string, string> = {
@@ -458,49 +459,48 @@ export function ActivityPage() {
 
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-muted/50 border-b">
-                <tr>
-                  <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-sm">Time</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-sm">User</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-sm">Action</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-sm">Resource</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-sm">Status</th>
-                  <th className="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-sm">Duration</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {isLoading ? (
-                  [...Array(5)].map((_, i) => (
-                    <tr key={i}>
-                      <td className="p-4"><Skeleton className="h-4 w-24" /></td>
-                      <td className="p-4"><Skeleton className="h-4 w-32" /></td>
-                      <td className="p-4"><Skeleton className="h-4 w-16" /></td>
-                      <td className="p-4"><Skeleton className="h-4 w-28" /></td>
-                      <td className="p-4"><Skeleton className="h-4 w-20" /></td>
-                      <td className="p-4"><Skeleton className="h-4 w-12" /></td>
-                    </tr>
-                  ))
-                ) : activities.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-8 text-center">
-                      <Activity className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                      <p className="text-muted-foreground">No activity recorded yet</p>
-                    </td>
-                  </tr>
-                ) : (
-                  activities.map((activity) => {
-                    const activityKey = activity.id || activity._id || `${activity.user_id}-${activity.timestamp}`
-                    return (
-                      <tr key={activityKey} className="hover:bg-muted/50 transition-colors">
-                      <td className="p-4 text-sm">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Resource</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Duration</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                [...Array(5)].map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                  </TableRow>
+                ))
+              ) : activities.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="p-8 text-center">
+                    <Activity className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">No activity recorded yet</p>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                activities.map((activity) => {
+                  const activityKey = activity.id || activity._id || `${activity.user_id}-${activity.timestamp}`
+                  return (
+                    <TableRow key={activityKey}>
+                      <TableCell className="text-sm">
                         <div className="flex items-center gap-2">
                           <Clock className="w-3 h-3 text-muted-foreground" />
                           {format(new Date(activity.timestamp), 'MMM d, yyyy HH:mm')}
                         </div>
-                      </td>
-                      <td className="p-4">
+                      </TableCell>
+                      <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
                             {activity.user_name?.[0] || 'U'}
@@ -510,13 +510,13 @@ export function ActivityPage() {
                             <p className="text-xs text-muted-foreground">{activity.user_email}</p>
                           </div>
                         </div>
-                      </td>
-                      <td className="p-4">
+                      </TableCell>
+                      <TableCell>
                         <Badge variant="secondary" className={methodColors[activity.method] || methodColors.GET}>
                           {activity.method}
                         </Badge>
-                      </td>
-                      <td className="p-4 text-sm">
+                      </TableCell>
+                      <TableCell className="text-sm">
                         <div className="flex items-center gap-2">
                           <FileText className="w-3 h-3 text-muted-foreground" />
                           <span className="font-medium">{activity.resource}</span>
@@ -526,23 +526,22 @@ export function ActivityPage() {
                             </span>
                           )}
                         </div>
-                      </td>
-                      <td className="p-4">
+                      </TableCell>
+                      <TableCell>
                         <Badge variant="secondary" className={statusColors[getStatusFromCode(activity.status_code)]}>
                           {getStatusFromCode(activity.status_code) === 'success' && <CheckCircle className="w-3 h-3 mr-1" />}
                           {getStatusFromCode(activity.status_code) === 'error' && <XCircle className="w-3 h-3 mr-1" />}
                           {getStatusFromCode(activity.status_code) === 'warning' && <AlertCircle className="w-3 h-3 mr-1" />}
                           {activity.status_code}
                         </Badge>
-                      </td>
-                      <td className="p-4 text-sm text-muted-foreground">{formatDuration(activity.duration_ms)}</td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{formatDuration(activity.duration_ms)}</TableCell>
+                    </TableRow>
+                  )
+                })
+              )}
+            </TableBody>
+          </Table>
 
           {totalPages > 1 && !isLoading && (
             <div className="px-6 py-4 border-t flex items-center justify-between">

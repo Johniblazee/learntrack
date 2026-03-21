@@ -79,7 +79,7 @@ export default function AccessDeniedPage({
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-muted p-4">
       <Card className="w-full max-w-lg text-center shadow-lg border-0">
         <CardHeader className="pb-4">
           {/* 403 Icon */}
@@ -91,39 +91,39 @@ export default function AccessDeniedPage({
           
           <div className="text-5xl font-bold text-red-500 mb-2">403</div>
           
-          <CardTitle className="text-2xl font-bold text-slate-900 dark:text-white">
+          <CardTitle className="text-2xl font-bold text-foreground">
             {title}
           </CardTitle>
-          <CardDescription className="text-base text-slate-600 dark:text-slate-400 mt-2">
+          <CardDescription className="text-base text-muted-foreground mt-2">
             {message}
           </CardDescription>
         </CardHeader>
         
         <CardContent className="space-y-6">
           {/* Context information */}
-          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 text-left space-y-2">
+          <div className="bg-muted rounded-lg p-4 text-left space-y-2">
             {isSignedIn && user && (
-              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Mail className="w-4 h-4" />
                 <span>Signed in as: <strong>{user.primaryEmailAddress?.emailAddress}</strong></span>
               </div>
             )}
             
             {resource && (
-              <div className="text-sm text-slate-600 dark:text-slate-400">
+              <div className="text-sm text-muted-foreground">
                 <span className="font-medium">Requested resource:</span> {resource}
               </div>
             )}
             
             {requiredRole && (
-              <div className="text-sm text-slate-600 dark:text-slate-400">
+              <div className="text-sm text-muted-foreground">
                 <span className="font-medium">Required role:</span> {requiredRole}
               </div>
             )}
           </div>
 
           {/* Suggestions */}
-          <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
+          <div className="text-sm text-muted-foreground space-y-1">
             <p className="font-medium">What you can do:</p>
             <ul className="list-disc list-inside space-y-1 text-left">
               <li>Contact your administrator for access</li>

@@ -1,3 +1,4 @@
+import { PageShell } from "@/components/ui/page-shell"
 import { StatsCards } from "../components/StatsCards"
 import { PerformanceChart } from "../components/PerformanceChart"
 import { SubjectPerformance } from "../components/SubjectPerformance"
@@ -29,7 +30,7 @@ export function OverviewView({ dashboardStats, loading, onViewChange }: Overview
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-6">
+      <PageShell>
         {/* Welcome Section */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -68,7 +69,7 @@ export function OverviewView({ dashboardStats, loading, onViewChange }: Overview
 
         {/* Recent Activity */}
         <RecentActivity />
-      </div>
+      </PageShell>
     </div>
   )
 }

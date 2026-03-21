@@ -74,14 +74,14 @@ export function DashboardHeader({ onCreateAssignment }: DashboardHeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-50 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-6 py-4">
+    <header className="sticky top-0 z-50 bg-background border-b border-border px-6 py-4">
       <div className="flex items-center justify-between">
         {/* Left Section */}
         <div className="flex items-center space-x-2 sm:space-x-4">
           <SidebarTrigger />
           <div>
-            <h1 className="text-lg sm:text-2xl font-semibold text-slate-900 dark:text-white">Dashboard</h1>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 hidden sm:block">
+            <h1 className="text-lg sm:text-2xl font-semibold text-foreground">Dashboard</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">
               Welcome back, {getUserDisplayName()}
             </p>
           </div>
@@ -197,7 +197,7 @@ export function DashboardHeader({ onCreateAssignment }: DashboardHeaderProps) {
               <DropdownMenuLabel>
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none">{user?.firstName} {user?.lastName}</p>
-                  <p className="text-xs leading-none text-slate-500 dark:text-slate-400">
+                  <p className="text-xs leading-none text-muted-foreground">
                     {user?.primaryEmailAddress?.emailAddress}
                   </p>
                 </div>

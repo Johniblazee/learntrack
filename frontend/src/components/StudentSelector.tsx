@@ -109,10 +109,10 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
 
   if (students.length === 0) {
     return (
-      <div className="p-8 text-center border border-gray-200 dark:border-gray-700 rounded-lg">
-        <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-        <p className="text-gray-600 dark:text-gray-400">No students found</p>
-        <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+      <div className="p-8 text-center border border-border rounded-lg">
+        <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+        <p className="text-muted-foreground">No students found</p>
+        <p className="text-sm text-muted-foreground mt-1">
           Invite students to get started
         </p>
       </div>
@@ -124,7 +124,7 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
       {/* Search and Select All */}
       <div className="flex items-center gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search students..."
             value={searchTerm}
@@ -149,7 +149,7 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
       </div>
 
       {/* Student list */}
-      <ScrollArea className="h-[300px] border border-gray-200 dark:border-gray-700 rounded-lg">
+      <ScrollArea className="h-[300px] border border-border rounded-lg">
         <div className="p-2 space-y-1">
           {filteredStudents.map(student => (
             <div
@@ -159,7 +159,7 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
                 flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors
                 ${selectedStudents.includes(student.clerk_id)
                   ? 'bg-primary/10 border border-primary/30'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-800 border border-transparent'
+                  : 'hover:bg-muted border border-transparent'
                 }
               `}
             >
@@ -175,17 +175,17 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 dark:text-white truncate">
+                <p className="font-medium text-foreground truncate">
                   {student.name}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                <p className="text-sm text-muted-foreground truncate">
                   {student.email}
                 </p>
               </div>
             </div>
           ))}
           {filteredStudents.length === 0 && (
-            <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+            <div className="p-4 text-center text-muted-foreground">
               No students match your search
             </div>
           )}

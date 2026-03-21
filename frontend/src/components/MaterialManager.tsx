@@ -78,7 +78,7 @@ const getFileIcon = (type: Material['material_type']) => {
     case 'video': return <FileVideo className={`${cls} text-purple-500`} />
     case 'image': return <FileImage className={`${cls} text-green-500`} />
     case 'link':  return <Link className={`${cls} text-cyan-500`} />
-    default:      return <File className={`${cls} text-gray-500`} />
+    default:      return <File className={`${cls} text-muted-foreground`} />
   }
 }
 

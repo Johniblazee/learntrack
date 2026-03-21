@@ -67,10 +67,10 @@ export default function RoleSetupPage() {
       <div className="w-full max-w-4xl">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-3">
+          <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-3">
             Welcome to LearnTrack!
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 text-lg">
+          <p className="text-muted-foreground text-lg">
             To get started, please select your role.
           </p>
         </div>
@@ -88,8 +88,8 @@ export default function RoleSetupPage() {
                 className={`
                   relative p-6 rounded-xl text-left transition-all duration-200
                   ${isSelected
-                    ? 'bg-gray-800 dark:bg-gray-700 ring-2 ring-[#C8A882]'
-                    : 'bg-gray-100 dark:bg-gray-800/50 hover:bg-gray-200 dark:hover:bg-gray-700/50'
+                    ? 'bg-primary text-primary-foreground ring-2 ring-primary'
+                    : 'bg-muted hover:bg-muted/80'
                   }
                 `}
               >
@@ -99,12 +99,12 @@ export default function RoleSetupPage() {
                 </div>
 
                 {/* Title */}
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                <h3 className="text-lg font-semibold text-foreground mb-2">
                   {role.title}
                 </h3>
 
                 {/* Description */}
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+                <p className="text-sm text-muted-foreground">
                   {role.description}
                 </p>
 
@@ -132,7 +132,7 @@ export default function RoleSetupPage() {
               px-12 py-3 rounded-lg font-semibold text-lg transition-all duration-200
               ${selectedRole && !isLoading
                 ? 'bg-[#C8A882] hover:bg-[#B89872] text-white shadow-lg hover:shadow-xl'
-                : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-500 cursor-not-allowed'
+                : 'bg-muted text-muted-foreground cursor-not-allowed'
               }
             `}
           >

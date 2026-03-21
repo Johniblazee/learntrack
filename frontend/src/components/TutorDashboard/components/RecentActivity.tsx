@@ -35,8 +35,8 @@ function getActivityStyle(type: string) {
     default:
       return {
         Icon: FileText,
-        iconBg: "bg-gray-50 dark:bg-gray-950/30",
-        iconColor: "text-gray-600 dark:text-gray-400"
+        iconBg: "bg-muted",
+        iconColor: "text-muted-foreground"
       }
   }
 }

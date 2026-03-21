@@ -113,7 +113,7 @@ export function TopPerformers() {
                       isUpTrend
                         ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-700"
                         : isSteadyTrend
-                          ? "bg-slate-50 dark:bg-slate-900/30 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                          ? "bg-muted text-muted-foreground border-border"
                           : "bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-700"
                     }
                   >

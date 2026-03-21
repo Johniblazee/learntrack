@@ -149,7 +149,7 @@ export default function GroupsManagementView() {
       'yellow': 'bg-yellow-100 text-yellow-700',
       'indigo': 'bg-indigo-100 text-indigo-700',
     }
-    return colorMap[color] || 'bg-slate-100 text-slate-700'
+    return colorMap[color] || 'bg-muted text-foreground'
   }
 
   return (

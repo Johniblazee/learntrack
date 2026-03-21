@@ -44,12 +44,12 @@ function App() {
             <ErrorBoundary>
               <ImpersonationBanner />
               <div
-                className="min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300"
+                className="min-h-screen bg-background transition-colors duration-300"
                 style={{ paddingTop: 'var(--lt-impersonation-offset, 0px)' }}
               >
                 <Suspense fallback={
                   <div className="flex items-center justify-center min-h-screen">
-                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600" />
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-blue-600" />
                   </div>
                 }>
                 <Routes>

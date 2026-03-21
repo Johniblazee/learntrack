@@ -126,8 +126,8 @@ export default function AcceptInvitationPage() {
 
   if (!invitationDetails?.valid) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
-        <Card className="w-full max-w-md shadow-xl border-0 bg-white dark:bg-slate-900">
+      <div className="min-h-screen flex items-center justify-center bg-muted p-4">
+        <Card className="w-full max-w-md shadow-xl border-0 bg-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-red-600">
               <XCircle className="w-6 h-6" />
@@ -156,15 +156,15 @@ export default function AcceptInvitationPage() {
     const invitationRedirectUrl = `/accept-invitation/${token}`
 
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
+      <div className="min-h-screen flex items-center justify-center bg-muted p-4">
         <div className="w-full max-w-md space-y-6">
-          <Card className="shadow-xl border-0 bg-white dark:bg-slate-900">
+          <Card className="shadow-xl border-0 bg-card">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-slate-900 dark:text-white">
+              <CardTitle className="flex items-center gap-2 text-foreground">
                 <UserPlus className="w-6 h-6 text-purple-600" />
                 Accept Invitation
               </CardTitle>
-              <CardDescription className="text-slate-600 dark:text-slate-400">
+              <CardDescription className="text-muted-foreground">
                 You've been invited by {invitationDetails.tutor_name} to join as a {invitationDetails.invitation?.role}
               </CardDescription>
             </CardHeader>
@@ -173,15 +173,15 @@ export default function AcceptInvitationPage() {
                 <div className="flex items-start gap-3">
                   <Mail className="w-5 h-5 text-purple-600 mt-0.5" />
                   <div>
-                    <p className="text-sm font-medium text-slate-900 dark:text-white">Invited Email</p>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">{invitationDetails.invitation?.invitee_email}</p>
+                    <p className="text-sm font-medium text-foreground">Invited Email</p>
+                    <p className="text-sm text-muted-foreground">{invitationDetails.invitation?.invitee_email}</p>
                   </div>
                 </div>
               </div>
 
               {invitationDetails.invitation?.message && (
-                <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                  <p className="text-sm text-slate-700 dark:text-slate-300 italic">
+                <div className="p-4 rounded-lg bg-muted border border-border">
+                  <p className="text-sm text-foreground italic">
                     "{invitationDetails.invitation.message}"
                   </p>
                 </div>
@@ -205,7 +205,7 @@ export default function AcceptInvitationPage() {
           </div>
 
           <div className="text-center">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
+            <p className="text-sm text-muted-foreground">
               {showSignUp ? (
                 <>
                   Already have an account?{' '}

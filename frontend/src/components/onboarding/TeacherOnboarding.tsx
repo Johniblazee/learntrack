@@ -82,7 +82,7 @@ export default function TeacherOnboarding() {
 
   return (
     <OnboardingShell
-      backgroundClassName="bg-gradient-to-br from-purple-50 to-blue-50 dark:from-slate-900 dark:to-slate-800"
+      backgroundClassName="bg-muted"
       title="Welcome to LearnTrack!"
       description="Let's set up your teaching profile"
       icon={GraduationCap}
@@ -104,10 +104,10 @@ export default function TeacherOnboarding() {
                   <User className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-semibold text-foreground">
                     What should students call you?
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     This name will be visible to students and parents
                   </p>
                 </div>
@@ -125,7 +125,7 @@ export default function TeacherOnboarding() {
                   className="text-lg"
                   autoFocus
                 />
-                <p className="text-xs text-gray-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Examples: Mr. Smith, Dr. Johnson, Professor Lee, Ms. Garcia
                 </p>
               </div>
@@ -152,10 +152,10 @@ export default function TeacherOnboarding() {
                   <Clock className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-semibold text-foreground">
                     What's your timezone?
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     This helps us show correct times for assignments and deadlines
                   </p>
                 </div>
@@ -199,10 +199,10 @@ export default function TeacherOnboarding() {
                   <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-semibold text-foreground">
                     What subjects do you teach?
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     You can add more subjects later
                   </p>
                 </div>
@@ -218,7 +218,7 @@ export default function TeacherOnboarding() {
                   }
                   placeholder="e.g., Mathematics, Science, English"
                 />
-                <p className="text-xs text-gray-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Separate multiple subjects with commas
                 </p>
               </div>

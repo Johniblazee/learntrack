@@ -15,13 +15,13 @@ export default function GetStartedPage() {
         </div>
 
         {/* Header */}
-        <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-3">
+        <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-3">
           Welcome to LearnTrack!
         </h1>
-        <p className="text-gray-600 dark:text-gray-400 text-lg mb-2">
+        <p className="text-muted-foreground text-lg mb-2">
           Create your tutoring account to get started.
         </p>
-        <p className="text-gray-500 dark:text-gray-500 text-sm mb-10">
+        <p className="text-muted-foreground text-sm mb-10">
           Manage students, create assignments, and track progress — all in one place.
         </p>
 
@@ -36,7 +36,7 @@ export default function GetStartedPage() {
         </div>
 
         {/* Sign In Link */}
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <p className="text-sm text-muted-foreground">
           Already have an account?{' '}
           <Link
             to="/sign-in"

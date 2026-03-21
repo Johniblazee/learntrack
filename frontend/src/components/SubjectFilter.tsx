@@ -54,7 +54,7 @@ export default function SubjectFilter({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-gray-700 dark:text-slate-300">
+        <p className="text-sm font-medium text-foreground">
           Assign by Subject
         </p>
         {selectedSubject && (
@@ -112,7 +112,7 @@ export default function SubjectFilter({
       )}
 
       {!isLoading && subjects.length === 0 && (
-        <div className="text-center py-4 text-gray-500 dark:text-slate-400">
+        <div className="text-center py-4 text-muted-foreground">
           <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p className="text-sm">No subjects found</p>
         </div>

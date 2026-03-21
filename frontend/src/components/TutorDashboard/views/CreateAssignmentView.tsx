@@ -242,10 +242,10 @@ export default function CreateAssignmentView() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h2 className="text-2xl font-bold text-foreground">
             Create New Assignment
           </h2>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-muted-foreground">
             Create and assign work to your students
           </p>
         </div>
@@ -386,7 +386,7 @@ export default function CreateAssignmentView() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <p className="text-sm text-muted-foreground">
                 {formData.selectedQuestions.length} question(s) selected
               </p>
               <Button
@@ -401,9 +401,9 @@ export default function CreateAssignmentView() {
             </div>
 
             {formData.selectedQuestions.length === 0 ? (
-              <div className="p-8 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-center">
-                <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 dark:text-gray-400 mb-4">
+              <div className="p-8 border-2 border-dashed border-border rounded-lg text-center">
+                <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground mb-4">
                   No questions added yet
                 </p>
                 <Button
@@ -427,18 +427,18 @@ export default function CreateAssignmentView() {
                       case 'easy': return 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                       case 'medium': return 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
                       case 'hard': return 'bg-red-500/20 text-red-600 dark:text-red-400'
-                      default: return 'bg-gray-500/20 text-gray-600'
+                      default: return 'bg-muted text-muted-foreground'
                     }
                   }
 
                   return (
                     <div
                       key={question.id}
-                      className="flex items-start justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-card"
+                      className="flex items-start justify-between p-3 border border-border rounded-lg bg-card"
                     >
                       <div className="flex-1 min-w-0 pr-4">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                          <span className="text-xs font-medium text-muted-foreground">
                             Q{index + 1}
                           </span>
                           {question.difficulty && (
@@ -452,11 +452,11 @@ export default function CreateAssignmentView() {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-sm text-gray-900 dark:text-gray-100">
+                        <p className="text-sm text-foreground">
                           {truncatedText}
                         </p>
                         {question.subject && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                             Subject: {typeof question.subject === 'object'
                               ? (question.subject as any).name
                               : question.subject}
@@ -472,7 +472,7 @@ export default function CreateAssignmentView() {
                           setFormData({ ...formData, selectedQuestions: newQuestions })
                           setSelectedQuestionData(prev => prev.filter(q => q.id !== question.id))
                         }}
-                        className="text-gray-400 hover:text-red-500"
+                        className="text-muted-foreground hover:text-red-500"
                       >
                         <X className="h-4 w-4" />
                       </Button>

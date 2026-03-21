@@ -6,7 +6,7 @@ export default function SignUpPage() {
   return (
     <div className="min-h-screen flex">
       {/* Left Side - Image Section */}
-      <div className="hidden lg:flex lg:w-1/2 relative bg-gradient-to-br from-slate-800 to-slate-900 overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 relative bg-gradient-to-br from-background to-card overflow-hidden">
         {/* Background Image */}
         <div
           className="absolute inset-0 bg-cover bg-center opacity-80"
@@ -34,7 +34,7 @@ export default function SignUpPage() {
         <div className="w-full max-w-md">
           {/* Logo and Title */}
           <div className="mb-8">
-            <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Create Your Account</h3>
+            <h3 className="text-3xl font-bold text-foreground mb-2">Create Your Account</h3>
           </div>
 
           {/* Clerk Sign Up Component with Custom Styling */}
@@ -58,18 +58,18 @@ export default function SignUpPage() {
                 card: "shadow-none bg-transparent",
                 headerTitle: "hidden",
                 headerSubtitle: "hidden",
-                socialButtonsBlockButton: "bg-white dark:bg-white border-0 hover:bg-gray-50 dark:hover:bg-gray-100 transition-colors text-sm font-semibold rounded-lg py-3",
-                socialButtonsBlockButtonText: "text-gray-900 font-semibold",
+                socialButtonsBlockButton: "bg-background border-0 hover:bg-muted transition-colors text-sm font-semibold rounded-lg py-3",
+                socialButtonsBlockButtonText: "text-foreground font-semibold",
                 socialButtonsBlockButtonArrow: "hidden",
-                dividerLine: "bg-gray-200 dark:bg-gray-700",
-                dividerText: "text-gray-500 dark:text-gray-400 text-xs uppercase",
-                formButtonPrimary: "bg-[#C8A882] hover:bg-[#B89872] text-gray-900 font-semibold py-3 rounded-lg transition-colors shadow-sm normal-case",
-                formFieldInput: "border-0 rounded-lg px-4 py-3 bg-white dark:bg-[#2a2a2a] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-[#C8A882] focus:border-transparent transition-all shadow-sm",
-                formFieldLabel: "text-gray-900 dark:text-gray-300 font-medium mb-2 text-sm",
+                dividerLine: "bg-border",
+                dividerText: "text-muted-foreground text-xs uppercase",
+                formButtonPrimary: "bg-[#C8A882] hover:bg-[#B89872] text-foreground font-semibold py-3 rounded-lg transition-colors shadow-sm normal-case",
+                formFieldInput: "border-0 rounded-lg px-4 py-3 bg-card text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-[#C8A882] focus:border-transparent transition-all shadow-sm",
+                formFieldLabel: "text-foreground font-medium mb-2 text-sm",
                 footerActionLink: "text-[#C8A882] hover:text-[#B89872] font-medium",
-                identityPreviewText: "text-gray-900 dark:text-white",
+                identityPreviewText: "text-foreground",
                 identityPreviewEditButton: "text-[#C8A882] hover:text-[#B89872]",
-                formFieldInputShowPasswordButton: "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200",
+                formFieldInputShowPasswordButton: "text-muted-foreground hover:text-foreground",
                 formHeaderTitle: "hidden",
                 formHeaderSubtitle: "hidden",
                 footer: "hidden",
@@ -92,7 +92,7 @@ export default function SignUpPage() {
 
           {/* Sign In Link */}
           <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600 dark:text-gray-400">
+            <p className="text-sm text-muted-foreground">
               Already have an account?{' '}
               <Link
                 to="/sign-in"

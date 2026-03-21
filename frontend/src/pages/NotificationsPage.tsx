@@ -26,7 +26,7 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-8 dark:bg-gray-900">
+    <div className="min-h-screen bg-muted px-4 py-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -34,8 +34,8 @@ export default function NotificationsPage() {
               <ChevronLeft className="mr-2 h-4 w-4" />
               Back
             </Button>
-            <h1 className="mt-3 text-3xl font-bold text-gray-900 dark:text-white">Notifications</h1>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            <h1 className="mt-3 text-3xl font-bold text-foreground">Notifications</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
               Review message alerts, grading updates, and assignment activity in one place.
             </p>
           </div>

@@ -82,10 +82,10 @@ export default function ParentOnboarding() {
                   <User className="w-5 h-5 text-pink-600 dark:text-pink-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-semibold text-foreground">
                     What's your name?
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     This is how the teacher will see you
                   </p>
                 </div>
@@ -114,7 +114,7 @@ export default function ParentOnboarding() {
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   placeholder="e.g., (555) 123-4567"
                 />
-                <p className="text-xs text-gray-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   For important notifications about your child
                 </p>
               </div>
@@ -129,10 +129,10 @@ export default function ParentOnboarding() {
                   <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  <h3 className="text-xl font-semibold text-foreground">
                     You're all set!
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     Ready to support your child's learning journey
                   </p>
                 </div>

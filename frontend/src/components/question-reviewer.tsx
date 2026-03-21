@@ -928,12 +928,12 @@ export default function QuestionReviewer() {
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                       <Checkbox
-                        checked={
-                          filteredQuestions.filter((q) => q.status === 'pending').length > 0 &&
-                          filteredQuestions
-                            .filter((q) => q.status === 'pending')
-                            .every((q) => selectedQuestions.has(q.id))
-                        }
+                        checked={(() => {
+                          const pending = filteredQuestions.filter((q) => q.status === 'pending')
+                          const allSelected = pending.length > 0 && pending.every((q) => selectedQuestions.has(q.id))
+                          const someSelected = pending.some((q) => selectedQuestions.has(q.id)) && !allSelected
+                          return allSelected ? true : someSelected ? "indeterminate" : false
+                        })()}
                         onCheckedChange={(checked) => {
                           const pendingIds = filteredQuestions
                             .filter((q) => q.status === 'pending')

@@ -158,9 +158,9 @@ export function SendMessageModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[500px] bg-[#1a1a1a] dark:bg-[#1a1a1a] border-gray-800">
+      <DialogContent className="sm:max-w-[500px] bg-card border-border">
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold text-white">
+          <DialogTitle className="text-xl font-semibold text-foreground">
             Send a Message
           </DialogTitle>
         </DialogHeader>
@@ -169,15 +169,15 @@ export function SendMessageModal({
           {/* Recipient */}
           {student && (
             <div className="flex items-center gap-3 pb-2">
-              <span className="text-sm text-gray-400">To:</span>
+              <span className="text-sm text-muted-foreground">To:</span>
               <div className="flex items-center gap-2">
                 <Avatar className="h-6 w-6">
                   <AvatarImage src={student.avatar} alt={student.name} />
-                  <AvatarFallback className="bg-[#C8A882] text-gray-900 text-xs font-semibold">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
                     {student.name.split(' ').map(n => n[0]).join('')}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-sm font-medium text-white">{student.name}</span>
+                <span className="text-sm font-medium text-foreground">{student.name}</span>
               </div>
             </div>
           )}
@@ -209,7 +209,7 @@ export function SendMessageModal({
               placeholder="Subject"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              className="h-10 bg-[#2a2a2a] border-gray-700 text-white placeholder:text-gray-500 focus-visible:ring-1 focus-visible:ring-[#C8A882]"
+              className="h-10 bg-muted border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
               disabled={sending}
               maxLength={200}
             />
@@ -220,7 +220,7 @@ export function SendMessageModal({
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="min-h-[160px] bg-[#2a2a2a] border-0 text-white placeholder:text-gray-500 focus-visible:ring-1 focus-visible:ring-[#C8A882] resize-none"
+            className="min-h-[160px] bg-muted border-0 text-foreground placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring resize-none"
             disabled={sending}
           />
 
@@ -229,11 +229,11 @@ export function SendMessageModal({
             <Button
               onClick={handleSendMessage}
               disabled={!message.trim() || sending || (deliveryMethod === 'email' && !subject.trim())}
-              className="bg-[#C8A882] hover:bg-[#B89872] text-gray-900 font-semibold px-6 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-6 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {sending ? (
                 <>
-                  <LoadingSpinner size="sm" className="mr-2 text-gray-900" />
+                  <LoadingSpinner size="sm" className="mr-2 text-primary-foreground" />
                   Sending...
                 </>
               ) : (

@@ -57,7 +57,7 @@ export default function NotFoundPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-muted p-4">
       <Card className="w-full max-w-lg text-center shadow-lg border-0">
         <CardHeader className="pb-4">
           {/* 404 Illustration */}
@@ -68,21 +68,21 @@ export default function NotFoundPage() {
             <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-32 h-1 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full opacity-50" />
           </div>
           
-          <CardTitle className="text-2xl font-bold text-slate-900 dark:text-white">
+          <CardTitle className="text-2xl font-bold text-foreground">
             Page Not Found
           </CardTitle>
-          <CardDescription className="text-base text-slate-600 dark:text-slate-400 mt-2">
+          <CardDescription className="text-base text-muted-foreground mt-2">
             Oops! The page you're looking for doesn't exist or has been moved.
           </CardDescription>
         </CardHeader>
         
         <CardContent className="space-y-6">
           {/* Helpful suggestions */}
-          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 text-left">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+          <div className="bg-muted rounded-lg p-4 text-left">
+            <p className="text-sm font-medium text-foreground mb-2">
               Here are some helpful links:
             </p>
-            <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
+            <ul className="text-sm text-muted-foreground space-y-1">
               <li className="flex items-center gap-2">
                 <span className="w-1 h-1 bg-purple-500 rounded-full" />
                 <span>Check the URL for typos</span>
@@ -134,7 +134,7 @@ export default function NotFoundPage() {
           </div>
 
           {/* Search suggestion */}
-          <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center justify-center gap-2">
+          <div className="text-sm text-muted-foreground flex items-center justify-center gap-2">
             <Search className="w-4 h-4" />
             <span>Looking for something specific? Try using the navigation menu.</span>
           </div>

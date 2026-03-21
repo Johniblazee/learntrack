@@ -1,4 +1,4 @@
-import { Bell, CheckCheck, Loader2, LogOut, Moon, Settings, Sun } from 'lucide-react'
+import { Bell, CheckCheck, Loader2, LogOut, Settings } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useNavigate } from 'react-router-dom'
 
@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useTheme } from '@/contexts/ThemeContext'
+import { ThemeToggle } from '@/components/ui/theme-toggle'
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -42,7 +42,6 @@ export function DashboardHeaderActions({
   onSettings,
   onSignOut,
 }: DashboardHeaderActionsProps) {
-  const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const { data: notificationResponse } = useNotifications(1, 8)
   const { data: unreadResponse } = useUnreadNotificationCount()
@@ -225,10 +224,7 @@ export function DashboardHeaderActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Button variant="ghost" size="icon" onClick={toggleTheme}>
-        {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        <span className="sr-only">Toggle theme</span>
-      </Button>
+      <ThemeToggle />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

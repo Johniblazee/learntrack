@@ -53,8 +53,8 @@ export function ViewAssignmentModal({
     switch (status) {
       case 'published': return 'bg-green-500/10 text-green-600 dark:text-green-400 border-0'
       case 'draft': return 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-0'
-      case 'archived': return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-0'
-      default: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-0'
+      case 'archived': return 'bg-muted text-muted-foreground border-0'
+      default: return 'bg-muted text-muted-foreground border-0'
     }
   }
 

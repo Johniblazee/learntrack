@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { FilterToolbar } from "@/components/ui/filter-toolbar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   DropdownMenu,
@@ -196,7 +197,7 @@ export default function ActiveAssignmentsView() {
       case 'archived':
         return 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-0'
       default:
-        return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-0'
+        return 'bg-muted text-muted-foreground border-0'
     }
   }
 
@@ -345,7 +346,7 @@ export default function ActiveAssignmentsView() {
 
         {/* Filters Container */}
         <div className="bg-muted/30 border border-border rounded-lg p-4">
-          <div className="flex items-center gap-3">
+          <FilterToolbar>
             <div className="relative w-[300px]">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
               <Input
@@ -383,7 +384,7 @@ export default function ActiveAssignmentsView() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </FilterToolbar>
         </div>
 
         {/* Table */}

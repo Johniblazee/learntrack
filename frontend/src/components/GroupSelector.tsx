@@ -122,7 +122,7 @@ export default function GroupSelector({ selectedGroups, onChange, onStudentCount
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <h4 className="font-medium text-gray-900 dark:text-white truncate">
+                    <h4 className="font-medium text-foreground truncate">
                       {group.name}
                     </h4>
                     <Badge className={getColorClass(group.color)}>
@@ -130,7 +130,7 @@ export default function GroupSelector({ selectedGroups, onChange, onStudentCount
                     </Badge>
                   </div>
                   {group.description && (
-                    <p className="text-sm text-gray-600 dark:text-slate-400 line-clamp-2">
+                    <p className="text-sm text-muted-foreground line-clamp-2">
                       {group.description}
                     </p>
                   )}

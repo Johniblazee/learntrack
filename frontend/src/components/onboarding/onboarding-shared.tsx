@@ -61,7 +61,7 @@ export function OnboardingShell({
         <CardContent className="space-y-6">
           {children}
 
-          <div className="flex items-center justify-between pt-6 border-t border-gray-200 dark:border-slate-700">
+          <div className="flex items-center justify-between pt-6 border-t border-border">
             <div>
               {step > 1 && (
                 <Button variant="outline" onClick={onBack} disabled={loading}>

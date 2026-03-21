@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import {
   Sidebar,
@@ -1224,20 +1225,19 @@ export default function StudentDashboard() {
                 placeholder="Search assignments"
               />
             </div>
-            <div className="relative sm:w-44">
-              <Filter className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <select
-                value={assignmentFilter}
-                onChange={(event) => setAssignmentFilter(event.target.value as AssignmentFilter)}
-                className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm"
-              >
+            <Select value={assignmentFilter} onValueChange={(value) => setAssignmentFilter(value as AssignmentFilter)}>
+              <SelectTrigger className="sm:w-44">
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                 {Object.entries(ASSIGNMENT_FILTER_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
+                  <SelectItem key={value} value={value}>
                     {label}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
-            </div>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

@@ -87,7 +87,7 @@ export function Pagination({
         {getPageNumbers().map((page, index) => {
           if (page === '...') {
             return (
-              <span key={`ellipsis-${index}`} className="px-2 text-gray-400">
+              <span key={`ellipsis-${index}`} className="px-2 text-muted-foreground">
                 ...
               </span>
             )
@@ -105,7 +105,7 @@ export function Pagination({
               className={`h-8 min-w-[2rem] ${
                 isActive
                   ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
-                  : 'hover:bg-gray-800'
+                  : 'hover:bg-muted'
               }`}
             >
               {pageNum}

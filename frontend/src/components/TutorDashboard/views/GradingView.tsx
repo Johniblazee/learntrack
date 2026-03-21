@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { FilterToolbar } from '@/components/ui/filter-toolbar'
 import {
   Dialog,
   DialogContent,
@@ -141,7 +142,7 @@ export default function GradingView() {
       case 'pending': return 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-0'
       case 'graded': return 'bg-green-500/10 text-green-600 dark:text-green-400 border-0'
       case 'reviewed': return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-0'
-      default: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-0'
+      default: return 'bg-muted text-muted-foreground border-0'
     }
   }
 
@@ -167,7 +168,7 @@ export default function GradingView() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
+      <FilterToolbar>
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
           <Input
@@ -187,7 +188,7 @@ export default function GradingView() {
             <SelectItem value="graded">Graded</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+      </FilterToolbar>
 
       {/* Submissions Table */}
       <Card className="border-0 shadow-sm bg-card">

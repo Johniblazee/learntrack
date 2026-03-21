@@ -182,7 +182,7 @@ export default function QuestionBankSelector({
       case 'easy': return 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
       case 'medium': return 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
       case 'hard': return 'bg-red-500/20 text-red-600 dark:text-red-400'
-      default: return 'bg-gray-500/20 text-gray-600 dark:text-gray-400'
+      default: return 'bg-muted text-muted-foreground'
     }
   }
 
@@ -205,9 +205,9 @@ export default function QuestionBankSelector({
         </DialogHeader>
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-3 py-3 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex flex-wrap gap-3 py-3 border-b border-border">
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search questions..."
               value={searchTerm}
@@ -258,7 +258,7 @@ export default function QuestionBankSelector({
               <CheckCircle2 className="h-3 w-3" />
               {localSelected.length} selected
             </Badge>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-muted-foreground">
               {filteredQuestions.length} question{filteredQuestions.length !== 1 ? 's' : ''} found
             </span>
           </div>
@@ -286,9 +286,9 @@ export default function QuestionBankSelector({
               </div>
             ) : filteredQuestions.length === 0 ? (
               <div className="p-8 text-center">
-                <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 dark:text-gray-400">No questions found</p>
-                <p className="text-sm text-gray-500 mt-1">Try adjusting your filters</p>
+                <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No questions found</p>
+                <p className="text-sm text-muted-foreground mt-1">Try adjusting your filters</p>
               </div>
             ) : (
               filteredQuestions.map(question => (
@@ -346,7 +346,7 @@ function QuestionCard({
         p-3 rounded-lg border transition-colors cursor-pointer
         ${isSelected
           ? 'bg-primary/5 border-primary/30'
-          : 'bg-card border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+          : 'bg-card border-border hover:bg-muted'
         }
       `}
       onClick={onToggle}
@@ -359,7 +359,7 @@ function QuestionCard({
           className="mt-1"
         />
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-900 dark:text-gray-100">
+          <p className="text-sm text-foreground">
             {isExpanded ? question.text : truncateText(question.text, 120)}
           </p>
           {question.text.length > 120 && (

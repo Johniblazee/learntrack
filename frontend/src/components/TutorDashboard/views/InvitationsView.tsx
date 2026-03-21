@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
+import { StatsCard } from '@/components/ui/stats-card'
 import { Badge } from '@/components/ui/badge'
 import {
   Table,
@@ -175,10 +176,10 @@ export default function InvitationsView() {
         return {
           icon: Clock,
           label: 'Expired',
-          color: 'text-slate-600 dark:text-slate-400',
-          bgColor: 'bg-slate-50 dark:bg-slate-950/30',
-          borderColor: 'border-slate-200 dark:border-slate-800',
-          dotColor: 'bg-slate-400'
+          color: 'text-muted-foreground',
+          bgColor: 'bg-muted',
+          borderColor: 'border-border',
+          dotColor: 'bg-muted-foreground'
         }
       case 'revoked':
         return {
@@ -202,41 +203,13 @@ export default function InvitationsView() {
         return {
           icon: Clock,
           label: status,
-          color: 'text-slate-600 dark:text-slate-400',
-          bgColor: 'bg-slate-50 dark:bg-slate-950/30',
-          borderColor: 'border-slate-200 dark:border-slate-800',
-          dotColor: 'bg-slate-400'
+          color: 'text-muted-foreground',
+          bgColor: 'bg-muted',
+          borderColor: 'border-border',
+          dotColor: 'bg-muted-foreground'
         }
     }
   }
-
-  const StatCard = ({ 
-    label, 
-    value, 
-    icon: Icon, 
-    color,
-    bgColor 
-  }: { 
-    label: string
-    value: number
-    icon: React.ElementType
-    color: string
-    bgColor: string
-  }) => (
-    <Card className="border shadow-sm hover:shadow-md transition-shadow">
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">{label}</p>
-            <p className="text-3xl font-bold mt-1">{value}</p>
-          </div>
-          <div className={cn("p-3 rounded-xl", bgColor)}>
-            <Icon className={cn("w-6 h-6", color)} />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
 
   return (
     <div className="space-y-6">
@@ -281,33 +254,37 @@ export default function InvitationsView() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard 
+        <StatsCard
           label="Pending"
           value={stats.pending}
           icon={Clock}
-          color="text-amber-600"
-          bgColor="bg-amber-50"
+          iconColor="text-amber-600"
+          iconClassName="bg-amber-50"
+          className="border shadow-sm"
         />
-        <StatCard 
+        <StatsCard
           label="Accepted"
           value={stats.accepted}
           icon={CheckCircle}
-          color="text-emerald-600"
-          bgColor="bg-emerald-50"
+          iconColor="text-emerald-600"
+          iconClassName="bg-emerald-50"
+          className="border shadow-sm"
         />
-        <StatCard 
+        <StatsCard
           label="Expired"
           value={stats.expired}
           icon={Clock}
-          color="text-slate-600"
-          bgColor="bg-slate-50"
+          iconColor="text-muted-foreground"
+          iconClassName="bg-muted"
+          className="border shadow-sm"
         />
-        <StatCard 
+        <StatsCard
           label="Rejected"
           value={stats.rejected}
           icon={XCircle}
-          color="text-rose-600"
-          bgColor="bg-rose-50"
+          iconColor="text-rose-600"
+          iconClassName="bg-rose-50"
+          className="border shadow-sm"
         />
       </div>
 

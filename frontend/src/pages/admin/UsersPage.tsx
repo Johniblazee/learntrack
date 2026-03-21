@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
-import { BatchOperationType, BatchOperationsPanel, SelectCheckbox } from '../../components/admin/BatchOperationsPanel'
+import { BatchOperationType, BatchOperationsPanel } from '../../components/admin/BatchOperationsPanel'
 import { useImpersonation } from '../../contexts/ImpersonationContext'
 import { type AdminPermission, useSuperAdmin } from '@/contexts/UserContext'
 import { toast } from '@/contexts/ToastContext'
@@ -628,9 +628,9 @@ export function UsersPage() {
                     data-state={selectedIds.includes(user.clerk_id) ? 'selected' : undefined}
                   >
                     <TableCell>
-                      <SelectCheckbox
+                      <Checkbox
                         checked={selectedIds.includes(user.clerk_id)}
-                        onChange={() => toggleSelection(user.clerk_id)}
+                        onCheckedChange={() => toggleSelection(user.clerk_id)}
                         disabled={!canManageUsers || user.is_super_admin}
                       />
                     </TableCell>

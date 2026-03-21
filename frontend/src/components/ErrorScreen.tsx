@@ -35,10 +35,10 @@ function ErrorScreen({
 
         {/* Error Message */}
         <div className="text-center space-y-2">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h2 className="text-2xl font-bold text-foreground">
             {title}
           </h2>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-muted-foreground">
             {message}
           </p>
         </div>
@@ -93,7 +93,7 @@ function ErrorScreen({
         </div>
 
         {/* Help Text */}
-        <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-center text-sm text-muted-foreground">
           If this problem persists, please contact support.
         </p>
       </div>

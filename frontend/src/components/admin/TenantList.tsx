@@ -14,7 +14,7 @@ import {
   Users,
 } from 'lucide-react'
 
-import { SelectCheckbox } from './BatchOperationsPanel'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -193,9 +193,9 @@ export function TenantList({
               <TableRow key={tenant._id} data-state={selectedIds.includes(tenant.clerk_id) ? 'selected' : undefined}>
                 {onToggleSelection && (
                   <TableCell>
-                    <SelectCheckbox
+                    <Checkbox
                       checked={selectedIds.includes(tenant.clerk_id)}
-                      onChange={() => onToggleSelection(tenant.clerk_id)}
+                      onCheckedChange={() => onToggleSelection(tenant.clerk_id)}
                       disabled={!canSuspendTenants}
                     />
                   </TableCell>
