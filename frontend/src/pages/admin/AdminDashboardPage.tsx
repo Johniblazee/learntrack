@@ -550,7 +550,11 @@ export function AdminDashboardPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <Badge variant="outline">{log.target_type}</Badge>
-                    {log.target_id && <span className="text-xs">{log.target_id}</span>}
+                    {log.target_id && (
+                      <span className="text-xs" title={log.target_id}>
+                        {(log.details?.email as string) || log.target_id}
+                      </span>
+                    )}
                     <span className="text-xs">{formatDateTime(log.timestamp)}</span>
                   </div>
                   </div>

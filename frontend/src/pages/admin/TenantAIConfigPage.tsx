@@ -74,7 +74,6 @@ interface ProviderConfig {
   provider_id: string
   enabled: boolean
   enabled_models: string[]
-  custom_api_key?: string | null
   priority: number
 }
 
@@ -122,8 +121,6 @@ export function TenantAIConfigPage() {
   }>>([])
   const [auditLoading, setAuditLoading] = useState(true)
   const [auditError, setAuditError] = useState<string | null>(null)
-  const [customApiKeyOverrides, setCustomApiKeyOverrides] = useState<Record<string, string>>({})
-  
   // Form state
   const [formData, setFormData] = useState<Partial<TenantAIConfig>>({})
 
@@ -158,7 +155,6 @@ export function TenantAIConfigPage() {
         enable_web_search: data.config.enable_web_search,
         enable_streaming: data.config.enable_streaming,
       })
-      setCustomApiKeyOverrides({})
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -200,37 +196,9 @@ export function TenantAIConfigPage() {
       setIsSaving(true)
       setError(null)
 
-      const providerConfigs = {
-        ...(formData.provider_configs || {}),
-      }
-
-      Object.entries(customApiKeyOverrides).forEach(([providerId, value]) => {
-        const trimmed = value.trim()
-        const existing = providerConfigs[providerId] || {
-          provider_id: providerId,
-          enabled: true,
-          enabled_models: [],
-          priority: 0,
-        }
-
-        providerConfigs[providerId] = {
-          ...existing,
-          custom_api_key: trimmed ? trimmed : null,
-        }
-      })
-
-      if (formData.allow_custom_api_keys === false) {
-        Object.keys(providerConfigs).forEach((providerId) => {
-          providerConfigs[providerId] = {
-            ...providerConfigs[providerId],
-            custom_api_key: null,
-          }
-        })
-      }
-
       const response = await client.put(`/admin/tenant-ai-config/${tenantId}`, {
         ...formData,
-        provider_configs: providerConfigs,
+        provider_configs: formData.provider_configs || {},
       })
 
       if (response.error) {
@@ -734,22 +702,6 @@ export function TenantAIConfigPage() {
                               }
                             />
                           </div>
-                          {formData.allow_custom_api_keys && (
-                            <div className="space-y-2">
-                              <Label>Custom API Key</Label>
-                              <Input
-                                type="password"
-                                value={customApiKeyOverrides[provider.provider_id] || ''}
-                                onChange={(event) =>
-                                  setCustomApiKeyOverrides((prev) => ({
-                                    ...prev,
-                                    [provider.provider_id]: event.target.value,
-                                  }))
-                                }
-                                placeholder={providerConfig?.custom_api_key ? '•••••••• (saved)' : 'Enter custom API key'}
-                              />
-                            </div>
-                          )}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -770,6 +722,12 @@ export function TenantAIConfigPage() {
                           </Button>
                         </div>
                       </div>
+
+                      {formData.allow_custom_api_keys && (
+                        <div className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+                          Tutors manage their own BYOK keys in personal settings. Use this page to control whether BYOK is allowed, which providers are enabled, and which models are approved.
+                        </div>
+                      )}
 
                       {provider.error_message && (
                         <Alert variant="destructive">

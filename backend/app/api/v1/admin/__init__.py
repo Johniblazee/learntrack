@@ -11,7 +11,7 @@ from app.api.v1.admin import (
     settings as admin_settings,
     impersonation,
 )
-from app.api.v1.admin import tenant_ai_config, activity
+from app.api.v1.admin import tenant_ai_config, activity, ai_models
 
 admin_router = APIRouter(prefix="/admin")
 
@@ -32,4 +32,7 @@ admin_router.include_router(
 )
 admin_router.include_router(
     activity.router, prefix="/activity", tags=["admin-activity"]
+)
+admin_router.include_router(
+    ai_models.router, prefix="/ai-models", tags=["admin-ai-models"]
 )

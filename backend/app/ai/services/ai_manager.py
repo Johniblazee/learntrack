@@ -61,7 +61,9 @@ class AIManager:
     # Question generation (used by RAG endpoint)
     # ------------------------------------------------------------------
 
-    def _pick_provider_and_model(self, preferred: Optional[str] = None) -> tuple[str, str]:
+    def _pick_provider_and_model(
+        self, preferred: Optional[str] = None
+    ) -> tuple[str, str]:
         """Return (provider_id, default_model_id) for the best available provider."""
         from app.core.ai_models_config import get_default_model
 
@@ -140,25 +142,31 @@ Generate exactly {question_count} questions."""
             text = text[start:end].strip() if end != -1 else text[start:].strip()
 
         payload = json.loads(text)
-        items = payload.get("questions", payload) if isinstance(payload, dict) else payload
+        items = (
+            payload.get("questions", payload) if isinstance(payload, dict) else payload
+        )
         if not isinstance(items, list):
             items = [items] if isinstance(items, dict) else []
 
         questions: List[QuestionCreate] = []
         for q in items:
             try:
-                questions.append(QuestionCreate(
-                    question_text=q["question_text"],
-                    question_type=normalize_question_type(q.get("question_type") or q.get("type")),
-                    subject_id=subject_id,
-                    topic=topic,
-                    difficulty=normalize_difficulty(q.get("difficulty")),
-                    points=q.get("points", 1),
-                    explanation=q.get("explanation"),
-                    tags=q.get("tags", []),
-                    options=q.get("options", []),
-                    correct_answer=q.get("correct_answer"),
-                ))
+                questions.append(
+                    QuestionCreate(
+                        question_text=q["question_text"],
+                        question_type=normalize_question_type(
+                            q.get("question_type") or q.get("type")
+                        ),
+                        subject_id=subject_id,
+                        topic=topic,
+                        difficulty=normalize_difficulty(q.get("difficulty")),
+                        points=q.get("points", 1),
+                        explanation=q.get("explanation"),
+                        tags=q.get("tags", []),
+                        options=q.get("options", []),
+                        correct_answer=q.get("correct_answer"),
+                    )
+                )
             except Exception as e:
                 logger.warning("Failed to parse question", error=str(e))
         return questions
@@ -172,18 +180,38 @@ Generate exactly {question_count} questions."""
         difficulty: QuestionDifficulty = QuestionDifficulty.MEDIUM,
         question_types: Optional[List[QuestionType]] = None,
         preferred_provider: Optional[str] = None,
+        provider_id: Optional[str] = None,
+        model_id: Optional[str] = None,
+        encrypted_tutor_key: Optional[str] = None,
     ) -> List[QuestionCreate]:
         types = question_types or [QuestionType.MULTIPLE_CHOICE]
-        pid, model = self._pick_provider_and_model(preferred_provider)
+        pid = provider_id
+        model = model_id
+        if not pid or not model:
+            pid, model = self._pick_provider_and_model(
+                preferred_provider or provider_id
+            )
 
         from app.ai.litellm_provider import create_litellm_chat_model
         from langchain_core.messages import HumanMessage
 
-        llm = create_litellm_chat_model(provider_id=pid, model_id=model, temperature=0.7)
-        prompt = self._build_prompt(text_content, subject, topic, question_count, difficulty, types)
+        llm = create_litellm_chat_model(
+            provider_id=pid,
+            model_id=model,
+            encrypted_tutor_key=encrypted_tutor_key,
+            temperature=0.7,
+        )
+        prompt = self._build_prompt(
+            text_content, subject, topic, question_count, difficulty, types
+        )
 
         response = await llm.ainvoke([HumanMessage(content=prompt)])
-        return self._parse_response(response.content, subject, topic)
+        response_content = response.content
+        if isinstance(response_content, list):
+            response_content = "\n".join(
+                str(part) for part in response_content if part is not None
+            )
+        return self._parse_response(str(response_content), subject, topic)
 
     async def generate_questions_with_rag(
         self,
@@ -195,6 +223,9 @@ Generate exactly {question_count} questions."""
         difficulty: QuestionDifficulty = QuestionDifficulty.MEDIUM,
         question_types: Optional[List[QuestionType]] = None,
         preferred_provider: Optional[str] = None,
+        provider_id: Optional[str] = None,
+        model_id: Optional[str] = None,
+        encrypted_tutor_key: Optional[str] = None,
     ) -> List[QuestionCreate]:
         combined = f"RAG Context:\n{rag_context}\n\nOriginal Content:\n{text_content}"
         return await self.generate_questions(
@@ -205,6 +236,9 @@ Generate exactly {question_count} questions."""
             difficulty=difficulty,
             question_types=question_types,
             preferred_provider=preferred_provider,
+            provider_id=provider_id,
+            model_id=model_id,
+            encrypted_tutor_key=encrypted_tutor_key,
         )
 
     # ------------------------------------------------------------------
@@ -217,7 +251,9 @@ Generate exactly {question_count} questions."""
     def get_provider(self, name: str):
         return None  # Legacy — no longer used
 
-    def get_available_models(self, provider_name: Optional[str] = None) -> Dict[str, List[str]]:
+    def get_available_models(
+        self, provider_name: Optional[str] = None
+    ) -> Dict[str, List[str]]:
         from app.core.ai_models_config import get_model_ids, ALL_PROVIDER_MODELS
 
         if provider_name:
@@ -230,6 +266,7 @@ Generate exactly {question_count} questions."""
 # ---------------------------------------------------------------------------
 # Module-level helpers (backward compat)
 # ---------------------------------------------------------------------------
+
 
 def invalidate_tenant_ai_manager(tenant_id: str) -> None:
     """No-op — tenant caching removed. Kept for call-site compatibility."""

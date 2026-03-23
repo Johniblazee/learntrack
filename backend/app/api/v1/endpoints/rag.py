@@ -66,23 +66,6 @@ def _create_question_service(database: AsyncIOMotorDatabase):
     return QuestionService(database)
 
 
-def _create_litellm_chat_model_for_tenant(tenant_config, provider_id: str, model_id: str):
-    """Create a LiteLLM chat model using tenant config (BYOK → system key fallback)."""
-    from app.ai.litellm_provider import create_litellm_chat_model
-
-    encrypted_key = None
-    if tenant_config and tenant_config.provider_configs:
-        pc = tenant_config.provider_configs.get(provider_id)
-        if pc and pc.encrypted_api_key:
-            encrypted_key = pc.encrypted_api_key
-
-    return create_litellm_chat_model(
-        provider_id=provider_id,
-        model_id=model_id,
-        encrypted_tutor_key=encrypted_key,
-    )
-
-
 def _build_basic_rag_context(
     documents: List[Any],
 ) -> tuple[str, List[Dict[str, Any]]]:
@@ -149,34 +132,20 @@ async def generate_questions_with_rag(
                 status_code=403, detail="Web search is disabled for this tenant"
             )
 
-        # Normalize provider name (handles legacy 'google' -> 'gemini' mapping)
-        ai_provider = (
-            normalize_provider(body.ai_provider)
-            if body.ai_provider
-            else tenant_config.default_provider
-        )
-        model_name = body.model_name or tenant_config.default_model
+        from app.ai.services.tenant_ai_resolver import resolve_tenant_chat_model
 
-        if ai_provider not in tenant_config.enabled_providers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Provider {ai_provider} is not enabled for this tenant",
+        try:
+            resolved_model = await resolve_tenant_chat_model(
+                db=database,
+                tenant_id=current_user.tutor_id,
+                requested_provider=body.ai_provider,
+                requested_model=body.model_name,
+                tenant_config=tenant_config,
             )
-
-        provider_config = (
-            tenant_config.provider_configs.get(ai_provider)
-            if tenant_config.provider_configs
-            else None
-        )
-        if (
-            provider_config
-            and provider_config.enabled_models
-            and model_name not in provider_config.enabled_models
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Model {model_name} is not enabled for provider {ai_provider}",
-            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        ai_provider = resolved_model.provider_id
+        model_name = resolved_model.model_id
 
         # Resolve RAG context using AgenticRAGAgent when available,
         # otherwise fall back to direct vector retrieval.
@@ -188,14 +157,10 @@ async def generate_questions_with_rag(
                 from app.agents.rag.graph import AgenticRAGAgent
                 from app.agents.rag.state import RAGConfig
 
-                rag_llm = _create_litellm_chat_model_for_tenant(
-                    tenant_config, ai_provider, model_name
-                )
+                rag_llm = resolved_model.llm
 
                 if rag_llm:
-                    rag_agent = AgenticRAGAgent(
-                        llm=rag_llm, rag_service=rag_service
-                    )
+                    rag_agent = AgenticRAGAgent(llm=rag_llm, rag_service=rag_service)
                     rag_config = RAGConfig(
                         top_k=body.context_chunks,
                         generate_answer=False,
@@ -275,7 +240,9 @@ async def generate_questions_with_rag(
             question_count=body.question_count,
             difficulty=difficulty,
             question_types=normalized_types,
-            preferred_provider=ai_provider,
+            provider_id=ai_provider,
+            model_id=model_name,
+            encrypted_tutor_key=resolved_model.encrypted_tutor_key,
         )
 
         generation_id = str(uuid.uuid4())
@@ -314,6 +281,8 @@ async def generate_questions_with_rag(
             status="completed",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("RAG question generation failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
@@ -330,6 +299,7 @@ async def regenerate_single_question(
     """Regenerate a single question with modifications"""
     try:
         from app.ai.services.ai_manager import AIManager
+        from app.ai.services.tenant_ai_resolver import resolve_tenant_chat_model
 
         manager = AIManager()
         question_service = _create_question_service(database)
@@ -361,6 +331,13 @@ Instructions:
         difficulty = (
             original.difficulty if body.keep_difficulty else QuestionDifficulty.MEDIUM
         )
+        try:
+            resolved_model = await resolve_tenant_chat_model(
+                db=database,
+                tenant_id=current_user.tutor_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
         questions = await manager.generate_questions(
             text_content=text_content,
@@ -369,12 +346,17 @@ Instructions:
             question_count=1,
             difficulty=difficulty,
             question_types=question_types,
+            provider_id=resolved_model.provider_id,
+            model_id=resolved_model.model_id,
+            encrypted_tutor_key=resolved_model.encrypted_tutor_key,
         )
 
         if not questions:
             raise HTTPException(status_code=500, detail="Failed to regenerate question")
 
         return questions[0]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Question regeneration failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -384,14 +366,35 @@ Instructions:
 async def get_available_models(
     provider: str = Path(..., description="AI provider name"),
     current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get available models for a provider"""
     try:
-        from app.ai.services.ai_manager import AIManager
-
-        manager = AIManager()
-        models = manager.get_available_models(provider)
-        return {"provider": provider, "models": models}
+        service = _create_tenant_config_service(database)
+        providers = await service.get_available_providers(current_user.tutor_id)
+        normalized_provider = normalize_provider(provider)
+        provider_entry = next(
+            (item for item in providers if item.provider_id == normalized_provider),
+            None,
+        )
+        if not provider_entry:
+            raise HTTPException(status_code=404, detail="Provider not found")
+        return {
+            "provider": normalized_provider,
+            "models": [
+                {
+                    "id": model.model_id,
+                    "name": model.name,
+                    "description": model.description,
+                    "available": model.available,
+                    "context_window": model.context_window,
+                    "priority": model.priority,
+                }
+                for model in provider_entry.models
+            ],
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -427,9 +430,7 @@ async def get_document_library(
                 category=f.get("category"),
                 subject_id=f.get("subject_id"),
                 topic=f.get("topic"),
-                file_url=str(
-                    f.get("source_url") or f.get("file_url") or ""
-                ),
+                file_url=str(f.get("source_url") or f.get("file_url") or ""),
             )
             library_items.append(item)
         return library_items
@@ -493,9 +494,7 @@ async def process_document_for_rag(
                     status_code=400, detail="No content extracted from file"
                 )
 
-            extracted_text = "\n\n".join(
-                doc.page_content for doc in documents
-            ).strip()
+            extracted_text = "\n\n".join(doc.page_content for doc in documents).strip()
 
             # Cache the extracted text for future use
             await database.files.update_one(
@@ -651,13 +650,13 @@ async def get_rag_stats(
 @router.get("/providers", response_model=List[str])
 async def get_available_providers(
     current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get list of available AI providers"""
-    from app.ai.services.ai_manager import AIManager
-
     try:
-        manager = AIManager()
-        return manager.get_available_providers()
+        service = _create_tenant_config_service(database)
+        providers = await service.get_available_providers(current_user.tutor_id)
+        return [provider.provider_id for provider in providers if provider.available]
     except Exception as e:
         logger.exception("Failed to get available providers")
         raise HTTPException(status_code=500, detail="Failed to retrieve providers")

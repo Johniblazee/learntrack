@@ -1,6 +1,6 @@
 // AdminLayout.tsx - Admin dashboard layout using SidebarProvider
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom'
-import { LayoutDashboard, Users, Building2, Settings, Shield, LogOut, Moon, Sun, ArrowLeft, Activity } from 'lucide-react'
+import { LayoutDashboard, Users, Building2, Settings, Shield, LogOut, Moon, Sun, ArrowLeft, Activity, Cpu } from 'lucide-react'
 import { useUserContext } from '../../contexts/UserContext'
 import { useClerk } from '@clerk/clerk-react'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -42,6 +42,7 @@ const navItems: NavItem[] = [
   { name: 'Tenants', path: '/admin/tenants', icon: Building2, permission: 'view_all_tenants' },
   { name: 'Users', path: '/admin/users', icon: Users, permission: 'view_all_users' },
   { name: 'Activity', path: '/admin/activity', icon: Activity, permission: 'view_audit_logs' },
+  { name: 'AI Models', path: '/admin/ai-models', icon: Cpu, permission: 'manage_ai_providers' },
   { name: 'Settings', path: '/admin/settings', icon: Settings, permission: 'manage_system_settings' },
 ]
 

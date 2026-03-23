@@ -274,6 +274,19 @@ class Database:
                 [("user_id", 1), ("tenant_id", 1), ("updated_at", -1)]
             )
 
+            # Tenant AI configuration indexes
+            await db.tenant_ai_configurations.create_index("tenant_id", unique=True)
+            await db.tenant_ai_configurations.create_index(
+                [("default_provider", 1), ("updated_at", -1)]
+            )
+            await db.tenant_ai_config_audit.create_index(
+                [("tenant_id", 1), ("timestamp", -1)]
+            )
+            await db.global_ai_model_overrides.create_index(
+                [("provider", 1), ("model_id", 1)],
+                unique=True,
+            )
+
             # Impersonation session indexes
             await db.impersonation_sessions.create_index("admin_clerk_id")
             await db.impersonation_sessions.create_index(

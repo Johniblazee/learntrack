@@ -34,6 +34,7 @@ const TenantAIConfigPage    = lazy(() => import('./pages/admin').then(m => ({ de
 const TenantDetailsPage     = lazy(() => import('./pages/admin').then(m => ({ default: m.TenantDetailsPage })))
 const TenantsPage           = lazy(() => import('./pages/admin').then(m => ({ default: m.TenantsPage })))
 const UsersPage             = lazy(() => import('./pages/admin').then(m => ({ default: m.UsersPage })))
+const AIModelsPage          = lazy(() => import('./pages/admin').then(m => ({ default: m.AIModelsPage })))
 
 function App() {
   return (
@@ -189,6 +190,14 @@ function App() {
                   element={
                     <AdminProtectedRoute requiredPermission="view_audit_logs">
                       <ActivityPage />
+                    </AdminProtectedRoute>
+                  }
+                />
+                <Route
+                  path="ai-models"
+                  element={
+                    <AdminProtectedRoute requiredPermission="manage_ai_providers">
+                      <AIModelsPage />
                     </AdminProtectedRoute>
                   }
                 />

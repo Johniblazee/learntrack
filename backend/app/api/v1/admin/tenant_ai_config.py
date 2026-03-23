@@ -2,16 +2,25 @@
 Admin API endpoints for Tenant AI Configuration Management
 Allows admins to configure AI providers and models per tenant
 """
+
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 
 from app.core.dependencies import get_database
-from app.core.enhanced_auth import require_super_admin, ClerkUserContext
+from app.core.enhanced_auth import (
+    ClerkUserContext,
+    require_admin_permission,
+)
+from app.models.user import AdminPermission
 from app.models.tenant_ai_config import (
-    TenantAIConfig, TenantAIConfigCreate, TenantAIConfigUpdate,
-    TenantAIConfigResponse, ProviderAvailability, BulkModelOperation
+    TenantAIConfig,
+    TenantAIConfigCreate,
+    TenantAIConfigUpdate,
+    TenantAIConfigResponse,
+    ProviderAvailability,
+    BulkModelOperation,
 )
 from app.services.tenant_ai_config_service import TenantAIConfigService
 from app.core.exceptions import NotFoundError, ValidationError
@@ -19,9 +28,12 @@ from app.core.exceptions import NotFoundError, ValidationError
 logger = structlog.get_logger()
 
 router = APIRouter()
+_perm = require_admin_permission(AdminPermission.MANAGE_AI_PROVIDERS)
 
 
-async def get_service(db: AsyncIOMotorDatabase = Depends(get_database)) -> TenantAIConfigService:
+async def get_service(
+    db: AsyncIOMotorDatabase = Depends(get_database),
+) -> TenantAIConfigService:
     """Dependency to get TenantAIConfigService instance"""
     return TenantAIConfigService(db)
 
@@ -32,7 +44,7 @@ async def list_tenant_configs(
     per_page: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """List all tenant AI configurations with pagination"""
     configs, total = await service.list_configs(page, per_page, search)
@@ -41,7 +53,7 @@ async def list_tenant_configs(
         "total": total,
         "page": page,
         "per_page": per_page,
-        "pages": (total + per_page - 1) // per_page
+        "pages": (total + per_page - 1) // per_page,
     }
 
 
@@ -49,7 +61,7 @@ async def list_tenant_configs(
 async def get_available_providers(
     tenant_id: str = Query(..., description="Tenant ID to get providers for"),
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """Get all available AI providers and their models for a tenant"""
     return await service.get_available_providers(tenant_id)
@@ -59,16 +71,14 @@ async def get_available_providers(
 async def get_tenant_config(
     tenant_id: str,
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """Get AI configuration for a specific tenant"""
     config = await service.get_or_create_default(tenant_id)
     providers = await service.get_available_providers(tenant_id)
     embedding_providers = await service.get_embedding_providers()
     return TenantAIConfigResponse(
-        config=config,
-        providers=providers,
-        embedding_providers=embedding_providers
+        config=config, providers=providers, embedding_providers=embedding_providers
     )
 
 
@@ -76,14 +86,11 @@ async def get_tenant_config(
 async def create_tenant_config(
     config_data: TenantAIConfigCreate,
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """Create a new tenant AI configuration"""
     try:
-        return await service.create_config(
-            config_data,
-            admin_id=current_user.clerk_id
-        )
+        return await service.create_config(config_data, admin_id=current_user.clerk_id)
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -93,7 +100,7 @@ async def update_tenant_config(
     tenant_id: str,
     update_data: TenantAIConfigUpdate,
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """Update tenant AI configuration"""
     try:
@@ -101,10 +108,12 @@ async def update_tenant_config(
             tenant_id,
             update_data,
             admin_id=current_user.clerk_id,
-            admin_email=current_user.email or ""
+            admin_email=current_user.email or "",
         )
     except NotFoundError:
-        raise HTTPException(status_code=404, detail=f"Config not found for tenant {tenant_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Config not found for tenant {tenant_id}"
+        )
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -114,7 +123,7 @@ async def bulk_model_operation(
     tenant_id: str,
     operation: BulkModelOperation,
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """Perform bulk operations on model configuration"""
     try:
@@ -123,10 +132,12 @@ async def bulk_model_operation(
             operation.operation,
             operation.provider_id,
             admin_id=current_user.clerk_id,
-            admin_email=current_user.email or ""
+            admin_email=current_user.email or "",
         )
     except NotFoundError:
-        raise HTTPException(status_code=404, detail=f"Config not found for tenant {tenant_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Config not found for tenant {tenant_id}"
+        )
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -135,16 +146,16 @@ async def bulk_model_operation(
 async def delete_tenant_config(
     tenant_id: str,
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """Delete tenant AI configuration"""
     deleted = await service.delete_config(
-        tenant_id,
-        admin_id=current_user.clerk_id,
-        admin_email=current_user.email or ""
+        tenant_id, admin_id=current_user.clerk_id, admin_email=current_user.email or ""
     )
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"Config not found for tenant {tenant_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Config not found for tenant {tenant_id}"
+        )
 
 
 @router.get("/{tenant_id}/audit-logs", response_model=dict)
@@ -153,13 +164,8 @@ async def get_audit_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
     service: TenantAIConfigService = Depends(get_service),
-    current_user: ClerkUserContext = Depends(require_super_admin)
+    current_user: ClerkUserContext = Depends(_perm),
 ):
     """Get audit logs for a tenant's AI configuration changes"""
     logs, total = await service.get_audit_logs(tenant_id, page, per_page)
-    return {
-        "items": logs,
-        "total": total,
-        "page": page,
-        "per_page": per_page
-    }
+    return {"items": logs, "total": total, "page": page, "per_page": per_page}

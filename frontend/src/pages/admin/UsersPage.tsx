@@ -771,8 +771,8 @@ export function UsersPage() {
                     <p className="font-medium">{viewUser.is_active ? 'Active' : 'Inactive'}</p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">Clerk ID</p>
-                    <p className="font-medium break-all">{viewUser.clerk_id}</p>
+                    <p className="text-muted-foreground">Last updated</p>
+                    <p className="font-medium">{formatDate(viewUser.updated_at)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Created</p>
@@ -837,10 +837,6 @@ export function UsersPage() {
                 <div className="space-y-2">
                   <Label>Email</Label>
                   <Input value={editUser.email} readOnly className="bg-muted/40" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Clerk ID</Label>
-                  <Input value={editUser.clerk_id} readOnly className="bg-muted/40" />
                 </div>
                 <div className="space-y-2">
                   <Label>Role</Label>
@@ -953,12 +949,16 @@ export function UsersPage() {
                 />
               </div>
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="create-clerk">Clerk ID</Label>
+                <Label htmlFor="create-clerk">Clerk User ID</Label>
                 <Input
                   id="create-clerk"
+                  placeholder="user_2abc..."
                   value={createForm.clerk_id}
                   onChange={(event) => setCreateForm({ ...createForm, clerk_id: event.target.value })}
                 />
+                <p className="text-xs text-muted-foreground">
+                  The user_xxx identifier from the Clerk dashboard. Required to link this account.
+                </p>
               </div>
             </div>
 

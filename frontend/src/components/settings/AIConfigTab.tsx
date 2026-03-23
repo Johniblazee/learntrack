@@ -15,14 +15,24 @@ interface ProviderStatus {
   name: string
   has_system_key: boolean
   has_custom_key: boolean
+  key_source: 'custom' | 'system' | null
   available: boolean
   masked_key: string | null
   enabled_models: string[]
+  models: Array<{
+    model_id: string
+    name: string
+    description: string
+    available: boolean
+    context_window?: number | null
+    priority: number
+  }>
 }
 
 interface AIConfigStatus {
   default_provider: string
   default_model: string
+  allow_custom_api_keys: boolean
   providers: ProviderStatus[]
 }
 
@@ -119,9 +129,9 @@ export function AIConfigTab() {
     }
   }
 
-  const handleUpdateDefaults = async (field: 'default_provider' | 'default_model', value: string) => {
+  const handleUpdateDefaults = async (updates: Partial<Pick<AIConfigStatus, 'default_provider' | 'default_model'>>) => {
     try {
-      const res = await apiClient.put('/ai-config/defaults', { [field]: value })
+      const res = await apiClient.put('/ai-config/defaults', updates)
       if (res.error) throw new Error(res.error)
       setConfig(res.data as AIConfigStatus)
       toast.success('Defaults updated')
@@ -129,6 +139,12 @@ export function AIConfigTab() {
       toast.error(err?.message || 'Failed to update defaults')
     }
   }
+
+  const selectedProvider = config?.providers.find((provider) => provider.provider_id === config.default_provider)
+  const selectableModels = selectedProvider?.models || []
+  const selectedModelValue = selectableModels.some((model) => model.model_id === config?.default_model)
+    ? (config?.default_model || '')
+    : (selectableModels[0]?.model_id || '')
 
   if (loading || !config) {
     return (
@@ -138,7 +154,7 @@ export function AIConfigTab() {
     )
   }
 
-  const availableProviders = config.providers.filter((p) => p.available)
+  const providerOptions = config.providers.filter((provider) => provider.models.length > 0)
 
   return (
     <div className="space-y-6">
@@ -152,14 +168,24 @@ export function AIConfigTab() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="defaultProvider">Provider</Label>
-              <Select value={config.default_provider} onValueChange={(value) => handleUpdateDefaults('default_provider', value)}>
+              <Select
+                value={config.default_provider}
+                onValueChange={(value) => {
+                  const nextProvider = config.providers.find((provider) => provider.provider_id === value)
+                  const nextModel = nextProvider?.models[0]?.model_id
+                  void handleUpdateDefaults({
+                    default_provider: value,
+                    ...(nextModel ? { default_model: nextModel } : {}),
+                  })
+                }}
+              >
                 <SelectTrigger id="defaultProvider" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableProviders.map((p) => (
-                    <SelectItem key={p.provider_id} value={p.provider_id}>
-                      {p.name}
+                  {providerOptions.map((p) => (
+                    <SelectItem key={p.provider_id} value={p.provider_id} disabled={!p.available}>
+                      {p.name} {!p.available ? '(unavailable)' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -167,14 +193,29 @@ export function AIConfigTab() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="defaultModel">Model</Label>
-              <Input
-                id="defaultModel"
-                value={config.default_model}
-                onChange={(e) => handleUpdateDefaults('default_model', e.target.value)}
-                placeholder="e.g. gpt-4o"
-              />
+              <Select
+                value={selectedModelValue}
+                onValueChange={(value) => void handleUpdateDefaults({ default_model: value })}
+                disabled={!selectableModels.length}
+              >
+                <SelectTrigger id="defaultModel" className="w-full">
+                  <SelectValue placeholder="Select model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectableModels.map((model) => (
+                    <SelectItem key={model.model_id} value={model.model_id}>
+                      {model.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
+          {!config.allow_custom_api_keys && (
+            <p className="text-sm text-muted-foreground">
+              Bring-your-own-key is currently disabled for your tenant. You can still use any provider with a system key.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -203,6 +244,11 @@ export function AIConfigTab() {
                 <CardDescription>{meta.description}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
+                {provider.models.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {provider.models.length} approved model{provider.models.length === 1 ? '' : 's'} available for this provider.
+                  </p>
+                )}
                 {provider.has_custom_key && provider.masked_key && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="h-4 w-4 text-blue-500" />
@@ -225,6 +271,7 @@ export function AIConfigTab() {
                       type={showKey ? 'text' : 'password'}
                       placeholder={provider.has_custom_key ? 'Replace API key...' : 'Enter API key...'}
                       value={keyInput}
+                      disabled={!config.allow_custom_api_keys}
                       onChange={(e) =>
                         setKeyInputs((prev) => ({ ...prev, [provider.provider_id]: e.target.value }))
                       }
@@ -244,7 +291,7 @@ export function AIConfigTab() {
                     variant="outline"
                     size="sm"
                     onClick={() => handleTestKey(provider.provider_id)}
-                    disabled={!keyInput || isTesting}
+                    disabled={!config.allow_custom_api_keys || !keyInput || isTesting}
                   >
                     {isTesting ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
@@ -256,7 +303,7 @@ export function AIConfigTab() {
                   <Button
                     size="sm"
                     onClick={() => handleSaveKey(provider.provider_id)}
-                    disabled={!keyInput || isSaving}
+                    disabled={!config.allow_custom_api_keys || !keyInput || isSaving}
                   >
                     {isSaving ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
@@ -266,6 +313,18 @@ export function AIConfigTab() {
                     Save Key
                   </Button>
                 </div>
+
+                {!config.allow_custom_api_keys && (
+                  <p className="text-xs text-muted-foreground">
+                    Your administrator has disabled personal API keys for this tenant.
+                  </p>
+                )}
+
+                {provider.available && provider.key_source && (
+                  <p className="text-xs text-muted-foreground">
+                    Currently using {provider.key_source === 'custom' ? 'your saved key' : 'the shared system key'}.
+                  </p>
+                )}
 
                 {!provider.available && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">

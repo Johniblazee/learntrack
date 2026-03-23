@@ -17,7 +17,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.core.dependencies import get_rag_service, get_database, get_question_service
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
-from app.core.ai_models_config import get_all_active_models_for_dropdown
 from app.agents.graph.state import (
     GenerationConfig,
     QuestionType,
@@ -40,7 +39,6 @@ from app.models.question import (
 from app.utils.enums import (
     normalize_question_type,
     normalize_difficulty,
-    normalize_provider,
     normalize_blooms_level,
 )
 
@@ -95,55 +93,19 @@ async def _resolve_tenant_llm_provider(
     requested_model: Optional[str] = None,
 ):
     """Resolve the tenant's LLM via LiteLLM (BYOK key → system key fallback)."""
-    from app.ai.litellm_provider import create_litellm_chat_model
-
-    config_service = _create_tenant_config_service(database)
-    tenant_config = await config_service.get_or_create_default(tenant_id)
-
-    ai_provider = (
-        normalize_provider(requested_provider)
-        if requested_provider
-        else tenant_config.default_provider
-    )
-    model_name = requested_model or tenant_config.default_model
-
-    if ai_provider not in tenant_config.enabled_providers:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Provider {ai_provider} is not enabled for this tenant",
-        )
-
-    provider_config = (
-        tenant_config.provider_configs.get(ai_provider)
-        if tenant_config.provider_configs
-        else None
-    )
-    if (
-        provider_config
-        and provider_config.enabled_models
-        and model_name not in provider_config.enabled_models
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model {model_name} is not enabled for provider {ai_provider}",
-        )
-
-    encrypted_key = (
-        provider_config.encrypted_api_key
-        if provider_config
-        else None
-    )
+    from app.ai.services.tenant_ai_resolver import resolve_tenant_chat_model
 
     try:
-        llm = create_litellm_chat_model(
-            provider_id=ai_provider,
-            model_id=model_name,
-            encrypted_tutor_key=encrypted_key,
+        resolved = await resolve_tenant_chat_model(
+            db=database,
+            tenant_id=tenant_id,
+            requested_provider=requested_provider,
+            requested_model=requested_model,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return ai_provider, model_name, llm
+    return resolved.provider_id, resolved.model_id, resolved.llm
 
 
 async def get_session_service(db=Depends(get_database)):
@@ -1432,8 +1394,7 @@ async def get_available_models(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
-    Get all available AI providers and their models (fetched dynamically from provider APIs).
-    Respects tenant-specific AI configuration if available.
+    Get the tenant-approved AI providers and models for question generation.
 
     Returns a structure like:
     {
@@ -1450,88 +1411,33 @@ async def get_available_models(
         ]
     }
     """
-    from app.ai.services.models_fetcher import fetch_all_provider_models
-    from app.core.config import settings
-    from app.services.tenant_ai_config_service import TenantAIConfigService
+    from app.ai.services.tenant_ai_resolver import PROVIDER_DESCRIPTIONS
 
-    # Get tenant-specific configuration if available
-    tenant_config = None
-    enabled_providers = None
-    try:
-        config_service = _create_tenant_config_service(database)
-        tenant_config = await config_service.get_config(current_user.clerk_id)
-        if tenant_config:
-            enabled_providers = tenant_config.enabled_providers
-    except Exception as e:
-        logger.warning("Failed to load tenant AI config", error=str(e))
-
-    # Fallback static models from centralized config in case API fetching fails
-    fallback_models = get_all_active_models_for_dropdown()
-
-    # Fetch models from all providers (with caching and error handling)
-    fetched_models = {}
-    try:
-        fetched_models = await fetch_all_provider_models(limit=3)
-        logger.info(
-            "Successfully fetched models from providers", count=len(fetched_models)
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to fetch models from providers, using fallback", error=str(e)
-        )
-        fetched_models = {}
-
-    providers = []
-
-    provider_info = [
-        ("groq", "Groq", "Ultra-fast inference with open models"),
-        ("openai", "OpenAI", "GPT models from OpenAI"),
-        ("gemini", "Google Gemini", "Gemini models from Google"),
-        ("anthropic", "Anthropic", "Claude models from Anthropic"),
-    ]
-
-    # System-key check helper
-    _sys_key = {
-        "groq": settings.GROQ_API_KEY,
-        "openai": settings.OPENAI_API_KEY,
-        "gemini": settings.GEMINI_API_KEY,
-        "anthropic": settings.ANTHROPIC_API_KEY,
-    }
-
-    for provider_id, name, description in provider_info:
-        is_enabled = enabled_providers is None or provider_id in enabled_providers
-        has_system_key = bool(_sys_key.get(provider_id))
-
-        # Check for BYOK key
-        has_byok_key = False
-        if tenant_config and tenant_config.provider_configs:
-            pc = tenant_config.provider_configs.get(provider_id)
-            if pc and pc.encrypted_api_key:
-                has_byok_key = True
-
-        is_available = (has_system_key or has_byok_key) and is_enabled
-
-        models = fetched_models.get(provider_id, [])
-        if not models and provider_id in fallback_models:
-            models = fallback_models[provider_id]
-            logger.info(f"Using fallback models for {provider_id}")
-
-        if tenant_config and tenant_config.provider_configs:
-            provider_config = tenant_config.provider_configs.get(provider_id)
-            if provider_config and provider_config.enabled_models:
-                models = [
-                    m for m in models if m["id"] in provider_config.enabled_models
-                ]
-
-        providers.append(
+    service = _create_tenant_config_service(database)
+    providers = await service.get_tutor_provider_status(current_user.tutor_id)
+    return {
+        "providers": [
             {
-                "id": provider_id,
-                "name": name,
-                "description": description,
-                "available": is_available,
-                "has_byok_key": has_byok_key,
-                "models": models,
+                "id": provider.provider_id,
+                "name": provider.name,
+                "description": PROVIDER_DESCRIPTIONS.get(
+                    provider.provider_id, provider.name
+                ),
+                "available": provider.available,
+                "has_byok_key": provider.has_custom_key,
+                "key_source": provider.key_source,
+                "models": [
+                    {
+                        "id": model.model_id,
+                        "name": model.name,
+                        "description": model.description,
+                        "available": model.available,
+                        "context_window": model.context_window,
+                        "priority": model.priority,
+                    }
+                    for model in provider.models
+                ],
             }
-        )
-
-    return {"providers": providers}
+            for provider in providers
+        ]
+    }

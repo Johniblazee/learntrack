@@ -88,12 +88,12 @@ export function OpenCanvasGenerator() {
   const [sessionSnapshots, setSessionSnapshots] = useState<Record<string, SessionSnapshot>>({})
   const [isDeletingSessions, setIsDeletingSessions] = useState(false)
 
-  // Fetch AI defaults from settings on mount
+  // Fetch tenant AI defaults on mount
   useEffect(() => {
     const fetchAIDefaults = async () => {
       try {
         const token = await getToken()
-        const response = await fetch(`${API_BASE_URL}/settings/ai/defaults`, {
+        const response = await fetch(`${API_BASE_URL}/ai-config/status`, {
           headers: { Authorization: `Bearer ${token}` },
         })
         if (response.ok) {

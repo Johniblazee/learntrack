@@ -63,6 +63,7 @@ build/*.toml
 tests/  
 !backend/tests/
 backend/tests/*
+!backend/tests/test_admin_tenants.py
 !backend/tests/test_generation_session_service.py
 !backend/tests/test_question_service.py
 !frontend/src/tests/

@@ -46,7 +46,19 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
     if cached:
         return cached[:limit]
 
-    must_include_prefixes = ["openai/gpt-oss", "llama-3.3"]
+    # Skip non-chat model types
+    exclude_patterns = ["embed", "whisper", "guard", "tts", "rerank", "distil", "tool-use"]
+
+    # Boost well-known models to the top
+    priority_prefixes = [
+        ("gpt-oss-120b", 0),
+        ("gpt-oss-20b", 1),
+        ("llama-3.3", 2),
+        ("llama-4", 3),
+        ("llama-3.1", 5),
+        ("gemma2", 10),
+        ("mixtral", 15),
+    ]
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -60,25 +72,14 @@ async def fetch_groq_models(api_key: str, limit: int = 3) -> List[Dict[str, Any]
             models = []
             for m in data.get("data", []):
                 model_id = m.get("id", "")
-                if any(
-                    x in model_id.lower()
-                    for x in ["embed", "whisper", "guard", "tts", "rerank"]
-                ):
-                    continue
-                if not any(
-                    model_id.startswith(prefix) or prefix in model_id
-                    for prefix in must_include_prefixes
-                ):
+                if any(x in model_id.lower() for x in exclude_patterns):
                     continue
 
-                if "gpt-oss-120b" in model_id:
-                    priority = 0
-                elif "gpt-oss-20b" in model_id:
-                    priority = 1
-                elif "llama-3.3" in model_id:
-                    priority = 2
-                else:
-                    priority = 99
+                priority = 50
+                for prefix, prio in priority_prefixes:
+                    if prefix in model_id:
+                        priority = prio
+                        break
 
                 models.append(
                     {
