@@ -32,6 +32,11 @@ interface ChatApiResponse {
   ready_to_generate?: boolean
   missing_fields?: string[]
   session_id?: string
+  tool_calls?: Array<{
+    name: string
+    arguments?: Record<string, unknown>
+    result?: Record<string, unknown>
+  }>
 }
 
 interface SessionSnapshot {
@@ -634,13 +639,14 @@ export function OpenCanvasGenerator() {
           content: 'Thinking...',
           timestamp: new Date(),
           isStreaming: true,
+          toolCalls: [],
         }])
 
         const historyPayload = [...chatMessages, userMessage]
           .slice(-10)
           .map(chat => ({ role: chat.role, content: chat.content }))
 
-        const response = await fetch(`${API_BASE_URL}/question-generator/chat`, {
+        const response = await fetch(`${API_BASE_URL}/question-generator/chat-with-tools`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -679,6 +685,7 @@ export function OpenCanvasGenerator() {
             content: data.response || 'Could you share a bit more detail?',
             isStreaming: false,
             timestamp: new Date(),
+            toolCalls: Array.isArray(data.tool_calls) ? data.tool_calls : [],
           }
         }))
 

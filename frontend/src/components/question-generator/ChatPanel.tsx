@@ -22,7 +22,8 @@ import {
   Plus,
   Trash2,
   MessageSquare,
-  Search
+  Search,
+  Wrench
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AIInput } from '@/components/ui/animated-ai-input'
@@ -62,6 +63,11 @@ export interface ChatMessage {
   versions?: string[] // For cycling through question versions
   currentVersionIndex?: number
   agentPlan?: any // Agent thinking/plan tasks
+  toolCalls?: Array<{
+    name: string
+    arguments?: Record<string, unknown>
+    result?: Record<string, unknown>
+  }>
 }
 
 export interface ChatSession {
@@ -222,6 +228,50 @@ export function ChatPanel({
     }
 
     return `Last message ${formatDistanceToNow(updatedAt, { addSuffix: true })}`
+  }
+
+  const formatToolName = (toolName: string) => {
+    switch (toolName) {
+      case 'check_generation_readiness':
+        return 'Checked readiness'
+      case 'list_enabled_models':
+        return 'Checked models'
+      case 'get_saved_ai_defaults':
+        return 'Checked defaults'
+      default:
+        return toolName.replace(/_/g, ' ')
+    }
+  }
+
+  const formatToolResult = (toolName: string, result?: Record<string, unknown>) => {
+    if (!result) {
+      return 'Used during planning'
+    }
+
+    if (toolName === 'check_generation_readiness') {
+      const missingFields = Array.isArray(result.missing_fields) ? result.missing_fields : []
+      const isReady = Boolean(result.ready_to_generate)
+      return isReady ? 'Ready to generate' : `Missing: ${missingFields.join(', ') || 'details'}`
+    }
+
+    if (toolName === 'get_saved_ai_defaults') {
+      const provider = typeof result.default_provider === 'string' ? result.default_provider : 'not set'
+      const model = typeof result.default_model === 'string' ? result.default_model : 'not set'
+      return `Default: ${provider} / ${model}`
+    }
+
+    if (toolName === 'list_enabled_models') {
+      const providers = Array.isArray(result.providers) ? result.providers : []
+      const modelCount = providers.reduce((count, provider) => {
+        const models = Array.isArray((provider as { models?: unknown[] }).models)
+          ? (provider as { models: unknown[] }).models.length
+          : 0
+        return count + models
+      }, 0)
+      return `${providers.length} provider${providers.length === 1 ? '' : 's'}, ${modelCount} model${modelCount === 1 ? '' : 's'}`
+    }
+
+    return 'Used during planning'
   }
 
   return (
@@ -517,6 +567,29 @@ export function ChatPanel({
                     {message.role === 'assistant' && message.agentPlan && (
                       <div className="mt-2 w-full max-w-md">
                         <AgentPlan tasks={message.agentPlan} />
+                      </div>
+                    )}
+
+                    {message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0 && (
+                      <div className="mt-2 w-full max-w-md rounded-md border border-border/70 bg-background/80 p-3">
+                        <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <Wrench className="h-3.5 w-3.5" />
+                          Tools Used
+                        </div>
+                        <div className="space-y-2">
+                          {message.toolCalls.map((toolCall, index) => (
+                            <div key={`${message.id}-tool-${toolCall.name}-${index}`} className="rounded-sm bg-muted/60 px-2 py-1.5">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {formatToolName(toolCall.name)}
+                                </Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {formatToolResult(toolCall.name, toolCall.result)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
 

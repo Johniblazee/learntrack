@@ -69,6 +69,28 @@ MODEL_COSTS: Dict[str, Dict[str, Dict[str, Decimal]]] = {
             "input": Decimal("0.000075"),  # $0.075 per 1M tokens = $0.000075 per 1K
             "output": Decimal("0.00015"),  # $0.15 per 1M tokens = $0.00015 per 1K
         },
+        # Approximate family-level pricing for current Gemini models until live
+        # model pricing is sourced directly from LiteLLM metadata.
+        "gemini-2.0-flash": {
+            "input": Decimal("0.000075"),
+            "output": Decimal("0.00015"),
+        },
+        "gemini-2.5-flash": {
+            "input": Decimal("0.000075"),
+            "output": Decimal("0.00015"),
+        },
+        "gemini-2.5-flash-lite": {
+            "input": Decimal("0.000075"),
+            "output": Decimal("0.00015"),
+        },
+        "gemini-2.5-pro": {
+            "input": Decimal("0.00125"),
+            "output": Decimal("0.00375"),
+        },
+        "gemini-3-pro-preview": {
+            "input": Decimal("0.00125"),
+            "output": Decimal("0.00375"),
+        },
         "text-embedding-004": {
             "input": Decimal("0.000025"),  # $0.025 per 1M tokens = $0.000025 per 1K
             "output": Decimal("0"),
@@ -79,10 +101,40 @@ MODEL_COSTS: Dict[str, Dict[str, Dict[str, Decimal]]] = {
             "input": Decimal("0.003"),  # $3.00 per 1M tokens = $0.003 per 1K
             "output": Decimal("0.015"),  # $15.00 per 1M tokens = $0.015 per 1K
         },
+        "claude-3-5-sonnet-20241022": {
+            "input": Decimal("0.003"),
+            "output": Decimal("0.015"),
+        },
         "claude-3-haiku": {
             "input": Decimal("0.00025"),  # $0.25 per 1M tokens = $0.00025 per 1K
             "output": Decimal("0.00125"),  # $1.25 per 1M tokens = $0.00125 per 1K
         },
+        "claude-3-haiku-20240307": {
+            "input": Decimal("0.00025"),
+            "output": Decimal("0.00125"),
+        },
+        "claude-3-opus-20240229": {
+            "input": Decimal("0.015"),
+            "output": Decimal("0.075"),
+        },
+        "claude-sonnet-4-20250514": {
+            "input": Decimal("0.003"),
+            "output": Decimal("0.015"),
+        },
+    },
+}
+
+MODEL_COST_ALIASES: Dict[str, Dict[str, str]] = {
+    "anthropic": {
+        "claude-3-5-sonnet": "claude-3-5-sonnet-20241022",
+        "claude-3-haiku": "claude-3-haiku-20240307",
+        "claude-sonnet-4": "claude-sonnet-4-20250514",
+    },
+    "gemini": {
+        "gemini-3-pro": "gemini-3-pro-preview",
+        "gemini-2.5-flash": "gemini-2.5-flash",
+        "gemini-2.5-pro": "gemini-2.5-pro",
+        "gemini-2.0-flash": "gemini-2.0-flash",
     },
 }
 
@@ -126,10 +178,16 @@ class CostTrackingService:
         """Rough pre-flight token estimate (~4 chars per token)."""
         return max(1, len(text) // self._CHARS_PER_TOKEN)
 
-    def estimate_cost(self, provider: str, model: str, input_chars: int, output_chars: int = 0) -> Decimal:
+    def estimate_cost(
+        self, provider: str, model: str, input_chars: int, output_chars: int = 0
+    ) -> Decimal:
         """Estimate cost before making an LLM call for quota pre-checks."""
         input_tokens = max(1, input_chars // self._CHARS_PER_TOKEN)
-        output_tokens = max(0, output_chars // self._CHARS_PER_TOKEN) if output_chars else input_tokens  # assume similar output
+        output_tokens = (
+            max(0, output_chars // self._CHARS_PER_TOKEN)
+            if output_chars
+            else input_tokens
+        )  # assume similar output
         input_cost = self._calculate_cost(provider, model, input_tokens, "input")
         output_cost = self._calculate_cost(provider, model, output_tokens, "output")
         return input_cost + output_cost
@@ -240,10 +298,14 @@ class CostTrackingService:
             )
             return Decimal("0")
 
-        model_costs = provider_costs.get(model)
+        pricing_model = self._resolve_pricing_model(provider, model)
+        model_costs = provider_costs.get(pricing_model)
         if model_costs is None:
             logger.warning(
-                "Unknown model in cost calculation", provider=provider, model=model
+                "Unknown model in cost calculation",
+                provider=provider,
+                model=model,
+                pricing_model=pricing_model,
             )
             return Decimal("0")
 
@@ -251,6 +313,22 @@ class CostTrackingService:
 
         # Calculate cost: (cost per 1K tokens) * (tokens / 1000)
         return cost_per_1k * Decimal(str(tokens)) / Decimal("1000")
+
+    def _resolve_pricing_model(self, provider: str, model: str) -> str:
+        provider_costs = MODEL_COSTS.get(provider, {})
+        if model in provider_costs:
+            return model
+
+        aliases = MODEL_COST_ALIASES.get(provider, {})
+        for prefix, canonical_model in aliases.items():
+            if model.startswith(prefix):
+                return canonical_model
+
+        for known_model in provider_costs:
+            if model.startswith(known_model) or known_model.startswith(model):
+                return known_model
+
+        return model
 
     async def get_quota(self, tenant_id: str) -> Optional[CostQuota]:
         """Get quota configuration for tenant"""

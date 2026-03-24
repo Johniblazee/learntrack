@@ -1,15 +1,17 @@
 """
-Centralized AI Models Configuration
+Centralized AI models configuration and capability lookup helpers.
 
-This file contains all AI provider models in one place for easy management.
 Update models here and they will be reflected across the entire application.
 """
+
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 from pydantic import BaseModel
 
 
 class AIModelConfig(BaseModel):
     """Configuration for a single AI model"""
+
     id: str  # Model identifier used in API calls
     name: str  # Human-readable display name
     description: str  # Short description of the model
@@ -18,6 +20,17 @@ class AIModelConfig(BaseModel):
     is_default: bool = False  # Whether this is the default model for the provider
     supports_vision: bool = False  # Whether the model supports image inputs
     supports_tools: bool = True  # Whether the model supports function calling
+    supports_structured_output: bool = True  # Whether schema/json output is supported
+    supports_streaming: bool = True  # Whether token streaming is supported
+
+
+@dataclass(frozen=True)
+class ModelCapabilities:
+    context_window: int = 0
+    supports_vision: bool = False
+    supports_tools: bool = True
+    supports_structured_output: bool = True
+    supports_streaming: bool = True
 
 
 # =============================================================================
@@ -30,21 +43,21 @@ GROQ_MODELS: List[AIModelConfig] = [
         description="Most versatile and capable",
         context_window=131072,
         is_active=True,
-        is_default=True
+        is_default=True,
     ),
     AIModelConfig(
         id="openai/gpt-oss-20b",
         name="GPT-OSS 20B",
         description="Open source GPT model via Groq",
         context_window=131072,
-        is_active=True
+        is_active=True,
     ),
     AIModelConfig(
         id="llama-3.1-8b-instant",
         name="Llama 3.1 8B",
         description="Fast responses, lower cost",
         context_window=131072,
-        is_active=True
+        is_active=True,
     ),
     AIModelConfig(
         id="meta-llama/llama-4-maverick-17b-128e-instruct",
@@ -52,14 +65,14 @@ GROQ_MODELS: List[AIModelConfig] = [
         description="Latest multimodal model",
         context_window=131072,
         is_active=True,
-        supports_vision=True
+        supports_vision=True,
     ),
     AIModelConfig(
         id="mixtral-8x7b-32768",
         name="Mixtral 8x7B",
         description="Mixture of experts model",
         context_window=32768,
-        is_active=False  # Older model
+        is_active=False,  # Older model
     ),
 ]
 
@@ -75,14 +88,14 @@ OPENAI_MODELS: List[AIModelConfig] = [
         context_window=128000,
         is_active=False,  # Disabled
         is_default=True,
-        supports_vision=True
+        supports_vision=True,
     ),
     AIModelConfig(
         id="gpt-4o-mini",
         name="GPT-4o Mini",
         description="Fast and affordable",
         context_window=128000,
-        is_active=False  # Disabled
+        is_active=False,  # Disabled
     ),
     AIModelConfig(
         id="gpt-4-turbo",
@@ -90,7 +103,7 @@ OPENAI_MODELS: List[AIModelConfig] = [
         description="High performance",
         context_window=128000,
         is_active=False,  # Disabled
-        supports_vision=True
+        supports_vision=True,
     ),
     AIModelConfig(
         id="o1",
@@ -98,7 +111,7 @@ OPENAI_MODELS: List[AIModelConfig] = [
         description="Advanced reasoning model",
         context_window=128000,
         is_active=False,  # Disabled
-        supports_tools=False
+        supports_tools=False,
     ),
 ]
 
@@ -114,7 +127,7 @@ GEMINI_MODELS: List[AIModelConfig] = [
         context_window=1048576,
         is_active=True,
         is_default=True,
-        supports_vision=True
+        supports_vision=True,
     ),
     # Gemini 2.5 Series
     AIModelConfig(
@@ -123,14 +136,14 @@ GEMINI_MODELS: List[AIModelConfig] = [
         description="Fast with thinking capabilities",
         context_window=1048576,
         is_active=True,
-        supports_vision=True
+        supports_vision=True,
     ),
     AIModelConfig(
         id="gemini-2.5-flash-lite",
         name="Gemini 2.5 Flash-Lite",
         description="Ultra fast, cost efficient",
         context_window=1048576,
-        is_active=True
+        is_active=True,
     ),
     AIModelConfig(
         id="gemini-2.5-pro",
@@ -138,7 +151,7 @@ GEMINI_MODELS: List[AIModelConfig] = [
         description="Advanced thinking model for complex problems",
         context_window=1048576,
         is_active=True,
-        supports_vision=True
+        supports_vision=True,
     ),
     # Gemini 2.0 Series
     AIModelConfig(
@@ -146,14 +159,14 @@ GEMINI_MODELS: List[AIModelConfig] = [
         name="Gemini 2.0 Flash",
         description="Second generation workhorse model",
         context_window=1048576,
-        is_active=True
+        is_active=True,
     ),
     AIModelConfig(
         id="gemini-2.0-flash-lite",
         name="Gemini 2.0 Flash-Lite",
         description="Fast and cost-effective",
         context_window=1048576,
-        is_active=False  # Older, prefer 2.5
+        is_active=False,  # Older, prefer 2.5
     ),
 ]
 
@@ -168,7 +181,7 @@ ANTHROPIC_MODELS: List[AIModelConfig] = [
         context_window=200000,
         is_active=True,
         is_default=True,
-        supports_vision=True
+        supports_vision=True,
     ),
     AIModelConfig(
         id="claude-3-opus-20240229",
@@ -176,14 +189,14 @@ ANTHROPIC_MODELS: List[AIModelConfig] = [
         description="Highest quality outputs",
         context_window=200000,
         is_active=True,
-        supports_vision=True
+        supports_vision=True,
     ),
     AIModelConfig(
         id="claude-3-haiku-20240307",
         name="Claude 3 Haiku",
         description="Fast and lightweight",
         context_window=200000,
-        is_active=True
+        is_active=True,
     ),
 ]
 
@@ -226,6 +239,80 @@ def get_model_ids(provider: str, active_only: bool = True) -> List[str]:
     return [m.id for m in ALL_PROVIDER_MODELS.get(provider, [])]
 
 
+def get_model_config(provider: str, model_id: str) -> Optional[AIModelConfig]:
+    """Return the closest static model config for a provider/model pair."""
+    models = ALL_PROVIDER_MODELS.get(provider, [])
+    if not models:
+        return None
+
+    exact_match = next((model for model in models if model.id == model_id), None)
+    if exact_match is not None:
+        return exact_match
+
+    prefix_match = next(
+        (
+            model
+            for model in models
+            if model_id.startswith(model.id) or model.id.startswith(model_id)
+        ),
+        None,
+    )
+    if prefix_match is not None:
+        return prefix_match
+
+    return None
+
+
+def get_model_capabilities(provider: str, model_id: str) -> ModelCapabilities:
+    """Return the best-known capabilities for a model.
+
+    Unknown live-fetched models fall back to provider defaults so runtime checks do
+    not unnecessarily block calls.
+    """
+    model = get_model_config(provider, model_id)
+    if model is not None:
+        return ModelCapabilities(
+            context_window=model.context_window,
+            supports_vision=model.supports_vision,
+            supports_tools=model.supports_tools,
+            supports_structured_output=model.supports_structured_output,
+            supports_streaming=model.supports_streaming,
+        )
+
+    provider_defaults = {
+        "openai": ModelCapabilities(
+            context_window=128000,
+            supports_vision=True,
+            supports_tools=True,
+            supports_structured_output=True,
+            supports_streaming=True,
+        ),
+        "anthropic": ModelCapabilities(
+            context_window=200000,
+            supports_vision=True,
+            supports_tools=True,
+            supports_structured_output=True,
+            supports_streaming=True,
+        ),
+        "gemini": ModelCapabilities(
+            context_window=1048576,
+            supports_vision=True,
+            supports_tools=True,
+            supports_structured_output=True,
+            supports_streaming=True,
+        ),
+        "groq": ModelCapabilities(
+            context_window=131072,
+            supports_vision=False,
+            supports_tools=True,
+            supports_structured_output=True,
+            supports_streaming=True,
+        ),
+    }
+
+    return provider_defaults.get(provider, ModelCapabilities())
+
+
 def get_models_for_dropdown(provider: str) -> List[Dict]:
     """Get models formatted for frontend dropdown"""
     return [
@@ -245,4 +332,3 @@ def get_all_active_models_for_dropdown() -> Dict[str, List[Dict]]:
         provider: get_models_for_dropdown(provider)
         for provider in ALL_PROVIDER_MODELS.keys()
     }
-

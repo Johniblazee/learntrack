@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 # Timeout for individual LLM calls (seconds)
 LLM_CALL_TIMEOUT = 60
 
+from app.ai.structured_outputs import ReflectionOutput
 from app.agents.graph.state import (
     AgentState,
     FollowupSuggestion,
@@ -175,49 +176,62 @@ Consider:
                 ),
             ]
 
-            response = await asyncio.wait_for(
-                self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
-            )
-            content = response.content
-
-            if not content or not content.strip():
-                logger.warning("Empty response from LLM in reflect node, using default")
-                reflection = ReflectionResult(
-                    overall_quality=0.0,
-                    strengths=["Questions generated successfully"],
-                    improvements=[],
-                    should_regenerate=False,
-                    regenerate_indices=[],
-                )
-                state["reflection_result"] = reflection
-                return state
-
-            if "```json" in content:
-                json_content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                json_content = content.split("```")[1].split("```")[0]
-            else:
-                json_content = content
-
-            json_content = json_content.strip()
-
-            if not json_content:
-                logger.warning("Empty JSON content in reflect node, using default")
-                reflection = ReflectionResult(
-                    overall_quality=0.0,
-                    strengths=["Questions generated successfully"],
-                    improvements=[],
-                    should_regenerate=False,
-                    regenerate_indices=[],
-                )
-                state["reflection_result"] = reflection
-                return state
-
             try:
-                data = json.loads(json_content)
-            except json.JSONDecodeError:
-                sanitized = sanitize_json_string(json_content)
-                data = json.loads(sanitized)
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, ReflectionOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                data = structured.model_dump(mode="json")
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured reflection failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
+                content = response.content
+
+                if not content or not content.strip():
+                    logger.warning(
+                        "Empty response from LLM in reflect node, using default"
+                    )
+                    reflection = ReflectionResult(
+                        overall_quality=0.0,
+                        strengths=["Questions generated successfully"],
+                        improvements=[],
+                        should_regenerate=False,
+                        regenerate_indices=[],
+                    )
+                    state["reflection_result"] = reflection
+                    return state
+
+                if "```json" in content:
+                    json_content = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    json_content = content.split("```")[1].split("```")[0]
+                else:
+                    json_content = content
+
+                json_content = json_content.strip()
+
+                if not json_content:
+                    logger.warning("Empty JSON content in reflect node, using default")
+                    reflection = ReflectionResult(
+                        overall_quality=0.0,
+                        strengths=["Questions generated successfully"],
+                        improvements=[],
+                        should_regenerate=False,
+                        regenerate_indices=[],
+                    )
+                    state["reflection_result"] = reflection
+                    return state
+
+                try:
+                    data = json.loads(json_content)
+                except json.JSONDecodeError:
+                    sanitized = sanitize_json_string(json_content)
+                    data = json.loads(sanitized)
 
             reflection = ReflectionResult(
                 overall_quality=data.get("overall_quality", 0.85),

@@ -19,6 +19,7 @@ from fastapi import (
 )
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.ai.litellm_runtime import persist_usage_snapshot
 from app.core.database import get_database
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
 from app.core.rate_limit import limiter, RATE_LIMITS
@@ -202,6 +203,24 @@ async def generate_questions_with_rag(
                 )
                 rag_context, source_chunks = _build_basic_rag_context(documents)
 
+            try:
+                await persist_usage_snapshot(
+                    database=database,
+                    llm=resolved_model.llm,
+                    tenant_id=current_user.tutor_id,
+                    provider_id=ai_provider,
+                    model_id=model_name,
+                    operation="rag_context_retrieval",
+                    metadata={
+                        "document_ids": body.document_ids,
+                        "context_chunks": body.context_chunks,
+                    },
+                )
+            except Exception as usage_error:
+                logger.warning(
+                    "Failed to persist RAG retrieval usage", error=str(usage_error)
+                )
+
         # Get web search context if enabled
         web_results = []
         if use_web_search:
@@ -243,6 +262,12 @@ async def generate_questions_with_rag(
             provider_id=ai_provider,
             model_id=model_name,
             encrypted_tutor_key=resolved_model.encrypted_tutor_key,
+            database=database,
+            tenant_id=current_user.tutor_id,
+            usage_metadata={
+                "document_ids": body.document_ids or [],
+                "used_web_search": use_web_search,
+            },
         )
 
         generation_id = str(uuid.uuid4())
@@ -349,6 +374,10 @@ Instructions:
             provider_id=resolved_model.provider_id,
             model_id=resolved_model.model_id,
             encrypted_tutor_key=resolved_model.encrypted_tutor_key,
+            database=database,
+            tenant_id=current_user.tutor_id,
+            operation="rag_question_regeneration",
+            usage_metadata={"question_id": body.question_id},
         )
 
         if not questions:

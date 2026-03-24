@@ -13,6 +13,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 # Timeout for individual LLM calls (seconds)
 LLM_CALL_TIMEOUT = 60
 
+from app.ai.structured_outputs import (
+    GeneratedQuestionListOutput,
+    GeneratedQuestionOutput,
+)
 from app.agents.graph.state import (
     AgentState,
     SourceChunk,
@@ -33,6 +37,30 @@ from app.utils.enums import (
 from .base import BaseNode, sanitize_json_string
 
 logger = structlog.get_logger()
+
+
+def _structured_question_to_generated(
+    output: GeneratedQuestionOutput,
+    *,
+    question_id: str,
+) -> GeneratedQuestion:
+    return GeneratedQuestion(
+        question_id=output.question_id or question_id,
+        type=normalize_question_type(output.question_type or "multiple-choice"),
+        difficulty=normalize_difficulty(output.difficulty or "medium"),
+        blooms_level=normalize_blooms_level(output.blooms_level or "UNDERSTAND"),
+        question_text=output.question_text,
+        options=output.options or None,
+        correct_answer=output.correct_answer,
+        explanation=output.explanation,
+        source_citations=[
+            SourceCitation(**citation.model_dump(mode="json"))
+            for citation in output.source_citations
+        ],
+        tags=output.tags,
+        quality_score=None,
+        is_valid=True,
+    )
 
 
 class QuestionGeneratorNode(BaseNode):
@@ -66,10 +94,27 @@ IMPORTANT: Your response must contain exactly {total} question objects in a sing
                 ),
             ]
 
-            response = await asyncio.wait_for(
-                self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
-            )
-            questions = self._parse_questions(response.content, state)
+            try:
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, GeneratedQuestionListOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                questions = [
+                    _structured_question_to_generated(
+                        item,
+                        question_id=item.question_id or f"q{i + 1}",
+                    )
+                    for i, item in enumerate(structured.questions)
+                ]
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured question generation failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
+                questions = self._parse_questions(response.content, state)
 
             state["questions"] = questions
             state["current_question_index"] = len(questions)
@@ -408,9 +453,30 @@ Output as a single JSON object (not an array).
         ]
 
         try:
-            streamed_content = ""
             question_id = f"q{question_number}"
+            try:
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, GeneratedQuestionOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                question = _structured_question_to_generated(
+                    structured,
+                    question_id=question_id,
+                )
+                if self.sse_handler:
+                    await self.sse_handler.send_chunk(
+                        question_id=question_id,
+                        content=json.dumps(question.model_dump(mode="json")),
+                        question_number=question_number,
+                    )
+                return question
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured single-question generation failed, falling back to stream parsing",
+                    error=str(structured_error),
+                )
 
+            streamed_content = ""
             if hasattr(self.llm, "astream"):
                 async for chunk in self.llm.astream(messages):
                     if hasattr(chunk, "content") and chunk.content:
@@ -427,10 +493,7 @@ Output as a single JSON object (not an array).
                 )
                 streamed_content = response.content
 
-            question = self._parse_single_question(
-                streamed_content, question_number, state
-            )
-            return question
+            return self._parse_single_question(streamed_content, question_number, state)
 
         except Exception as e:
             logger.error(f"Failed to generate question {question_number}", error=str(e))

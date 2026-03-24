@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 # Timeout for individual LLM calls (seconds)
 LLM_CALL_TIMEOUT = 60
 
+from app.ai.structured_outputs import PromptAnalysisOutput
 from app.agents.graph.state import AgentState, PromptAnalysis
 from app.core.prompt_manager import get_prompt
 from app.utils.enums import normalize_question_type, normalize_difficulty
@@ -38,19 +39,29 @@ class PromptAnalyzerNode(BaseNode):
                 ),
             ]
 
-            response = await asyncio.wait_for(
-                self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
-            )
-            content = response.content
+            try:
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, PromptAnalysisOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                analysis_data = structured.model_dump(mode="json")
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured prompt analysis failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
+                content = response.content
 
-            # Parse JSON from response
-            json_match = content
-            if "```json" in content:
-                json_match = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                json_match = content.split("```")[1].split("```")[0]
+                json_match = content
+                if "```json" in content:
+                    json_match = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    json_match = content.split("```")[1].split("```")[0]
 
-            analysis_data = json.loads(json_match.strip())
+                analysis_data = json.loads(json_match.strip())
 
             # Convert to PromptAnalysis
             analysis = PromptAnalysis(

@@ -13,9 +13,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 # Timeout for individual LLM calls (seconds)
 LLM_CALL_TIMEOUT = 60
 
+from app.ai.structured_outputs import GeneratedQuestionOutput
 from app.agents.graph.state import (
     AgentState,
     GeneratedQuestion,
+    SourceCitation,
     SourceChunk,
 )
 from app.core.prompt_manager import get_prompt
@@ -29,6 +31,45 @@ from app.utils.enums import (
 from .base import BaseNode
 
 logger = structlog.get_logger()
+
+
+def _from_structured_question(
+    output: GeneratedQuestionOutput,
+    original: GeneratedQuestion,
+    *,
+    question_type: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    blooms_level: Optional[str] = None,
+) -> GeneratedQuestion:
+    source_citations = (
+        [
+            SourceCitation(**citation.model_dump(mode="json"))
+            for citation in output.source_citations
+        ]
+        if output.source_citations
+        else original.source_citations
+    )
+
+    return GeneratedQuestion(
+        question_id=original.question_id,
+        type=normalize_question_type(
+            question_type or output.question_type or original.type.value
+        ),
+        difficulty=normalize_difficulty(
+            difficulty or output.difficulty or original.difficulty.value
+        ),
+        blooms_level=normalize_blooms_level(
+            blooms_level or output.blooms_level or original.blooms_level.value
+        ),
+        question_text=output.question_text or original.question_text,
+        options=output.options or original.options,
+        correct_answer=output.correct_answer or original.correct_answer,
+        explanation=output.explanation or original.explanation,
+        source_citations=source_citations,
+        tags=output.tags or original.tags,
+        quality_score=None,
+        is_valid=True,
+    )
 
 
 class QuestionEditorNode(BaseNode):
@@ -99,44 +140,58 @@ Apply the edit and return the updated question as JSON.
             ),
         ]
 
-        response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
-
         try:
-            content = response.content
-            if "```json" in content:
-                json_content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                json_content = content.split("```")[1].split("```")[0]
-            else:
-                json_content = content
+            try:
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, GeneratedQuestionOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                edited = _from_structured_question(structured, original)
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured question edit failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
+                content = response.content
+                if "```json" in content:
+                    json_content = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    json_content = content.split("```")[1].split("```")[0]
+                else:
+                    json_content = content
 
-            data = json.loads(json_content.strip())
-            edited_data = data.get("edited_question", data)
+                data = json.loads(json_content.strip())
+                edited_data = data.get("edited_question", data)
 
-            edited = GeneratedQuestion(
-                question_id=original.question_id,
-                type=normalize_question_type(
-                    edited_data.get("type")
-                    or edited_data.get("question_type")
-                    or original.type.value
-                ),
-                difficulty=normalize_difficulty(
-                    edited_data.get("difficulty", original.difficulty.value)
-                ),
-                blooms_level=normalize_blooms_level(
-                    edited_data.get("blooms_level", original.blooms_level.value)
-                ),
-                question_text=edited_data.get("question_text", original.question_text),
-                options=edited_data.get("options", original.options),
-                correct_answer=edited_data.get(
-                    "correct_answer", original.correct_answer
-                ),
-                explanation=edited_data.get("explanation", original.explanation),
-                source_citations=original.source_citations,
-                tags=edited_data.get("tags", original.tags),
-                quality_score=None,
-                is_valid=True,
-            )
+                edited = GeneratedQuestion(
+                    question_id=original.question_id,
+                    type=normalize_question_type(
+                        edited_data.get("type")
+                        or edited_data.get("question_type")
+                        or original.type.value
+                    ),
+                    difficulty=normalize_difficulty(
+                        edited_data.get("difficulty", original.difficulty.value)
+                    ),
+                    blooms_level=normalize_blooms_level(
+                        edited_data.get("blooms_level", original.blooms_level.value)
+                    ),
+                    question_text=edited_data.get(
+                        "question_text", original.question_text
+                    ),
+                    options=edited_data.get("options", original.options),
+                    correct_answer=edited_data.get(
+                        "correct_answer", original.correct_answer
+                    ),
+                    explanation=edited_data.get("explanation", original.explanation),
+                    source_citations=original.source_citations,
+                    tags=edited_data.get("tags", original.tags),
+                    quality_score=None,
+                    is_valid=True,
+                )
 
             return edited
 
@@ -182,7 +237,9 @@ class UpdateArtifactNode(BaseNode):
             system_prompt = await get_prompt("question_editor")
 
             # Validate instruction length
-            safe_instruction = instruction[:1000] if len(instruction) > 1000 else instruction
+            safe_instruction = (
+                instruction[:1000] if len(instruction) > 1000 else instruction
+            )
 
             messages = [
                 SystemMessage(content=system_prompt),
@@ -199,8 +256,21 @@ Apply the edit and return the updated question as JSON.
                 ),
             ]
 
-            response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
-            edited = self._parse_edited_question(response.content, original)
+            try:
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, GeneratedQuestionOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                edited = _from_structured_question(structured, original)
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured artifact update failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
+                edited = self._parse_edited_question(response.content, original)
 
             state["questions"][original_idx] = edited
 
@@ -333,8 +403,21 @@ Output a single question as JSON.
                 ),
             ]
 
-            response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
-            new_question = self._parse_single_question(response.content, original)
+            try:
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, GeneratedQuestionOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                new_question = _from_structured_question(structured, original)
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured rewrite failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
+                new_question = self._parse_single_question(response.content, original)
 
             state["questions"][original_idx] = new_question
 
@@ -474,8 +557,29 @@ Output as JSON.
                 ),
             ]
 
-            response = await asyncio.wait_for(self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT)
-            new_question = self._parse_question(response.content, original, new_theme)
+            try:
+                structured = await asyncio.wait_for(
+                    self.llm.ainvoke_structured(messages, GeneratedQuestionOutput),
+                    timeout=LLM_CALL_TIMEOUT,
+                )
+                new_question = _from_structured_question(
+                    structured,
+                    original,
+                    question_type=new_type,
+                    difficulty=new_difficulty,
+                    blooms_level=new_blooms,
+                )
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured theme rewrite failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await asyncio.wait_for(
+                    self.llm.ainvoke(messages), timeout=LLM_CALL_TIMEOUT
+                )
+                new_question = self._parse_question(
+                    response.content, original, new_theme
+                )
 
             state["questions"][original_idx] = new_question
 
@@ -557,4 +661,3 @@ Output as JSON.
         except Exception as e:
             logger.error("Failed to parse question", error=str(e))
             raise
-

@@ -9,9 +9,16 @@ from typing import List, Dict, Any, Optional
 import json
 import structlog
 
+from app.ai.litellm_runtime import persist_usage_snapshot
+from app.ai.structured_outputs import QuestionBatchOutput
 from app.core.config import settings
 from app.ai.providers.base import AIProvider
-from app.models.question import QuestionCreate, QuestionDifficulty, QuestionType
+from app.models.question import (
+    QuestionCreate,
+    QuestionDifficulty,
+    QuestionOption,
+    QuestionType,
+)
 from app.core.exceptions import AIProviderError
 from app.utils.enums import normalize_question_type, normalize_difficulty
 
@@ -171,6 +178,56 @@ Generate exactly {question_count} questions."""
                 logger.warning("Failed to parse question", error=str(e))
         return questions
 
+    @staticmethod
+    def _structured_to_questions(
+        structured: QuestionBatchOutput,
+        subject_id: str,
+        topic: str,
+    ) -> List[QuestionCreate]:
+        questions: List[QuestionCreate] = []
+        for item in structured.questions:
+            try:
+                normalized_type = normalize_question_type(item.question_type)
+                options = []
+                if normalized_type == QuestionType.MULTIPLE_CHOICE:
+                    normalized_options = [opt for opt in item.options if opt]
+                    correct_answer = item.correct_answer
+                    if (
+                        correct_answer
+                        and len(correct_answer) == 1
+                        and correct_answer.isalpha()
+                    ):
+                        answer_index = ord(correct_answer.upper()) - 65
+                        if 0 <= answer_index < len(normalized_options):
+                            correct_answer = normalized_options[answer_index]
+                    options = [
+                        QuestionOption(
+                            text=option,
+                            is_correct=option == correct_answer,
+                        )
+                        for option in normalized_options
+                    ]
+                else:
+                    correct_answer = item.correct_answer
+
+                questions.append(
+                    QuestionCreate(
+                        question_text=item.question_text,
+                        question_type=normalized_type,
+                        subject_id=subject_id,
+                        topic=topic,
+                        difficulty=normalize_difficulty(item.difficulty),
+                        points=1,
+                        explanation=item.explanation,
+                        tags=item.tags,
+                        options=options,
+                        correct_answer=correct_answer,
+                    )
+                )
+            except Exception as e:
+                logger.warning("Failed to parse structured question", error=str(e))
+        return questions
+
     async def generate_questions(
         self,
         text_content: str,
@@ -183,6 +240,10 @@ Generate exactly {question_count} questions."""
         provider_id: Optional[str] = None,
         model_id: Optional[str] = None,
         encrypted_tutor_key: Optional[str] = None,
+        database: Optional[Any] = None,
+        tenant_id: Optional[str] = None,
+        operation: str = "question_generation",
+        usage_metadata: Optional[Dict[str, Any]] = None,
     ) -> List[QuestionCreate]:
         types = question_types or [QuestionType.MULTIPLE_CHOICE]
         pid = provider_id
@@ -205,13 +266,36 @@ Generate exactly {question_count} questions."""
             text_content, subject, topic, question_count, difficulty, types
         )
 
-        response = await llm.ainvoke([HumanMessage(content=prompt)])
-        response_content = response.content
-        if isinstance(response_content, list):
-            response_content = "\n".join(
-                str(part) for part in response_content if part is not None
-            )
-        return self._parse_response(str(response_content), subject, topic)
+        try:
+            try:
+                structured = await llm.ainvoke_structured(
+                    [HumanMessage(content=prompt)],
+                    QuestionBatchOutput,
+                )
+                return self._structured_to_questions(structured, subject, topic)
+            except Exception as structured_error:
+                logger.warning(
+                    "Structured AIManager generation failed, falling back to JSON parsing",
+                    error=str(structured_error),
+                )
+                response = await llm.ainvoke([HumanMessage(content=prompt)])
+                response_content = response.content
+                if isinstance(response_content, list):
+                    response_content = "\n".join(
+                        str(part) for part in response_content if part is not None
+                    )
+                return self._parse_response(str(response_content), subject, topic)
+        finally:
+            if database is not None and tenant_id:
+                await persist_usage_snapshot(
+                    database=database,
+                    llm=llm,
+                    tenant_id=tenant_id,
+                    provider_id=pid,
+                    model_id=model,
+                    operation=operation,
+                    metadata=usage_metadata,
+                )
 
     async def generate_questions_with_rag(
         self,
@@ -226,6 +310,10 @@ Generate exactly {question_count} questions."""
         provider_id: Optional[str] = None,
         model_id: Optional[str] = None,
         encrypted_tutor_key: Optional[str] = None,
+        database: Optional[Any] = None,
+        tenant_id: Optional[str] = None,
+        operation: str = "rag_question_generation",
+        usage_metadata: Optional[Dict[str, Any]] = None,
     ) -> List[QuestionCreate]:
         combined = f"RAG Context:\n{rag_context}\n\nOriginal Content:\n{text_content}"
         return await self.generate_questions(
@@ -239,6 +327,10 @@ Generate exactly {question_count} questions."""
             provider_id=provider_id,
             model_id=model_id,
             encrypted_tutor_key=encrypted_tutor_key,
+            database=database,
+            tenant_id=tenant_id,
+            operation=operation,
+            usage_metadata=usage_metadata,
         )
 
     # ------------------------------------------------------------------

@@ -1,16 +1,11 @@
-"""
-Unified LiteLLM provider — single factory that replaces all per-provider classes.
-
-Returns a LangChain ``BaseChatModel`` (via ``ChatLiteLLM``) so the existing
-LangGraph agent can call ``ainvoke()`` / ``astream()`` without changes.
-"""
+"""Unified LiteLLM provider factory."""
 
 from typing import Optional
 
 import structlog
 from langchain_community.chat_models import ChatLiteLLM
-from langchain_core.language_models.chat_models import BaseChatModel
 
+from app.ai.litellm_runtime import LiteLLMRuntime
 from app.core.config import settings
 from app.core.encryption import decrypt_api_key
 from app.core.exceptions import AIProviderError
@@ -74,8 +69,8 @@ def create_litellm_chat_model(
     encrypted_tutor_key: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
-) -> BaseChatModel:
-    """Return a LangChain-compatible ``BaseChatModel`` backed by LiteLLM.
+):
+    """Return an app-owned LiteLLM runtime wrapper.
 
     Args:
         provider_id: One of ``"openai"``, ``"anthropic"``, ``"gemini"``, ``"groq"``.
@@ -85,7 +80,8 @@ def create_litellm_chat_model(
         max_tokens: Maximum output tokens.
 
     Returns:
-        A ``ChatLiteLLM`` instance that implements ``ainvoke`` / ``astream``.
+        A runtime wrapper that implements ``ainvoke`` / ``astream`` plus
+        app-level structured output, tool calling, retry, and usage helpers.
     """
     prefix = _PROVIDER_PREFIX.get(provider_id)
     if prefix is None:
@@ -100,12 +96,13 @@ def create_litellm_chat_model(
         model=litellm_model,
     )
 
-    return ChatLiteLLM(
-        model=litellm_model,
+    return LiteLLMRuntime(
+        provider_id=provider_id,
+        model_id=model_id,
+        litellm_model=litellm_model,
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
-        streaming=True,
     )
 
 
