@@ -36,6 +36,20 @@ from app.utils.enums import normalize_provider
 
 logger = structlog.get_logger()
 
+
+def _json_safe(obj: Any) -> Any:
+    """Recursively convert MongoDB types (ObjectId, datetime) for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if type(obj).__name__ == "ObjectId":
+        return str(obj)
+    return obj
+
+
 # In-memory cache for tenant configurations
 _config_cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_MINUTES = 10
@@ -256,13 +270,59 @@ class TenantAIConfigService:
     async def _build_provider_availability(
         self, config: TenantAIConfig
     ) -> List[ProviderAvailability]:
-        registry = await get_global_model_registry(self.db)
+        from app.ai.services.models_fetcher import fetch_all_provider_models
+
+        # Static config + DB overrides
+        static_registry = await get_global_model_registry(self.db)
+
+        # Fetch live models from vendor APIs (30-min internal cache)
+        try:
+            live_models = await fetch_all_provider_models(limit=200)
+        except Exception:
+            live_models = {}
+
+        # Merge: live models are primary when available, enriched with static metadata
+        registry: Dict[str, List[Dict[str, Any]]] = {}
+        for provider_id in PROVIDER_NAMES:
+            static_models = static_registry.get(provider_id, [])
+            static_lookup = {m["id"]: m for m in static_models}
+            live_list = live_models.get(provider_id, [])
+
+            if live_list:
+                merged: List[Dict[str, Any]] = []
+                seen_ids: set = set()
+                for lm in live_list:
+                    mid = lm["id"]
+                    sm = static_lookup.get(mid, {})
+                    merged.append(
+                        {
+                            "id": mid,
+                            "name": sm.get("name") or lm.get("name", mid),
+                            "description": sm.get("description")
+                            or lm.get("description", ""),
+                            "context_window": lm.get("context_window")
+                            or sm.get("context_window", 0),
+                            "is_active": sm.get("is_active", True),
+                            "is_default": sm.get("is_default", False),
+                            "supports_vision": sm.get("supports_vision", False),
+                            "supports_tools": sm.get("supports_tools", True),
+                        }
+                    )
+                    seen_ids.add(mid)
+                # Keep static-only models (may be temporarily absent from API)
+                for sm in static_models:
+                    if sm["id"] not in seen_ids:
+                        merged.append(sm)
+                registry[provider_id] = merged
+            else:
+                registry[provider_id] = static_models
+
         providers: List[ProviderAvailability] = []
 
         for provider_id, name in PROVIDER_NAMES.items():
             key_source = get_tenant_provider_key_source(config, provider_id)
-            provider_models = await self._get_allowed_provider_models(
-                config, provider_id, registry
+            provider_models = filter_models_for_tenant(
+                config, provider_id, registry.get(provider_id, [])
             )
             provider_available = (
                 provider_id in config.enabled_providers
@@ -632,5 +692,6 @@ class TenantAIConfigService:
             .limit(per_page)
         )
         logs = await cursor.to_list(length=per_page)
+        logs = [_json_safe(log) for log in logs]
 
         return logs, total

@@ -407,10 +407,6 @@ export function TenantAIConfigPage() {
     }
   }
 
-  if (isLoading) {
-    return <LoadingState message="Loading AI configuration..." size="lg" className="h-64" />
-  }
-
   const { filteredDefaultModels, embeddingModels } = useMemo(() => {
     const defaultProvider = configData?.providers.find(
       (provider) => provider.provider_id === formData.default_provider
@@ -433,6 +429,10 @@ export function TenantAIConfigPage() {
       embeddingModels: embedding,
     }
   }, [configData, formData.default_provider, formData.embedding_provider, formData.provider_configs])
+
+  if (isLoading) {
+    return <LoadingState message="Loading AI configuration..." size="lg" className="h-64" />
+  }
 
   return (
     <div className="space-y-6">

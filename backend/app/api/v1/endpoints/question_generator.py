@@ -978,7 +978,7 @@ async def get_all_questions(
         None, description="Filter by status: pending, approved, rejected"
     ),
     page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    per_page: int = Query(20, ge=1, le=200, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
     session_service: Any = Depends(get_session_service),
 ):

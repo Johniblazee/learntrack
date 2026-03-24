@@ -36,6 +36,7 @@ def _load_migration_module(filename: str):
 
 # Load migration modules
 _migration_001 = _load_migration_module("001_ai_enhancements.py")
+_migration_002 = _load_migration_module("002_enable_tenant_byok.py")
 
 
 def get_all_migrations() -> List[Migration]:
@@ -52,6 +53,13 @@ def get_all_migrations() -> List[Migration]:
             description="Add cost tracking, semantic chunking, and local embeddings collections",
             up=_migration_001.run_migration,
             down=None,  # No rollback defined for this migration
+        ),
+        Migration(
+            version="004",
+            name="enable_tenant_byok",
+            description="Enable BYOK for existing tenant AI configuration documents",
+            up=_migration_002.run_migration,
+            down=None,
         ),
     ]
 

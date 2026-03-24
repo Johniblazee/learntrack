@@ -12,7 +12,7 @@ logger = structlog.get_logger()
 
 async def run_bootstrap_tasks(db_ref=None):
     """Run indexes, migrations, and audit-log maintenance tasks."""
-    db = db_ref or await database.ensure_connected()
+    db = db_ref if db_ref is not None else await database.ensure_connected()
 
     await database.ensure_connected()
     await database.ensure_indexes()
