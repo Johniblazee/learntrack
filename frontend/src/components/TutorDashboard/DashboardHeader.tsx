@@ -51,7 +51,7 @@ export function DashboardHeader({ onCreateAssignment }: DashboardHeaderProps) {
   }
 
   const handleSettingsClick = () => {
-    navigate('/settings')
+    navigate('/dashboard/settings')
   }
 
   const handleSignOut = async () => {

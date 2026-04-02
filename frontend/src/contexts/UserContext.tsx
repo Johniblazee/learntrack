@@ -146,7 +146,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const role = backendUser?.role || (clerkUser?.publicMetadata?.role as UserRole) || null
   const tutorId = backendUser?.tutor_id || null
-  const studentIds = backendUser?.student_ids || []
+  const studentIds = useMemo(() => backendUser?.student_ids || [], [backendUser?.student_ids])
 
   // ── Derived permission fields ────────────────────────────────────────────────
 
@@ -155,10 +155,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     role === 'super_admin' ||
     (clerkUser?.publicMetadata?.is_super_admin as boolean) ||
     false
-  const adminPermissions =
-    backendUser?.admin_permissions ||
-    (clerkUser?.publicMetadata?.admin_permissions as AdminPermission[]) ||
-    []
+  const adminPermissions = useMemo(
+    () =>
+      backendUser?.admin_permissions ||
+      (clerkUser?.publicMetadata?.admin_permissions as AdminPermission[]) ||
+      [],
+    [backendUser?.admin_permissions, clerkUser?.publicMetadata?.admin_permissions],
+  )
   const hasFullAdminAccess = isSuperAdmin && adminPermissions.includes('full_access')
 
   const hasAdminPermission = useCallback(
@@ -189,7 +192,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isParent: role === 'parent',
       refreshBackendUser: fetchBackendUser,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [clerkUser, isLoaded, isSignedIn, backendUser, isBackendLoaded, backendError, role, tutorId, studentIds, fetchBackendUser],
   )
 

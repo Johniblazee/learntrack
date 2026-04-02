@@ -164,7 +164,7 @@ export default function ParentDashboard() {
     userSettings?.preferences?.default_parent_tab,
   ])
 
-  const children = dashboardStats?.children || []
+  const children = useMemo(() => dashboardStats?.children || [], [dashboardStats?.children])
 
   const aggregate = useMemo(() => {
     const totalChildren = children.length
