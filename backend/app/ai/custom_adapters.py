@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass, field
 import json
+import re
 from typing import Any, AsyncIterator, Optional
 
 import anthropic
@@ -120,6 +121,30 @@ def _normalize_tool_call(
         "id": tool_call_id,
         "type": "tool_call",
     }
+
+
+def _extract_openai_compat_tool_calls(
+    raw_text: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    pattern = re.compile(
+        r"<function(?:=|\s+name=)(?P<name>[^>]+)>(?P<args>.*?)</function>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    tool_calls: list[dict[str, Any]] = []
+
+    for index, match in enumerate(pattern.finditer(raw_text or "")):
+        tool_name = match.group("name").strip().strip("\"'")
+        args_text = match.group("args").strip()
+        try:
+            tool_args = json.loads(args_text) if args_text else {}
+        except json.JSONDecodeError:
+            tool_args = {}
+        tool_calls.append(
+            _normalize_tool_call(tool_name, tool_args, f"compat_tool_call_{index}")
+        )
+
+    cleaned_text = pattern.sub("", raw_text or "").strip()
+    return cleaned_text, tool_calls
 
 
 def _openai_usage_to_counts(usage: Any) -> tuple[int, int, int]:
@@ -433,6 +458,7 @@ class OpenAICompatibleAdapter:
         choice = response.choices[0] if response.choices else None
         message = choice.message if choice is not None else None
         parsed_tool_calls: list[dict[str, Any]] = []
+        raw_text = _content_to_text(getattr(message, "content", ""))
         for index, tool_call in enumerate(getattr(message, "tool_calls", []) or []):
             function = getattr(tool_call, "function", None)
             try:
@@ -446,11 +472,14 @@ class OpenAICompatibleAdapter:
                     tool_call_id=str(getattr(tool_call, "id", f"call_{index}")),
                 )
             )
+        text = raw_text
+        if not parsed_tool_calls and raw_text:
+            text, parsed_tool_calls = _extract_openai_compat_tool_calls(raw_text)
         input_tokens, output_tokens, total_tokens = _openai_usage_to_counts(
             getattr(response, "usage", None)
         )
         return AdapterToolResponse(
-            text=_content_to_text(getattr(message, "content", "")),
+            text=text,
             tool_calls=parsed_tool_calls,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

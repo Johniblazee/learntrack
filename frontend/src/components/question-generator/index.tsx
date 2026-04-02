@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion } from 'motion/react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ import { SettingsModal, GenerationSettings, GenerationSourceOption } from './Set
 
 import { QuestionCanvas } from './QuestionCanvas'
 import { GeneratedQuestion, StreamEvent } from './types'
+import { useSubjects } from '@/hooks/useQueries'
 
 // Types
 interface Session {
@@ -56,6 +57,7 @@ interface LibraryItem {
 
 export function OpenCanvasGenerator() {
   const { getToken } = useAuth()
+  const { data: subjectsData } = useSubjects()
 
   // Settings state
   const [settings, setSettings] = useState<GenerationSettings>({
@@ -92,6 +94,27 @@ export function OpenCanvasGenerator() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [sessionSnapshots, setSessionSnapshots] = useState<Record<string, SessionSnapshot>>({})
   const [isDeletingSessions, setIsDeletingSessions] = useState(false)
+
+  const subjects = useMemo(() => {
+    if (Array.isArray(subjectsData)) {
+      return subjectsData
+    }
+    return (subjectsData as { items?: unknown[] } | undefined)?.items || []
+  }, [subjectsData])
+
+  const resolvedPublishSubjectId = useMemo(() => {
+    const subjectName = settings.subject.trim().toLowerCase()
+    if (!subjectName) {
+      return ''
+    }
+
+    const matchedSubject = subjects.find((subject) => {
+      const candidate = String((subject as { name?: string }).name || '').trim().toLowerCase()
+      return candidate === subjectName
+    }) as { _id?: string; id?: string } | undefined
+
+    return matchedSubject?._id || matchedSubject?.id || ''
+  }, [settings.subject, subjects])
 
   // Fetch tenant AI defaults on mount
   useEffect(() => {
@@ -927,6 +950,11 @@ export function OpenCanvasGenerator() {
       return
     }
 
+    if (!resolvedPublishSubjectId) {
+      toast.error('Select a subject in generation settings before publishing to the question bank')
+      return
+    }
+
     try {
       const token = await getToken()
       const response = await fetch(
@@ -939,6 +967,8 @@ export function OpenCanvasGenerator() {
           },
           body: JSON.stringify({
             question_ids: publishReadyQuestions.map((question) => question.question_id),
+            subject_id: resolvedPublishSubjectId,
+            topic: settings.topic || undefined,
           }),
         },
       )
@@ -978,7 +1008,7 @@ export function OpenCanvasGenerator() {
       console.error('Publish approved error:', error)
       toast.error(error instanceof Error ? error.message : 'Failed to publish approved questions')
     }
-  }, [currentSessionId, questions, getToken, fetchSessions, getErrorDetail])
+  }, [currentSessionId, questions, getToken, fetchSessions, getErrorDetail, resolvedPublishSubjectId, settings.topic])
 
   const handleApproveAll = useCallback(async () => {
     const pendingQuestions = questions.filter(q => (q.status ?? 'pending') === 'pending')

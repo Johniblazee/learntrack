@@ -1572,9 +1572,14 @@ async def save_session_questions_to_bank(
                 subject_id = str(subject_doc["_id"])
 
     if not subject_id:
+        configured_subject_name = (session.config or {}).get("subject")
         raise HTTPException(
             status_code=400,
-            detail="Unable to resolve subject_id from session subject. Provide subject_id.",
+            detail=(
+                "Unable to resolve subject_id from the session subject"
+                + (f" '{configured_subject_name}'" if configured_subject_name else "")
+                + ". Provide subject_id or select a valid subject before publishing."
+            ),
         )
 
     topic = request.topic or (session.config or {}).get("topic") or "AI Generated"

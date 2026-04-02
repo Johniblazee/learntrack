@@ -26,6 +26,29 @@ from app.core.exceptions import ValidationError, NotFoundError
 
 logger = structlog.get_logger()
 
+
+def _to_bson_compatible(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return Decimal128(value)
+    if isinstance(value, dict):
+        return {key: _to_bson_compatible(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_bson_compatible(item) for item in value]
+    if isinstance(value, tuple):
+        return [_to_bson_compatible(item) for item in value]
+    return value
+
+
+def _from_bson_compatible(value: Any) -> Any:
+    if isinstance(value, Decimal128):
+        return value.to_decimal()
+    if isinstance(value, dict):
+        return {key: _from_bson_compatible(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_from_bson_compatible(item) for item in value]
+    return value
+
+
 # Cost per 1K tokens for different models (in USD)
 MODEL_COSTS: Dict[str, Dict[str, Dict[str, Decimal]]] = {
     "openai": {
@@ -254,7 +277,9 @@ class CostTrackingService:
         )
 
         # Store in database
-        await self.cost_collection.insert_one(cost_record.model_dump())
+        await self.cost_collection.insert_one(
+            _to_bson_compatible(cost_record.model_dump())
+        )
 
         logger.info(
             "Tracked AI usage",
@@ -334,6 +359,7 @@ class CostTrackingService:
         """Get quota configuration for tenant"""
         quota_doc = await self.quota_collection.find_one({"tenant_id": tenant_id})
         if quota_doc:
+            quota_doc = _from_bson_compatible(quota_doc)
             quota_doc["_id"] = str(quota_doc["_id"])
             return CostQuota(**quota_doc)
         return None
@@ -362,7 +388,7 @@ class CostTrackingService:
         )
 
         # Upsert the default quota so repeated calls don't create duplicates
-        payload = quota.model_dump()
+        payload = _to_bson_compatible(quota.model_dump())
         result = await self.quota_collection.update_one(
             {"tenant_id": tenant_id},
             {"$setOnInsert": payload},
@@ -409,12 +435,14 @@ class CostTrackingService:
         update_data["updated_at"] = datetime.now(timezone.utc)
 
         if update_data:
+            update_data = _to_bson_compatible(update_data)
             updated_doc = await self.quota_collection.find_one_and_update(
                 {"tenant_id": tenant_id},
                 {"$set": update_data},
                 return_document=ReturnDocument.AFTER,
             )
             if updated_doc:
+                updated_doc = _from_bson_compatible(updated_doc)
                 updated_doc["_id"] = str(updated_doc["_id"])
                 quota = CostQuota(**updated_doc)
             else:
@@ -708,7 +736,9 @@ class CostTrackingService:
                     timestamp=datetime.now(timezone.utc),
                 )
 
-                await self.alerts_collection.insert_one(alert.model_dump())
+                await self.alerts_collection.insert_one(
+                    _to_bson_compatible(alert.model_dump())
+                )
                 logger.warning(
                     "Cost quota alert",
                     tenant_id=tenant_id,
@@ -791,7 +821,7 @@ class CostTrackingService:
                 total_requests=0,
             )
 
-        data = result[0]
+        data = _from_bson_compatible(result[0])
         return UsageMetrics(
             tenant_id=tenant_id,
             period=period,
@@ -825,6 +855,7 @@ class CostTrackingService:
 
         # Convert ObjectId to string
         for item in history:
+            item.update(_from_bson_compatible(item))
             item["_id"] = str(item["_id"])
 
         return history
@@ -841,6 +872,7 @@ class CostTrackingService:
         alerts = []
 
         async for doc in cursor:
+            doc = _from_bson_compatible(doc)
             doc["_id"] = str(doc["_id"])
             alerts.append(CostAlert(**doc))
 
