@@ -828,26 +828,42 @@ async def get_progress_chart(
             completion_rate = min((submission_count / expected_submissions) * 100, 100)
 
             if date_str not in date_map:
-                date_map[date_str] = {"day": date_str[-2:], "completionRate": 0.0}
+                date_map[date_str] = {
+                    "day": date_str[-2:],
+                    "completionRate": 0.0,
+                    "_completion_total": 0.0,
+                    "_completion_count": 0,
+                }
 
-            existing_rate = float(date_map[date_str].get("completionRate", 0) or 0)
-            if existing_rate:
-                date_map[date_str]["completionRate"] = round(
-                    (existing_rate + completion_rate) / 2,
-                    1,
-                )
-            else:
-                date_map[date_str]["completionRate"] = round(completion_rate, 1)
+            date_map[date_str]["_completion_total"] += completion_rate
+            date_map[date_str]["_completion_count"] += 1
+            date_map[date_str]["completionRate"] = round(
+                date_map[date_str]["_completion_total"]
+                / max(date_map[date_str]["_completion_count"], 1),
+                1,
+            )
 
-            # Average if multiple assignments on same day
-            if subject_name in date_map[date_str]:
-                date_map[date_str][subject_name] = (
-                    date_map[date_str][subject_name] + completion_rate
-                ) / 2
-            else:
-                date_map[date_str][subject_name] = round(completion_rate, 1)
+            subject_total_key = f"_{subject_name}_total"
+            subject_count_key = f"_{subject_name}_count"
+            date_map[date_str][subject_total_key] = (
+                float(date_map[date_str].get(subject_total_key, 0.0) or 0.0)
+                + completion_rate
+            )
+            date_map[date_str][subject_count_key] = (
+                int(date_map[date_str].get(subject_count_key, 0) or 0) + 1
+            )
+            date_map[date_str][subject_name] = round(
+                date_map[date_str][subject_total_key]
+                / max(date_map[date_str][subject_count_key], 1),
+                1,
+            )
 
-        chart_data = list(date_map.values())
+        chart_data = []
+        for row in date_map.values():
+            cleaned_row = {
+                key: value for key, value in row.items() if not key.startswith("_")
+            }
+            chart_data.append(cleaned_row)
 
         return chart_data
     except Exception as e:

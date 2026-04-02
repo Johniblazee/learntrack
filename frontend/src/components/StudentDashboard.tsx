@@ -22,6 +22,8 @@ import {
 } from "lucide-react"
 
 import { DashboardMessagesPage } from "@/components/dashboard/DashboardMessagesPage"
+import NotificationsPage from "@/pages/NotificationsPage"
+import SettingsPage from "@/pages/SettingsPage"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -201,6 +203,16 @@ function getStudentSectionFromPath(pathname: string): StudentNavSection {
     default:
       return "dashboard"
   }
+}
+
+function getStudentPageLabel(pathname: string, activeSection: StudentNavSection): string {
+  if (pathname.startsWith("/dashboard/settings")) {
+    return "Settings"
+  }
+  if (pathname.startsWith("/dashboard/notifications")) {
+    return "Notifications"
+  }
+  return NAV_LABELS[activeSection]
 }
 
 function normalizeAssignmentStatus(rawStatus: string, dueDate: Date | null): AssignmentStatus {
@@ -526,6 +538,10 @@ export default function StudentDashboard() {
   const activeNavSection = useMemo(
     () => getStudentSectionFromPath(location.pathname),
     [location.pathname]
+  )
+  const currentPageLabel = useMemo(
+    () => getStudentPageLabel(location.pathname, activeNavSection),
+    [activeNavSection, location.pathname]
   )
 
   useEffect(() => {
@@ -941,7 +957,7 @@ export default function StudentDashboard() {
   }
 
   const handleOpenSettings = () => {
-    navigate("/settings")
+    navigate("/dashboard/settings")
   }
 
   const handleSignOut = async () => {
@@ -1830,7 +1846,7 @@ export default function StudentDashboard() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>{NAV_LABELS[activeNavSection]}</BreadcrumbPage>
+                  <BreadcrumbPage>{currentPageLabel}</BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
@@ -1859,6 +1875,8 @@ export default function StudentDashboard() {
                 <Route path="messages" element={renderMessagesPage()} />
                 <Route path="messages/chats" element={<Navigate to="/dashboard/messages?mode=chat" replace />} />
                 <Route path="messages/emails" element={<Navigate to="/dashboard/messages?mode=email" replace />} />
+                <Route path="notifications" element={<NotificationsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </PageShell>

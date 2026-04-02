@@ -204,12 +204,14 @@ class ProgressService:
         """Create a new progress record"""
         try:
             # Check if progress already exists for this student/assignment
-            existing = await self.collection.find_one(
-                {
-                    "student_id": progress_data.student_id,
-                    "assignment_id": progress_data.assignment_id,
-                }
-            )
+            existing_query: Dict[str, Any] = {
+                "student_id": progress_data.student_id,
+                "assignment_id": progress_data.assignment_id,
+            }
+            if progress_data.tutor_id:
+                existing_query["tutor_id"] = progress_data.tutor_id
+
+            existing = await self.collection.find_one(existing_query)
 
             if existing:
                 return Progress(**existing)
@@ -251,19 +253,25 @@ class ProgressService:
             raise DatabaseException(f"Failed to get progress: {str(e)}")
 
     async def get_student_assignment_progress(
-        self, student_id: str, assignment_id: str
+        self, student_id: str, assignment_id: str, tutor_id: Optional[str] = None
     ) -> Optional[Progress]:
         """Get student's progress on a specific assignment"""
         try:
-            progress = await self.collection.find_one(
-                {"student_id": student_id, "assignment_id": assignment_id}
-            )
+            progress_query: Dict[str, Any] = {
+                "student_id": student_id,
+                "assignment_id": assignment_id,
+            }
+            if tutor_id:
+                progress_query["tutor_id"] = tutor_id
+
+            progress = await self.collection.find_one(progress_query)
             return Progress(**progress) if progress else None
         except Exception as e:
             logger.error(
                 "Failed to get student assignment progress",
                 student_id=student_id,
                 assignment_id=assignment_id,
+                tutor_id=tutor_id,
                 error=str(e),
             )
             raise DatabaseException(f"Failed to get progress: {str(e)}")
@@ -427,16 +435,22 @@ class ProgressService:
             )
             raise DatabaseException(f"Failed to get assignment progress: {str(e)}")
 
-    async def get_student_analytics(self, student_id: str) -> ProgressAnalytics:
+    async def get_student_analytics(
+        self, student_id: str, tutor_id: Optional[str] = None
+    ) -> ProgressAnalytics:
         """Get progress analytics for a student using assignments as the source of truth."""
         try:
             max_limit = getattr(settings, "PROGRESS_AGG_LIMIT", 500)
-            assignment_docs = await self.db.assignments.find(
-                {
-                    "student_ids": student_id,
-                    "status": {"$ne": "draft"},
-                }
-            ).to_list(length=max_limit)
+            assignment_query: Dict[str, Any] = {
+                "student_ids": student_id,
+                "status": {"$ne": "draft"},
+            }
+            if tutor_id:
+                assignment_query["tutor_id"] = tutor_id
+
+            assignment_docs = await self.db.assignments.find(assignment_query).to_list(
+                length=max_limit
+            )
 
             assignment_ids = [
                 str(assignment.get("_id"))
@@ -446,12 +460,16 @@ class ProgressService:
 
             progress_docs: List[Dict[str, Any]] = []
             if assignment_ids:
-                progress_docs = await self.collection.find(
-                    {
-                        "student_id": student_id,
-                        "assignment_id": {"$in": assignment_ids},
-                    }
-                ).to_list(length=len(assignment_ids))
+                progress_query: Dict[str, Any] = {
+                    "student_id": student_id,
+                    "assignment_id": {"$in": assignment_ids},
+                }
+                if tutor_id:
+                    progress_query["tutor_id"] = tutor_id
+
+                progress_docs = await self.collection.find(progress_query).to_list(
+                    length=len(assignment_ids)
+                )
 
             progress_by_assignment_id = {
                 str(progress.get("assignment_id")): progress
@@ -675,12 +693,15 @@ class ProgressService:
                     continue
 
                 child_parent_ids = child.get("parent_ids") or []
-                if child_parent_ids and parent_id not in child_parent_ids:
+                if parent_id not in child_parent_ids:
                     continue
 
                 child_tutor_id = child.get("tutor_id") or expected_tutor_id
 
-                analytics = await self.get_student_analytics(child_id)
+                analytics = await self.get_student_analytics(
+                    child_id,
+                    tutor_id=child_tutor_id,
+                )
 
                 # Fetch recent progress attempts for this child
                 progress_query: Dict[str, Any] = {"student_id": child_id}

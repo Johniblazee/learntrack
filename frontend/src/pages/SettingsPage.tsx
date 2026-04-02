@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useUser } from '@clerk/clerk-react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Bell, Brain, Globe, Lock, Palette, Save, User } from 'lucide-react'
+import { AlertCircle, Bell, Brain, Globe, Lock, Palette, Save, User } from 'lucide-react'
 
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
@@ -11,7 +10,7 @@ import { Label } from '../components/ui/label'
 import { Switch } from '../components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
-import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
+import { LoadingSpinner } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
 import { toast } from '../contexts/ToastContext'
 import { useUserContext } from '@/contexts/UserContext'
@@ -82,7 +81,6 @@ function normalizeDefaultParentTab(value: unknown): ParentDefaultTab {
 
 export default function SettingsPage() {
   const { user } = useUser()
-  const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
   const apiClient = useApiClient()
   const queryClient = useQueryClient()
@@ -90,6 +88,8 @@ export default function SettingsPage() {
 
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [settings, setSettings] = useState<SettingsState>({
     ...DEFAULT_SETTINGS,
     displayName: user?.fullName || '',
@@ -105,10 +105,15 @@ export default function SettingsPage() {
     const loadSettings = async () => {
       try {
         setIsLoading(true)
+        setLoadError(null)
         const response = await apiClient.get('/settings/user')
 
+        if (response.error) {
+          throw new Error(response.error)
+        }
+
         if (!response.data) {
-          return
+          throw new Error('Unable to load your settings right now.')
         }
 
         const data = response.data as any
@@ -135,15 +140,21 @@ export default function SettingsPage() {
         }))
       } catch (error) {
         console.error('Failed to load settings:', error)
+        setLoadError(error instanceof Error ? error.message : 'Failed to load settings')
       } finally {
         setIsLoading(false)
       }
     }
 
     void loadSettings()
-  }, [apiClient, user])
+  }, [apiClient, reloadKey, user])
 
   const handleSave = async () => {
+    if (loadError) {
+      toast.error('Resolve the settings load error before saving changes.')
+      return
+    }
+
     setIsSaving(true)
     try {
       const response = await apiClient.put('/settings/user', {
@@ -185,46 +196,54 @@ export default function SettingsPage() {
     }
   }
 
-  if (isLoading) {
-    return <LoadingState fullScreen message="Loading settings..." size="lg" />
-  }
-
   return (
-    <div className="min-h-screen bg-muted">
-      <div className="bg-card border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back
-              </Button>
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-                  <p className="text-sm text-muted-foreground">
-                  Manage your {roleLabel} settings and preferences
-                  </p>
-              </div>
-            </div>
-
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <>
-                  <LoadingSpinner size="sm" className="mr-2" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Changes
-                </>
-              )}
-            </Button>
-          </div>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Settings</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage your {roleLabel} settings and preferences
+          </p>
         </div>
+
+        <Button onClick={handleSave} disabled={isSaving || isLoading || Boolean(loadError)}>
+          {isSaving ? (
+            <>
+              <LoadingSpinner size="sm" className="mr-2" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4 mr-2" />
+              Save Changes
+            </>
+          )}
+        </Button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {isLoading ? (
+        <Card>
+          <CardContent className="flex items-center gap-3 p-6 text-sm text-muted-foreground">
+            <LoadingSpinner size="sm" />
+            Loading your settings...
+          </CardContent>
+        </Card>
+      ) : loadError ? (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 text-destructive" />
+              <div>
+                <p className="font-medium text-foreground">Unable to load settings</p>
+                <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+              </div>
+            </div>
+            <Button type="button" variant="outline" onClick={() => setReloadKey((value) => value + 1)}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
         <Tabs defaultValue="profile" className="space-y-6">
           <TabsList className={`grid w-full ${isTutor ? 'grid-cols-6' : 'grid-cols-5'} lg:w-auto`}>
             <TabsTrigger value="profile">
@@ -367,16 +386,19 @@ export default function SettingsPage() {
               <CardContent className="space-y-6">
                 <div className="space-y-2">
                   <Label htmlFor="profileVisibility">Profile Visibility</Label>
-                  <select
-                    id="profileVisibility"
+                  <Select
                     value={settings.profileVisibility}
-                    onChange={(event) => setSettings({ ...settings, profileVisibility: event.target.value })}
-                    className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
+                    onValueChange={(value) => setSettings({ ...settings, profileVisibility: value })}
                   >
-                    <option value="everyone">Everyone</option>
-                    <option value="students">My Students Only</option>
-                    <option value="private">Private</option>
-                  </select>
+                    <SelectTrigger id="profileVisibility" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="everyone">Everyone</SelectItem>
+                      <SelectItem value="students">My Students Only</SelectItem>
+                      <SelectItem value="private">Private</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -433,24 +455,27 @@ export default function SettingsPage() {
                   <>
                     <div className="space-y-2">
                       <Label htmlFor="defaultStudentTab">Default Student Dashboard Tab</Label>
-                      <select
-                        id="defaultStudentTab"
+                      <Select
                         value={settings.defaultStudentTab}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           setSettings({
                             ...settings,
-                            defaultStudentTab: normalizeDefaultStudentTab(event.target.value),
+                            defaultStudentTab: normalizeDefaultStudentTab(value),
                           })
                         }
-                        className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
                       >
-                        <option value="dashboard">Dashboard</option>
-                        <option value="courses">My Courses</option>
-                        <option value="assignments">Assignments</option>
-                        <option value="grades">Grades</option>
-                        <option value="library">Library</option>
-                        <option value="messages">Messages</option>
-                      </select>
+                        <SelectTrigger id="defaultStudentTab" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="dashboard">Dashboard</SelectItem>
+                          <SelectItem value="courses">My Courses</SelectItem>
+                          <SelectItem value="assignments">Assignments</SelectItem>
+                          <SelectItem value="grades">Grades</SelectItem>
+                          <SelectItem value="library">Library</SelectItem>
+                          <SelectItem value="messages">Messages</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <p className="text-sm text-muted-foreground">
                         Choose which tab opens first when you enter the student dashboard.
                       </p>
@@ -493,22 +518,25 @@ export default function SettingsPage() {
                   <>
                     <div className="space-y-2">
                       <Label htmlFor="defaultParentTab">Default Parent Dashboard Tab</Label>
-                      <select
-                        id="defaultParentTab"
+                      <Select
                         value={settings.defaultParentTab}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           setSettings({
                             ...settings,
-                            defaultParentTab: normalizeDefaultParentTab(event.target.value),
+                            defaultParentTab: normalizeDefaultParentTab(value),
                           })
                         }
-                        className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground"
                       >
-                        <option value="overview">Overview</option>
-                        <option value="children">Children</option>
-                        <option value="upcoming">Upcoming Work</option>
-                        <option value="messages">Messages</option>
-                      </select>
+                        <SelectTrigger id="defaultParentTab" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="overview">Overview</SelectItem>
+                          <SelectItem value="children">Children</SelectItem>
+                          <SelectItem value="upcoming">Upcoming Work</SelectItem>
+                          <SelectItem value="messages">Messages</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <p className="text-sm text-muted-foreground">
                         Choose which view opens first when you enter the parent dashboard.
                       </p>
@@ -529,7 +557,7 @@ export default function SettingsPage() {
             </TabsContent>
           )}
         </Tabs>
-      </div>
+      )}
     </div>
   )
 }

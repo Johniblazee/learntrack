@@ -18,6 +18,8 @@ import CreateAssignmentView from "./views/CreateAssignmentView"
 import AssignmentTemplatesView from "./views/AssignmentTemplatesView"
 import GradingView from "./views/GradingView"
 import ConversationsView from "./views/ConversationsView"
+import NotificationsPage from "@/pages/NotificationsPage"
+import SettingsPage from "@/pages/SettingsPage"
 import StudentDetailsPage from "@/pages/StudentDetailsPage"
 import { useDashboardStats } from "@/hooks/useQueries"
 import { useUserContext } from "@/contexts/UserContext"
@@ -87,6 +89,8 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       'messages': 'chats',
       'messages/chats': 'chats',
       'messages/emails': 'emails',
+      'notifications': 'notifications',
+      'settings': 'settings',
     }
 
     return pathToView[path] || 'overview'
@@ -112,7 +116,8 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       'grading': '/dashboard/assignments/grading',
       'chats': '/dashboard/messages/chats',
       'emails': '/dashboard/messages/emails',
-      'settings': '/settings',
+      'notifications': '/dashboard/notifications',
+      'settings': '/dashboard/settings',
     }
 
     const route = viewToRoute[view] || '/dashboard'
@@ -120,7 +125,7 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
   }
 
   const handleOpenSettings = () => {
-    navigate('/settings')
+    navigate('/dashboard/settings')
   }
 
   const handleSignOut = async () => {
@@ -153,10 +158,12 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       "active-assignments": "Active Assignments",
       "create-new": "Create Assignment",
       "templates": "Templates",
-      "grading": "Grading",
-      "chats": "Conversations",
-      "emails": "Emails",
-    }
+        "grading": "Grading",
+        "chats": "Conversations",
+        "emails": "Emails",
+        "notifications": "Notifications",
+        "settings": "Settings",
+      }
 
     return {
       parent: null,
@@ -244,6 +251,10 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
             <Route path="messages" element={<MessagesModeRedirect />} />
             <Route path="messages/chats" element={<ConversationsView routeMode="chats" />} />
             <Route path="messages/emails" element={<ConversationsView routeMode="emails" />} />
+
+            {/* Utility routes */}
+            <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
 
             {/* 404 Catch-all for undefined dashboard routes */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

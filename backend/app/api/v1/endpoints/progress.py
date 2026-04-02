@@ -34,6 +34,7 @@ from app.models.progress import (
     StudentPerformanceData,
     WeeklyProgressData,
 )
+from app.models.user import UserRole
 from app.models.activity import ActivityCreate, ActivityType
 from app.models.notification import NotificationCreate, NotificationType
 from app.services.progress_service import ProgressService
@@ -126,6 +127,91 @@ def _is_progress_locked(status_value: Any) -> bool:
     }
 
 
+def _resolve_tenant_tutor_id(current_user: ClerkUserContext) -> str:
+    return current_user.tutor_id or current_user.clerk_id
+
+
+def _build_empty_progress_response(
+    *, assignment_id: str, student_id: str, tutor_id: str, seed_time: datetime
+) -> Progress:
+    return Progress(
+        id="",
+        assignment_id=assignment_id,
+        student_id=student_id,
+        tutor_id=tutor_id,
+        attempt_number=0,
+        status=SubmissionStatus.IN_PROGRESS,
+        answers=[],
+        started_at=seed_time,
+        submitted_at=None,
+        time_spent=0,
+        score=None,
+        points_earned=0.0,
+        points_possible=0.0,
+        feedback=None,
+        graded_at=None,
+        graded_by=None,
+        created_at=seed_time,
+        updated_at=seed_time,
+    )
+
+
+async def _get_authorized_student_record(
+    database: AsyncIOMotorDatabase,
+    *,
+    student_id: str,
+    current_user: ClerkUserContext,
+) -> Dict[str, Any]:
+    student = await database.students.find_one({"clerk_id": student_id})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    student_tutor_id = str(student.get("tutor_id") or "").strip()
+
+    if current_user.is_super_admin:
+        return student
+
+    if current_user.role == UserRole.TUTOR:
+        if student_tutor_id != current_user.clerk_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Access forbidden: Student does not belong to your tenant",
+            )
+        return student
+
+    if current_user.role == UserRole.STUDENT:
+        if student_id != current_user.clerk_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Access forbidden: You can only view your own data",
+            )
+        return student
+
+    if current_user.role == UserRole.PARENT:
+        linked_student_ids = set(current_user.student_ids or [])
+        reciprocal_parent_ids = set(student.get("parent_ids") or [])
+        if (
+            student_id not in linked_student_ids
+            or current_user.clerk_id not in reciprocal_parent_ids
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access forbidden: This student is not your child",
+            )
+        if (
+            current_user.tutor_id
+            and student_tutor_id
+            and student_tutor_id != current_user.tutor_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access forbidden: Student does not belong to your tenant",
+            )
+        return student
+
+    raise HTTPException(status_code=403, detail="Access forbidden")
+
+
 @router.get("/student", response_model=ProgressAnalytics)
 async def get_student_progress_analytics(
     current_user: ClerkUserContext = Depends(require_student),
@@ -134,7 +220,10 @@ async def get_student_progress_analytics(
     """Get progress analytics for current student"""
     try:
         progress_service = ProgressService(database)
-        return await progress_service.get_student_analytics(current_user.clerk_id)
+        return await progress_service.get_student_analytics(
+            current_user.clerk_id,
+            tutor_id=_resolve_tenant_tutor_id(current_user),
+        )
     except Exception as e:
         logger.error("Failed to get student progress analytics", error=str(e))
         raise HTTPException(
@@ -158,48 +247,24 @@ async def get_student_progress_analytics_by_id(
     - Parents can view analytics for their children
     """
     try:
-        from app.services.user_service import UserService
-        from app.models.user import UserRole
         from datetime import datetime, timezone
         from calendar import month_abbr
 
-        user_service = UserService(database)
-
-        # Get the student
-        student = await user_service.get_user_by_clerk_id(student_id)
-        if not student or student.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
-
-        # Security check - super admins have full access
-        if current_user.is_super_admin:
-            pass  # Super admins can view any student
-        elif current_user.role == UserRole.TUTOR:
-            # Tutors can view their students
-            if student.tutor_id != current_user.clerk_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Access forbidden: Student does not belong to your tenant",
-                )
-        elif current_user.role == UserRole.STUDENT:
-            # Students can only view themselves
-            if student_id != current_user.clerk_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Access forbidden: You can only view your own analytics",
-                )
-        elif current_user.role == UserRole.PARENT:
-            # Parents can view their children
-            if student_id not in (current_user.student_ids or []):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Access forbidden: This student is not your child",
-                )
-        else:
-            raise HTTPException(status_code=403, detail="Access forbidden")
+        student = await _get_authorized_student_record(
+            database,
+            student_id=student_id,
+            current_user=current_user,
+        )
+        student_tutor_id = str(
+            student.get("tutor_id") or _resolve_tenant_tutor_id(current_user)
+        ).strip()
 
         # Get analytics
         progress_service = ProgressService(database)
-        analytics = await progress_service.get_student_analytics(student_id)
+        analytics = await progress_service.get_student_analytics(
+            student_id,
+            tutor_id=student_tutor_id or None,
+        )
 
         # Calculate monthly scores using single aggregation query (replaces 6 sequential queries)
         now = datetime.now(timezone.utc)
@@ -215,6 +280,7 @@ async def get_student_progress_analytics_by_id(
                     "student_id": student_id,
                     "submitted_at": {"$gte": six_months_ago},
                     "score": {"$ne": None},
+                    **({"tutor_id": student_tutor_id} if student_tutor_id else {}),
                 }
             },
             {
@@ -337,56 +403,58 @@ async def get_student_assignment_progress(
 ):
     """Get specific student's progress on an assignment"""
     try:
-        from app.services.user_service import UserService
-        from app.models.user import UserRole
+        student = await _get_authorized_student_record(
+            database,
+            student_id=student_id,
+            current_user=current_user,
+        )
 
-        user_service = UserService(database)
-
-        # Get the student for authorization check
-        student = await user_service.get_user_by_clerk_id(student_id)
-        if not student or student.role != UserRole.STUDENT:
-            raise HTTPException(status_code=404, detail="Student not found")
-
-        # Authorization check - same logic as get_student_progress_analytics_by_id
-        if current_user.is_super_admin:
-            pass  # Super admins can view any student
-        elif current_user.role == UserRole.TUTOR:
-            # Tutors can view their students
-            if student.tutor_id != current_user.clerk_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access forbidden: Student does not belong to your tenant",
-                )
-        elif current_user.role == UserRole.STUDENT:
-            # Students can only view themselves
-            if student_id != current_user.clerk_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access forbidden: You can only view your own progress",
-                )
-        elif current_user.role == UserRole.PARENT:
-            # Parents can view their children
-            if student_id not in (current_user.student_ids or []):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access forbidden: This student is not your child",
-                )
-        else:
+        try:
+            assignment_oid = to_object_id(assignment_id)
+        except Exception:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Access forbidden"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid assignment ID",
+            )
+
+        student_tutor_id = str(
+            student.get("tutor_id") or _resolve_tenant_tutor_id(current_user)
+        ).strip()
+        assignment = await database.assignments.find_one({"_id": assignment_oid})
+        if not assignment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assignment not found",
+            )
+
+        if student_id not in (assignment.get("student_ids") or []):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not assigned to this assignment",
+            )
+
+        if student_tutor_id and assignment.get("tutor_id") not in {
+            None,
+            student_tutor_id,
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access forbidden: Assignment does not belong to your tenant",
             )
 
         progress_service = ProgressService(database)
         progress = await progress_service.get_student_assignment_progress(
-            student_id, assignment_id
+            student_id,
+            assignment_id,
+            tutor_id=student_tutor_id or None,
         )
         if not progress:
-            progress = await progress_service.create_progress(
-                ProgressCreate(
-                    assignment_id=assignment_id,
-                    student_id=student_id,
-                    tutor_id=student.tutor_id or current_user.tutor_id or student_id,
-                )
+            seed_time = assignment.get("created_at") or datetime.now(timezone.utc)
+            return _build_empty_progress_response(
+                assignment_id=assignment_id,
+                student_id=student_id,
+                tutor_id=student_tutor_id or student_id,
+                seed_time=seed_time,
             )
         return progress
     except HTTPException:
@@ -425,6 +493,13 @@ async def update_assignment_progress(
                 detail="Assignment not found",
             )
 
+        tenant_tutor_id = _resolve_tenant_tutor_id(current_user)
+        if assignment.get("tutor_id") not in {None, tenant_tutor_id}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access forbidden: Assignment does not belong to your tenant",
+            )
+
         if current_user.clerk_id not in (assignment.get("student_ids") or []):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -459,14 +534,16 @@ async def update_assignment_progress(
 
         # Get or create progress record
         progress = await progress_service.get_student_assignment_progress(
-            current_user.clerk_id, assignment_id
+            current_user.clerk_id,
+            assignment_id,
+            tutor_id=tenant_tutor_id,
         )
         if not progress:
             progress = await progress_service.create_progress(
                 ProgressCreate(
                     assignment_id=assignment_id,
                     student_id=current_user.clerk_id,
-                    tutor_id=current_user.tutor_id or current_user.clerk_id,
+                    tutor_id=tenant_tutor_id,
                 )
             )
 
@@ -513,6 +590,13 @@ async def submit_answer(
             status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
         )
 
+    tenant_tutor_id = _resolve_tenant_tutor_id(current_user)
+    if assignment.get("tutor_id") not in {None, tenant_tutor_id}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Assignment does not belong to your tenant",
+        )
+
     assigned_students = assignment.get("student_ids", [])
     if current_user.clerk_id not in assigned_students:
         raise HTTPException(
@@ -522,14 +606,16 @@ async def submit_answer(
 
     progress_service = ProgressService(database)
     progress = await progress_service.get_student_assignment_progress(
-        current_user.clerk_id, assignment_id
+        current_user.clerk_id,
+        assignment_id,
+        tutor_id=tenant_tutor_id,
     )
     if not progress:
         progress = await progress_service.create_progress(
             ProgressCreate(
                 assignment_id=assignment_id,
                 student_id=current_user.clerk_id,
-                tutor_id=current_user.tutor_id or current_user.clerk_id,
+                tutor_id=tenant_tutor_id,
             )
         )
 

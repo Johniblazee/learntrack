@@ -21,6 +21,21 @@ from bson import ObjectId
 logger = structlog.get_logger()
 
 
+async def _get_authorized_conversation(db, user_context, conversation_id: str):
+    try:
+        conversation_oid = ObjectId(conversation_id)
+    except Exception:
+        return None
+
+    return await db.conversations.find_one(
+        {
+            "_id": conversation_oid,
+            "tutor_id": user_context.tutor_id or user_context.clerk_id,
+            "participants": user_context.clerk_id,
+        }
+    )
+
+
 @sio.event
 async def connect(sid, environ, auth):
     """
@@ -111,13 +126,7 @@ async def join_conversation(sid, data):
 
     # Verify user is participant in conversation
     db = await get_database_sync()
-    conversation = await db.conversations.find_one(
-        {
-            "_id": ObjectId(conversation_id),
-            "tutor_id": user_context.tutor_id,
-            "participants": user_context.clerk_id,
-        }
-    )
+    conversation = await _get_authorized_conversation(db, user_context, conversation_id)
 
     if not conversation:
         logger.warning(
@@ -325,6 +334,17 @@ async def typing_start(sid, data):
 
     user_context = user_data["user_context"]
 
+    db = await get_database_sync()
+    conversation = await _get_authorized_conversation(db, user_context, conversation_id)
+    if not conversation:
+        logger.warning(
+            "Unauthorized typing_start attempt",
+            sid=sid,
+            conversation_id=conversation_id,
+            user_id=user_context.clerk_id,
+        )
+        return {"error": "Conversation not found or access denied"}
+
     # Broadcast typing indicator to conversation room (except sender)
     room = get_conversation_room(conversation_id)
     await sio.emit(
@@ -360,6 +380,17 @@ async def typing_stop(sid, data):
         return {"error": "conversation_id required"}
 
     user_context = user_data["user_context"]
+
+    db = await get_database_sync()
+    conversation = await _get_authorized_conversation(db, user_context, conversation_id)
+    if not conversation:
+        logger.warning(
+            "Unauthorized typing_stop attempt",
+            sid=sid,
+            conversation_id=conversation_id,
+            user_id=user_context.clerk_id,
+        )
+        return {"error": "Conversation not found or access denied"}
 
     # Broadcast typing stopped to conversation room (except sender)
     room = get_conversation_room(conversation_id)
@@ -404,21 +435,21 @@ async def message_read(sid, data):
         db = await get_database_sync()
         message_service = MessageService(db)
 
-        await message_service.mark_as_read(
+        actual_conversation_id = await message_service.mark_as_read(
             message_id=message_id,
             user_id=user_context.clerk_id,
-            tutor_id=user_context.tutor_id,
+            tutor_id=user_context.tutor_id or user_context.clerk_id,
         )
 
         # Broadcast read receipt to conversation room
-        if conversation_id:
-            room = get_conversation_room(conversation_id)
+        if actual_conversation_id:
+            room = get_conversation_room(actual_conversation_id)
             await sio.emit(
                 "message_read_receipt",
                 {
                     "message_id": message_id,
                     "user_id": user_context.clerk_id,
-                    "conversation_id": conversation_id,
+                    "conversation_id": actual_conversation_id,
                 },
                 room=room,
             )

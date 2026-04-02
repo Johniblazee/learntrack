@@ -14,6 +14,7 @@ import pytest
 # Query matching helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_nested(document: Dict[str, Any], key: str) -> Any:
     """Resolve dot-notation keys like 'metadata.role'."""
     parts = key.split(".")
@@ -33,8 +34,12 @@ def _match_operator(actual: Any, operator: str, expected: Any) -> bool:
     if operator == "$ne":
         return actual != expected
     if operator == "$in":
+        if isinstance(actual, list):
+            return any(item in expected for item in actual)
         return actual in expected
     if operator == "$nin":
+        if isinstance(actual, list):
+            return all(item not in expected for item in actual)
         return actual not in expected
     if operator == "$gt":
         return actual is not None and actual > expected
@@ -78,6 +83,11 @@ def _matches(document: Dict[str, Any], query: Optional[Dict[str, Any]]) -> bool:
             continue
 
         # Exact match
+        if isinstance(actual, list):
+            if expected not in actual:
+                return False
+            continue
+
         if actual != expected:
             return False
 
@@ -134,6 +144,7 @@ def _apply_update(document: Dict[str, Any], update: Dict[str, Any]) -> None:
 # FakeCursor
 # ---------------------------------------------------------------------------
 
+
 class FakeCursor:
     def __init__(self, documents: Iterable[Dict[str, Any]]):
         self._documents = [deepcopy(document) for document in documents]
@@ -159,13 +170,13 @@ class FakeCursor:
         return self
 
     def limit(self, limit: int):
-        docs = self._documents[self._skip_n:]
+        docs = self._documents[self._skip_n :]
         self._documents = docs[:limit]
         self._skip_n = 0
         return self
 
     async def to_list(self, length: Optional[int] = None):
-        docs = self._documents[self._skip_n:]
+        docs = self._documents[self._skip_n :]
         if length is not None:
             docs = docs[:length]
         return deepcopy(docs)
@@ -185,6 +196,7 @@ class FakeCursor:
 # ---------------------------------------------------------------------------
 # FakeCollection — enhanced with operator support
 # ---------------------------------------------------------------------------
+
 
 class FakeCollection:
     def __init__(self, documents: Optional[Iterable[Dict[str, Any]]] = None):
@@ -211,9 +223,7 @@ class FakeCollection:
                 return _project(document, projection)
         return None
 
-    async def update_one(
-        self, query: Dict[str, Any], update, upsert: bool = False
-    ):
+    async def update_one(self, query: Dict[str, Any], update, upsert: bool = False):
         # Support aggregation pipeline updates (list of stages)
         if isinstance(update, list):
             for document in self.documents:
@@ -241,9 +251,7 @@ class FakeCollection:
 
         return SimpleNamespace(matched_count=0, modified_count=0)
 
-    async def update_many(
-        self, query: Dict[str, Any], update: Dict[str, Any]
-    ):
+    async def update_many(self, query: Dict[str, Any], update: Dict[str, Any]):
         count = 0
         for document in self.documents:
             if _matches(document, query):
@@ -333,7 +341,7 @@ class FakeCollection:
             elif "$limit" in stage:
                 docs = docs[: stage["$limit"]]
             elif "$skip" in stage:
-                docs = docs[stage["$skip"]:]
+                docs = docs[stage["$skip"] :]
         return FakeCursor(docs)
 
     async def create_index(self, *args, **kwargs):
@@ -347,8 +355,10 @@ class FakeCollection:
 # FakeDatabase — dict-like container that auto-creates FakeCollections
 # ---------------------------------------------------------------------------
 
+
 class FakeDatabase(dict):
     """Dict subclass that auto-creates FakeCollection for any key access."""
+
     def __missing__(self, key):
         collection = FakeCollection()
         self[key] = collection
@@ -358,6 +368,7 @@ class FakeDatabase(dict):
 # ---------------------------------------------------------------------------
 # Auth fixtures — reusable user contexts for tests
 # ---------------------------------------------------------------------------
+
 
 def make_tutor_context(
     clerk_id: str = "tutor_clerk_001",
@@ -434,7 +445,15 @@ def make_super_admin_context(
         name=name,
         role=UserRole.SUPER_ADMIN,
         roles=[UserRole.SUPER_ADMIN],
-        permissions=["read", "write", "create", "delete", "manage_students", "admin", "manage_system"],
+        permissions=[
+            "read",
+            "write",
+            "create",
+            "delete",
+            "manage_students",
+            "admin",
+            "manage_system",
+        ],
         session_id="test_session",
         organization_id=None,
         created_at=datetime.now(timezone.utc),
@@ -451,6 +470,7 @@ def make_super_admin_context(
 # ---------------------------------------------------------------------------
 # Pytest fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def fake_db():

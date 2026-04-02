@@ -20,8 +20,6 @@ const AcceptInvitationPage  = lazy(() => import('./pages/AcceptInvitationPage'))
 const TeacherOnboarding     = lazy(() => import('./components/onboarding/TeacherOnboarding'))
 const StudentOnboarding     = lazy(() => import('./components/onboarding/StudentOnboarding'))
 const ParentOnboarding      = lazy(() => import('./components/onboarding/ParentOnboarding'))
-const NotificationsPage     = lazy(() => import('./pages/NotificationsPage'))
-const SettingsPage          = lazy(() => import('./pages/SettingsPage'))
 const NotFoundPage          = lazy(() => import('./pages/NotFoundPage'))
 const AccessDeniedPage      = lazy(() => import('./pages/AccessDeniedPage'))
 const AdminLayout           = lazy(() => import('./components/admin/AdminLayout').then(m => ({ default: m.AdminLayout })))
@@ -115,7 +113,7 @@ function App() {
                 path="/notifications"
                 element={
                   <ProtectedRoute>
-                    <NotificationsPage />
+                    <Navigate to="/dashboard/notifications" replace />
                   </ProtectedRoute>
                 }
               />
@@ -123,7 +121,7 @@ function App() {
                 path="/settings"
                 element={
                   <ProtectedRoute>
-                    <SettingsPage />
+                    <Navigate to="/dashboard/settings" replace />
                   </ProtectedRoute>
                 }
               />

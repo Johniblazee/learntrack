@@ -405,6 +405,8 @@ async def list_messages(
         return MessageListResponse(**result)
     except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(
             "Failed to list messages", error=str(e), conversation_id=conversation_id
@@ -436,6 +438,8 @@ async def get_message(
         return message
     except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to get message", error=str(e), message_id=message_id)
         raise HTTPException(
@@ -499,6 +503,8 @@ async def delete_message(
         return None
     except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Failed to delete message", error=str(e), message_id=message_id)
         raise HTTPException(
@@ -528,6 +534,8 @@ async def mark_message_as_read(
         return None
     except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(
             "Failed to mark message as read", error=str(e), message_id=message_id

@@ -15,6 +15,8 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { DashboardMessagesPage } from '@/components/dashboard/DashboardMessagesPage'
+import NotificationsPage from '@/pages/NotificationsPage'
+import SettingsPage from '@/pages/SettingsPage'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -75,6 +77,24 @@ function getParentTabFromPath(pathname: string): ParentTab {
   }
 }
 
+function getParentPageLabel(pathname: string, activeTab: ParentTab): string {
+  if (pathname.startsWith('/dashboard/settings')) {
+    return 'Settings'
+  }
+  if (pathname.startsWith('/dashboard/notifications')) {
+    return 'Notifications'
+  }
+
+  const labels: Record<ParentTab, string> = {
+    overview: 'Overview',
+    children: 'Children',
+    upcoming: 'Upcoming',
+    messages: 'Messages',
+  }
+
+  return labels[activeTab]
+}
+
 export default function ParentDashboard() {
   const { user } = useUser()
   const { backendUser } = useUserContext()
@@ -113,6 +133,10 @@ export default function ParentDashboard() {
   } = useParentProgress()
   const { data: userSettings, isLoading: isLoadingSettings } = useUserSettings()
   const activeTab = useMemo(() => getParentTabFromPath(location.pathname), [location.pathname])
+  const currentPageLabel = useMemo(
+    () => getParentPageLabel(location.pathname, activeTab),
+    [activeTab, location.pathname]
+  )
 
   useEffect(() => {
     if (isLoadingSettings) {
@@ -215,7 +239,7 @@ export default function ParentDashboard() {
   }
 
   const handleOpenSettings = () => {
-    navigate('/settings')
+    navigate('/dashboard/settings')
   }
 
   const handleTabChange = (tab: ParentTab) => {
@@ -433,7 +457,7 @@ export default function ParentDashboard() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>{navItems.find((item) => item.tab === activeTab)?.label || 'Parent Dashboard'}</BreadcrumbPage>
+                  <BreadcrumbPage>{currentPageLabel}</BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
@@ -528,6 +552,8 @@ export default function ParentDashboard() {
                 <Route path="messages" element={renderMessagesPage()} />
                 <Route path="messages/chats" element={<Navigate to="/dashboard/messages?mode=chat" replace />} />
                 <Route path="messages/emails" element={<Navigate to="/dashboard/messages?mode=email" replace />} />
+                <Route path="notifications" element={<NotificationsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
 

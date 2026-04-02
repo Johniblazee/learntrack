@@ -15,6 +15,13 @@ from app.core.exceptions import NotFoundError, ValidationError
 logger = structlog.get_logger()
 
 
+def _parse_object_id(value: str, field_name: str) -> ObjectId:
+    try:
+        return ObjectId(value)
+    except Exception as exc:
+        raise ValidationError(f"Invalid {field_name}") from exc
+
+
 class MessageService:
     """Service for managing messages"""
 
@@ -46,10 +53,15 @@ class MessageService:
         Returns:
             Created message
         """
+        conversation_oid = _parse_object_id(
+            message_data.conversation_id,
+            "conversation ID",
+        )
+
         # Verify conversation exists and user is participant
         conversation = await self.db.conversations.find_one(
             {
-                "_id": ObjectId(message_data.conversation_id),
+                "_id": conversation_oid,
                 "tutor_id": tutor_id,
                 "participants": sender_id,
             }
@@ -101,17 +113,21 @@ class MessageService:
         Returns:
             Message
         """
+        message_oid = _parse_object_id(message_id, "message ID")
         message = await self.collection.find_one(
-            {"_id": ObjectId(message_id), "tutor_id": tutor_id}
+            {"_id": message_oid, "tutor_id": tutor_id}
         )
 
         if not message:
             raise NotFoundError("Message", message_id)
 
         # Verify user is participant in conversation
+        conversation_oid = _parse_object_id(
+            message["conversation_id"], "conversation ID"
+        )
         conversation = await self.db.conversations.find_one(
             {
-                "_id": ObjectId(message["conversation_id"]),
+                "_id": conversation_oid,
                 "participants": current_user_id,
             }
         )
@@ -143,10 +159,11 @@ class MessageService:
         Returns:
             Dict with messages, total, page, page_size, has_more
         """
+        conversation_oid = _parse_object_id(conversation_id, "conversation ID")
         # Verify user is participant in conversation
         conversation = await self.db.conversations.find_one(
             {
-                "_id": ObjectId(conversation_id),
+                "_id": conversation_oid,
                 "tutor_id": tutor_id,
                 "participants": current_user_id,
             }
@@ -208,9 +225,10 @@ class MessageService:
         Returns:
             Updated message
         """
+        message_oid = _parse_object_id(message_id, "message ID")
         message = await self.collection.find_one(
             {
-                "_id": ObjectId(message_id),
+                "_id": message_oid,
                 "tutor_id": tutor_id,
                 "sender_id": current_user_id,
                 "deleted": False,
@@ -233,12 +251,10 @@ class MessageService:
         if message_data.content is not None:
             update_data["content"] = message_data.content
 
-        await self.collection.update_one(
-            {"_id": ObjectId(message_id)}, {"$set": update_data}
-        )
+        await self.collection.update_one({"_id": message_oid}, {"$set": update_data})
 
         # Get updated message
-        updated_message = await self.collection.find_one({"_id": ObjectId(message_id)})
+        updated_message = await self.collection.find_one({"_id": message_oid})
         if not updated_message:
             raise NotFoundError("Message", message_id)
         updated_message["_id"] = str(updated_message["_id"])
@@ -258,9 +274,10 @@ class MessageService:
             current_user_id: Current user's Clerk ID
             tutor_id: Tutor ID for tenant isolation
         """
+        message_oid = _parse_object_id(message_id, "message ID")
         message = await self.collection.find_one(
             {
-                "_id": ObjectId(message_id),
+                "_id": message_oid,
                 "tutor_id": tutor_id,
                 "sender_id": current_user_id,
                 "deleted": False,
@@ -272,7 +289,7 @@ class MessageService:
 
         # Soft delete
         await self.collection.update_one(
-            {"_id": ObjectId(message_id)},
+            {"_id": message_oid},
             {
                 "$set": {
                     "deleted": True,
@@ -284,18 +301,22 @@ class MessageService:
 
         logger.info("Message deleted", message_id=message_id)
 
-    async def mark_as_read(self, message_id: str, user_id: str, tutor_id: str) -> None:
+    async def mark_as_read(self, message_id: str, user_id: str, tutor_id: str) -> str:
         """
-        Mark message as read by user
+        Mark message as read by user.
+
+        Returns:
+            The conversation ID that owns this message.
 
         Args:
             message_id: Message ID
             user_id: User's Clerk ID
             tutor_id: Tutor ID for tenant isolation
         """
+        message_oid = _parse_object_id(message_id, "message ID")
         message = await self.collection.find_one(
             {
-                "_id": ObjectId(message_id),
+                "_id": message_oid,
                 "tutor_id": tutor_id,
                 "deleted": False,
             }
@@ -303,9 +324,12 @@ class MessageService:
         if not message:
             raise NotFoundError("Message", message_id)
 
+        conversation_oid = _parse_object_id(
+            message["conversation_id"], "conversation ID"
+        )
         conversation = await self.db.conversations.find_one(
             {
-                "_id": ObjectId(message["conversation_id"]),
+                "_id": conversation_oid,
                 "tutor_id": tutor_id,
                 "participants": user_id,
             }
@@ -314,6 +338,8 @@ class MessageService:
             raise NotFoundError("Message", message_id)
 
         await self.collection.update_one(
-            {"_id": ObjectId(message_id), "tutor_id": tutor_id},
+            {"_id": message_oid, "tutor_id": tutor_id},
             {"$addToSet": {"read_by": user_id}},
         )
+
+        return str(message["conversation_id"])

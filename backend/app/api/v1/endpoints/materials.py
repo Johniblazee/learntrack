@@ -493,6 +493,11 @@ async def get_material(
 
         if current_user.role.value != "tutor" and not material.shared_with_students:
             raise HTTPException(status_code=403, detail="Material is private")
+        if (
+            current_user.role.value != "tutor"
+            and material.status != MaterialStatus.ACTIVE
+        ):
+            raise HTTPException(status_code=404, detail="Material not available")
 
         await material_service.increment_view_count(material_id)
         return material
@@ -609,6 +614,11 @@ async def track_download(
         )
         if current_user.role.value != "tutor" and not material.shared_with_students:
             raise HTTPException(status_code=403, detail="Material is private")
+        if (
+            current_user.role.value != "tutor"
+            and material.status != MaterialStatus.ACTIVE
+        ):
+            raise HTTPException(status_code=404, detail="Material not available")
 
         await material_service.increment_download_count(material_id)
         return {"message": "Download tracked"}

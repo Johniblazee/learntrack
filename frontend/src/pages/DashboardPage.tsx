@@ -5,6 +5,7 @@ import { useEffect, useMemo } from 'react'
 import TutorDashboard from '@/components/TutorDashboard/index'
 import StudentDashboard from '@/components/StudentDashboard'
 import ParentDashboard from '@/components/ParentDashboard'
+import AccessDeniedPage from '@/pages/AccessDeniedPage'
 import { LoadingState } from '@/components/ui/loading-state'
 import { useImpersonation } from '@/contexts/ImpersonationContext'
 import { useUserContext } from '@/contexts/UserContext'
@@ -26,42 +27,59 @@ export default function DashboardPage() {
   useNotificationSocket()
 
   const clerkRole = (user?.publicMetadata?.role || user?.unsafeMetadata?.role) as string | undefined
+  const validClerkRole = isDashboardRole(clerkRole) ? clerkRole : null
+  const validBackendRole = isDashboardRole(backendRole) ? backendRole : null
+  const validImpersonatedRole = isDashboardRole(impersonatedUser?.role)
+    ? impersonatedUser.role
+    : null
+  const hasRoleMismatch =
+    isBackendLoaded && Boolean(validBackendRole && validClerkRole && validBackendRole !== validClerkRole)
 
-  const effectiveView = useMemo<DashboardView>(() => {
-    if (isImpersonating && isDashboardRole(impersonatedUser?.role)) {
-      return impersonatedUser.role
+  const effectiveView = useMemo<DashboardView | null>(() => {
+    if (isImpersonating && validImpersonatedRole) {
+      return validImpersonatedRole
     }
 
-    if (isDashboardRole(backendRole)) {
-      return backendRole
+    if (validBackendRole) {
+      return validBackendRole
     }
 
-    if (isDashboardRole(clerkRole)) {
-      return clerkRole
+    if (!isBackendLoaded && validClerkRole) {
+      return validClerkRole
     }
 
-    return 'tutor'
-  }, [backendRole, clerkRole, impersonatedUser?.role, isImpersonating])
+    return null
+  }, [isBackendLoaded, isImpersonating, validBackendRole, validClerkRole, validImpersonatedRole])
 
   useEffect(() => {
     if (!isLoaded) {
       return
     }
 
-    if (!isBackendLoaded && !isDashboardRole(clerkRole)) {
+    if (!isBackendLoaded && !validClerkRole) {
       return
     }
 
-    if (!backendRole && !clerkRole) {
+    if (!effectiveView && !hasRoleMismatch) {
       navigate('/role-setup')
     }
-  }, [backendRole, clerkRole, isBackendLoaded, isLoaded, navigate])
+  }, [effectiveView, hasRoleMismatch, isBackendLoaded, isLoaded, navigate, validClerkRole])
 
-  if (!isLoaded || (!isBackendLoaded && !isDashboardRole(clerkRole))) {
+  if (!isLoaded || (!isBackendLoaded && !validClerkRole)) {
     return <LoadingState fullScreen message="Loading dashboard..." size="xl" />
   }
 
-  if (!backendRole && !clerkRole) {
+  if (hasRoleMismatch) {
+    return (
+      <AccessDeniedPage
+        title="Role configuration mismatch"
+        message="Your account role is out of sync. Please refresh or contact support if this persists."
+        resource="Dashboard"
+      />
+    )
+  }
+
+  if (!effectiveView) {
     return <LoadingState fullScreen message="Redirecting to role setup..." size="xl" />
   }
 
