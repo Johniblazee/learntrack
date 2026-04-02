@@ -397,9 +397,30 @@ export function useMyAssignments() {
   return useQuery({
     queryKey: ['assignments', 'my'],
     queryFn: async () => {
-      const response = await client.get('/assignments/student/me')
-      if (response.error) throw new Error(response.error)
-      return response.data?.items || response.data || []
+      const perPage = 100
+      let page = 1
+      let totalPages = 1
+      const items: any[] = []
+
+      while (page <= totalPages) {
+        const response = await client.get(
+          `/assignments/student/me?page=${page}&per_page=${perPage}`
+        )
+        if (response.error) throw new Error(response.error)
+
+        const payload = response.data as PaginatedResponse<any> | any[]
+        const pageItems = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.items)
+            ? payload.items
+            : []
+
+        items.push(...pageItems)
+        totalPages = Array.isArray(payload) ? 1 : Number(payload?.meta?.total_pages || 1)
+        page += 1
+      }
+
+      return items
     },
     staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
@@ -759,7 +780,7 @@ export function useStudentMaterials(subjectId?: string) {
 }
 
 export interface UserPreferenceSettings {
-  default_student_tab: 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
+  default_student_tab: 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library' | 'messages'
   default_parent_tab: 'overview' | 'children' | 'upcoming' | 'messages'
   show_weekend_schedule: boolean
   compact_assignment_cards: boolean

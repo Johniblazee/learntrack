@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAuth, useClerk, useUser } from "@clerk/clerk-react"
-import { useNavigate } from "react-router-dom"
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import {
   BookOpen,
   CheckCircle2,
@@ -14,12 +14,14 @@ import {
   Layers,
   LayoutDashboard,
   Library,
+  MessageCircle,
   Search,
   Sparkles,
   TrendingUp,
   Trophy,
 } from "lucide-react"
 
+import { DashboardMessagesPage } from "@/components/dashboard/DashboardMessagesPage"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -47,6 +49,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { PageShell } from "@/components/ui/page-shell"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DashboardHeaderActions } from "@/components/dashboard/DashboardHeaderActions"
 import StudentAssignmentWorkspace from "@/components/student-assignment-workspace"
@@ -68,7 +71,13 @@ import { useApiClient } from "@/lib/api-client"
 import { API_HOST } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
-type StudentNavSection = "dashboard" | "courses" | "assignments" | "grades" | "library"
+type StudentNavSection =
+  | "dashboard"
+  | "courses"
+  | "assignments"
+  | "grades"
+  | "library"
+  | "messages"
 type AssignmentFilter = "all" | "active" | "pending" | "overdue" | "completed"
 type MaterialFilter = "all" | "pdf" | "doc" | "video" | "image" | "link" | "other"
 
@@ -126,6 +135,7 @@ const NAV_LABELS: Record<StudentNavSection, string> = {
   assignments: "Assignments",
   grades: "Grades",
   library: "Library",
+  messages: "Messages",
 }
 
 const ASSIGNMENT_FILTER_LABELS: Record<AssignmentFilter, string> = {
@@ -152,6 +162,7 @@ const NAV_ITEMS: Array<{ label: string; section: StudentNavSection; icon: any }>
   { label: "Assignments", section: "assignments", icon: CheckCircle2 },
   { label: "Grades", section: "grades", icon: TrendingUp },
   { label: "Library", section: "library", icon: FolderOpen },
+  { label: "Messages", section: "messages", icon: MessageCircle },
 ]
 
 const STUDENT_SECTIONS: StudentNavSection[] = [
@@ -160,7 +171,37 @@ const STUDENT_SECTIONS: StudentNavSection[] = [
   "assignments",
   "grades",
   "library",
+  "messages",
 ]
+
+const STUDENT_SECTION_ROUTES: Record<StudentNavSection, string> = {
+  dashboard: "/dashboard",
+  courses: "/dashboard/courses",
+  assignments: "/dashboard/assignments",
+  grades: "/dashboard/grades",
+  library: "/dashboard/library",
+  messages: "/dashboard/messages",
+}
+
+function getStudentSectionFromPath(pathname: string): StudentNavSection {
+  const path = pathname.replace("/dashboard", "").replace(/^\/+/, "")
+  const [rootSegment] = path.split("/")
+
+  switch (rootSegment) {
+    case "courses":
+      return "courses"
+    case "assignments":
+      return "assignments"
+    case "grades":
+      return "grades"
+    case "library":
+      return "library"
+    case "messages":
+      return "messages"
+    default:
+      return "dashboard"
+  }
+}
 
 function normalizeAssignmentStatus(rawStatus: string, dueDate: Date | null): AssignmentStatus {
   const normalized = rawStatus.trim().toLowerCase()
@@ -412,13 +453,12 @@ export default function StudentDashboard() {
   const { user } = useUser()
   const { signOut } = useClerk()
   const { getToken } = useAuth()
+  const location = useLocation()
   const navigate = useNavigate()
   const client = useApiClient()
   const { backendUser } = useUserContext()
   const { isImpersonating } = useImpersonation()
 
-  const [activeNavSection, setActiveNavSection] = useState<StudentNavSection>("dashboard")
-  const [hasAppliedPreferredTab, setHasAppliedPreferredTab] = useState(false)
   const [assignmentSearchTerm, setAssignmentSearchTerm] = useState("")
   const [assignmentFilter, setAssignmentFilter] = useState<AssignmentFilter>("all")
   const [materialSearchTerm, setMaterialSearchTerm] = useState("")
@@ -427,12 +467,36 @@ export default function StudentDashboard() {
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null)
 
-  const { data: rawAssignments = [], isLoading: assignmentsLoading } = useMyAssignments()
-  const { data: dashboardStats, isLoading: statsLoading } = useStudentDashboardStats()
-  const { data: progressAnalytics, isLoading: analyticsLoading } = useStudentProgressAnalytics()
-  const { data: announcements = [], isLoading: announcementsLoading } = useAnnouncements()
-  const { data: activityFeed = [], isLoading: activitiesLoading } = useMyActivities(20)
-  const { data: materials = [], isLoading: materialsLoading } = useStudentMaterials()
+  const {
+    data: rawAssignments = [],
+    isLoading: assignmentsLoading,
+    error: assignmentsError,
+  } = useMyAssignments()
+  const {
+    data: dashboardStats,
+    isLoading: statsLoading,
+    error: statsError,
+  } = useStudentDashboardStats()
+  const {
+    data: progressAnalytics,
+    isLoading: analyticsLoading,
+    error: analyticsError,
+  } = useStudentProgressAnalytics()
+  const {
+    data: announcements = [],
+    isLoading: announcementsLoading,
+    error: announcementsError,
+  } = useAnnouncements()
+  const {
+    data: activityFeed = [],
+    isLoading: activitiesLoading,
+    error: activitiesError,
+  } = useMyActivities(20)
+  const {
+    data: materials = [],
+    isLoading: materialsLoading,
+    error: materialsError,
+  } = useStudentMaterials()
   const { data: userSettings, isLoading: settingsLoading } = useUserSettings()
   const markAnnouncementRead = useMarkNotificationRead()
   const markAllAnnouncementsRead = useMarkAllNotificationsRead()
@@ -459,19 +523,40 @@ export default function StudentDashboard() {
   const showWeekendSchedule = preferences.show_weekend_schedule ?? true
   const compactAssignmentCards = preferences.compact_assignment_cards ?? false
   const autoOpenNextAssignment = preferences.auto_open_next_assignment ?? false
+  const activeNavSection = useMemo(
+    () => getStudentSectionFromPath(location.pathname),
+    [location.pathname]
+  )
 
   useEffect(() => {
-    if (settingsLoading || hasAppliedPreferredTab) {
+    if (settingsLoading) {
+      return
+    }
+
+    const isBaseDashboardRoute =
+      location.pathname === "/dashboard" || location.pathname === "/dashboard/"
+
+    if (!isBaseDashboardRoute) {
       return
     }
 
     const preferred = preferences.default_student_tab
     if (preferred && STUDENT_SECTIONS.includes(preferred)) {
-      setActiveNavSection(preferred)
+      const preferredRoute = STUDENT_SECTION_ROUTES[preferred]
+      if (preferredRoute !== STUDENT_SECTION_ROUTES.dashboard) {
+        navigate(preferredRoute, { replace: true })
+      }
     }
+  }, [
+    location.pathname,
+    navigate,
+    preferences.default_student_tab,
+    settingsLoading,
+  ])
 
-    setHasAppliedPreferredTab(true)
-  }, [hasAppliedPreferredTab, preferences.default_student_tab, settingsLoading])
+  useEffect(() => {
+    contentScrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
+  }, [activeNavSection])
 
   const assignments = useMemo(
     () => toAssignmentCards(Array.isArray(rawAssignments) ? (rawAssignments as any[]) : []),
@@ -765,14 +850,34 @@ export default function StudentDashboard() {
     : []
 
   const assignmentCardSpacingClass = compactAssignmentCards ? "space-y-3 p-4" : "space-y-4 p-5"
+  const assignmentsErrorMessage =
+    assignmentsError instanceof Error ? assignmentsError.message : null
+  const statsErrorMessage = statsError instanceof Error ? statsError.message : null
+  const analyticsErrorMessage =
+    analyticsError instanceof Error ? analyticsError.message : null
+  const announcementsErrorMessage =
+    announcementsError instanceof Error ? announcementsError.message : null
+  const activitiesErrorMessage =
+    activitiesError instanceof Error ? activitiesError.message : null
+  const materialsErrorMessage = materialsError instanceof Error ? materialsError.message : null
+
+  const renderErrorCard = (title: string, message: string) => {
+    return (
+      <Card className="border-destructive/30 bg-destructive/5 shadow-sm">
+        <CardContent className="space-y-2 p-6">
+          <p className="font-semibold text-foreground">{title}</p>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </CardContent>
+      </Card>
+    )
+  }
 
   const handleSectionChange = (section: StudentNavSection) => {
-    setActiveNavSection(section)
-    contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+    navigate(STUDENT_SECTION_ROUTES[section])
   }
 
   const handleStartAssignment = (assignment: AssignmentCardData) => {
-    setActiveNavSection("assignments")
+    navigate(STUDENT_SECTION_ROUTES.assignments)
     setActiveAssignmentId(assignment.id)
   }
 
@@ -844,6 +949,8 @@ export default function StudentDashboard() {
   }
 
   const renderDashboardPage = () => {
+    const dashboardInsightError = statsErrorMessage || analyticsErrorMessage
+
     return (
       <div className="space-y-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -869,71 +976,75 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card className="border-0 bg-card shadow-sm">
-            <CardContent className="flex items-center justify-between p-5">
-              <div>
-                <p className="text-sm text-muted-foreground">Overall GPA</p>
-                <p className="mt-1 text-3xl font-bold text-primary">
-                  {statsLoading ? <Skeleton className="h-8 w-14" /> : gpa}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">Current grade: {dashboardStats?.current_grade || "--"}</p>
-              </div>
-              <div className="rounded-full border-4 border-primary/20 p-3">
-                <Trophy className="h-6 w-6 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
+        {dashboardInsightError ? (
+          renderErrorCard("Dashboard insights unavailable", dashboardInsightError)
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Card className="border-0 bg-card shadow-sm">
+              <CardContent className="flex items-center justify-between p-5">
+                <div>
+                  <p className="text-sm text-muted-foreground">Overall GPA</p>
+                  <p className="mt-1 text-3xl font-bold text-primary">
+                    {statsLoading ? <Skeleton className="h-8 w-14" /> : gpa}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">Current grade: {dashboardStats?.current_grade || "--"}</p>
+                </div>
+                <div className="rounded-full border-4 border-primary/20 p-3">
+                  <Trophy className="h-6 w-6 text-primary" />
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card className="border-0 bg-card shadow-sm">
-            <CardContent className="flex items-center justify-between p-5">
-              <div>
-                <p className="text-sm text-muted-foreground">Completion</p>
-                <p className="mt-1 text-3xl font-bold">
-                  {statsLoading ? <Skeleton className="h-8 w-12" /> : `${completionRate}%`}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {completedAssignments}/{totalAssignments} assignments completed
-                </p>
-              </div>
-              <div className="rounded-full border-4 border-primary/20 p-3">
-                <CheckCircle2 className="h-6 w-6 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="border-0 bg-card shadow-sm">
+              <CardContent className="flex items-center justify-between p-5">
+                <div>
+                  <p className="text-sm text-muted-foreground">Completion</p>
+                  <p className="mt-1 text-3xl font-bold">
+                    {statsLoading ? <Skeleton className="h-8 w-12" /> : `${completionRate}%`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {completedAssignments}/{totalAssignments} assignments completed
+                  </p>
+                </div>
+                <div className="rounded-full border-4 border-primary/20 p-3">
+                  <CheckCircle2 className="h-6 w-6 text-primary" />
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card className="border-0 bg-card shadow-sm">
-            <CardContent className="flex items-center justify-between p-5">
-              <div>
-                <p className="text-sm text-muted-foreground">Pending Work</p>
-                <p className="mt-1 text-3xl font-bold">
-                  {statsLoading ? <Skeleton className="h-8 w-10" /> : pendingAssignments}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">Not yet submitted</p>
-              </div>
-              <div className="rounded-full bg-primary/10 p-3">
-                <Clock3 className="h-6 w-6 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="border-0 bg-card shadow-sm">
+              <CardContent className="flex items-center justify-between p-5">
+                <div>
+                  <p className="text-sm text-muted-foreground">Pending Work</p>
+                  <p className="mt-1 text-3xl font-bold">
+                    {statsLoading ? <Skeleton className="h-8 w-10" /> : pendingAssignments}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">Not yet submitted</p>
+                </div>
+                <div className="rounded-full bg-primary/10 p-3">
+                  <Clock3 className="h-6 w-6 text-primary" />
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card className="border-0 bg-card shadow-sm">
-            <CardContent className="flex items-center justify-between p-5">
-              <div>
-                <p className="text-sm text-muted-foreground">Average Score</p>
-                <p className="mt-1 text-3xl font-bold">
-                  {analyticsLoading ? <Skeleton className="h-8 w-14" /> : `${Math.round(averageScore || 0)}%`}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Study time: {formatMinutesToDuration(progressAnalytics?.total_time_spent || 0)}
-                </p>
-              </div>
-              <div className="rounded-full bg-primary/10 p-3">
-                <TrendingUp className="h-6 w-6 text-primary" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            <Card className="border-0 bg-card shadow-sm">
+              <CardContent className="flex items-center justify-between p-5">
+                <div>
+                  <p className="text-sm text-muted-foreground">Average Score</p>
+                  <p className="mt-1 text-3xl font-bold">
+                    {analyticsLoading ? <Skeleton className="h-8 w-14" /> : `${Math.round(averageScore || 0)}%`}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Study time: {formatMinutesToDuration(progressAnalytics?.total_time_spent || 0)}
+                  </p>
+                </div>
+                <div className="rounded-full bg-primary/10 p-3">
+                  <TrendingUp className="h-6 w-6 text-primary" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
           <div className="space-y-8 xl:col-span-2">
@@ -943,7 +1054,9 @@ export default function StudentDashboard() {
                 <Button variant="ghost" size="sm" className="text-primary" onClick={() => handleSectionChange("assignments")}>Open all</Button>
               </div>
 
-              {assignmentsLoading ? (
+              {assignmentsErrorMessage ? (
+                renderErrorCard("Unable to load assignments", assignmentsErrorMessage)
+              ) : assignmentsLoading ? (
                 <Card className="border-0 bg-card shadow-sm">
                   <CardContent className="space-y-3 p-5">
                     <Skeleton className="h-5 w-48" />
@@ -1041,7 +1154,9 @@ export default function StudentDashboard() {
               <h2 className="mb-4 text-xl font-semibold">Recent Activity</h2>
               <Card className="border-0 bg-card shadow-sm">
                 <CardContent className="p-5">
-                  {activitiesLoading ? (
+                  {activitiesErrorMessage ? (
+                    renderErrorCard("Unable to load recent activity", activitiesErrorMessage)
+                  ) : activitiesLoading ? (
                     <div className="space-y-4">
                       {Array.from({ length: 3 }).map((_, index) => (
                         <div key={index} className="space-y-2">
@@ -1099,7 +1214,9 @@ export default function StudentDashboard() {
               </div>
               <Card className="border-0 bg-card shadow-sm">
                 <CardContent className="space-y-4 p-5">
-                  {announcementsLoading ? (
+                  {announcementsErrorMessage ? (
+                    renderErrorCard("Unable to load announcements", announcementsErrorMessage)
+                  ) : announcementsLoading ? (
                     Array.from({ length: 2 }).map((_, index) => (
                       <div key={index} className="space-y-2">
                         <Skeleton className="h-4 w-32" />
@@ -1139,6 +1256,10 @@ export default function StudentDashboard() {
   }
 
   const renderCoursesPage = () => {
+    if (assignmentsErrorMessage) {
+      return renderErrorCard("Unable to load courses", assignmentsErrorMessage)
+    }
+
     return (
       <div className="space-y-6">
         <div>
@@ -1207,6 +1328,10 @@ export default function StudentDashboard() {
   }
 
   const renderAssignmentsPage = () => {
+    if (assignmentsErrorMessage) {
+      return renderErrorCard("Unable to load assignments", assignmentsErrorMessage)
+    }
+
     return (
       <div className="space-y-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -1333,6 +1458,11 @@ export default function StudentDashboard() {
   }
 
   const renderGradesPage = () => {
+    const gradesErrorMessage = statsErrorMessage || analyticsErrorMessage
+    if (gradesErrorMessage) {
+      return renderErrorCard("Unable to load grades and performance", gradesErrorMessage)
+    }
+
     return (
       <div className="space-y-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -1513,6 +1643,10 @@ export default function StudentDashboard() {
   }
 
   const renderLibraryPage = () => {
+    if (materialsErrorMessage) {
+      return renderErrorCard("Unable to load your library", materialsErrorMessage)
+    }
+
     return (
       <div className="space-y-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -1531,20 +1665,17 @@ export default function StudentDashboard() {
                 placeholder="Search resources"
               />
             </div>
-            <div className="relative sm:w-40">
-              <Filter className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <select
-                value={materialFilter}
-                onChange={(event) => setMaterialFilter(event.target.value as MaterialFilter)}
-                className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm"
-              >
+            <Select value={materialFilter} onValueChange={(value) => setMaterialFilter(value as MaterialFilter)}>
+              <SelectTrigger className="sm:w-40">
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
                 {Object.entries(MATERIAL_FILTER_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
                 ))}
-              </select>
-            </div>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -1643,21 +1774,13 @@ export default function StudentDashboard() {
     )
   }
 
-  const renderActivePage = () => {
-    switch (activeNavSection) {
-      case "dashboard":
-        return renderDashboardPage()
-      case "courses":
-        return renderCoursesPage()
-      case "assignments":
-        return renderAssignmentsPage()
-      case "grades":
-        return renderGradesPage()
-      case "library":
-        return renderLibraryPage()
-      default:
-        return renderDashboardPage()
-    }
+  const renderMessagesPage = () => {
+    return (
+      <DashboardMessagesPage
+        title="Messages"
+        description="Stay in sync with your tutor and family support team."
+      />
+    )
   }
 
   return (
@@ -1703,7 +1826,7 @@ export default function StudentDashboard() {
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#" onClick={() => navigate("/dashboard")}>LearnTrack</BreadcrumbLink>
+                  <BreadcrumbLink href="#" onClick={() => navigate(STUDENT_SECTION_ROUTES.dashboard)}>LearnTrack</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
@@ -1726,9 +1849,19 @@ export default function StudentDashboard() {
 
         <div className="flex flex-1 flex-col gap-4 bg-background p-4">
           <div ref={contentScrollRef} className="flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-7xl space-y-6 px-4 py-4 sm:px-6 sm:py-6">
-              {renderActivePage()}
-            </div>
+            <PageShell>
+              <Routes>
+                <Route index element={renderDashboardPage()} />
+                <Route path="courses" element={renderCoursesPage()} />
+                <Route path="assignments" element={renderAssignmentsPage()} />
+                <Route path="grades" element={renderGradesPage()} />
+                <Route path="library" element={renderLibraryPage()} />
+                <Route path="messages" element={renderMessagesPage()} />
+                <Route path="messages/chats" element={<Navigate to="/dashboard/messages?mode=chat" replace />} />
+                <Route path="messages/emails" element={<Navigate to="/dashboard/messages?mode=email" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </PageShell>
           </div>
         </div>
       </SidebarInset>

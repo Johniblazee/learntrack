@@ -293,6 +293,26 @@ class MessageService:
             user_id: User's Clerk ID
             tutor_id: Tutor ID for tenant isolation
         """
+        message = await self.collection.find_one(
+            {
+                "_id": ObjectId(message_id),
+                "tutor_id": tutor_id,
+                "deleted": False,
+            }
+        )
+        if not message:
+            raise NotFoundError("Message", message_id)
+
+        conversation = await self.db.conversations.find_one(
+            {
+                "_id": ObjectId(message["conversation_id"]),
+                "tutor_id": tutor_id,
+                "participants": user_id,
+            }
+        )
+        if not conversation:
+            raise NotFoundError("Message", message_id)
+
         await self.collection.update_one(
             {"_id": ObjectId(message_id), "tutor_id": tutor_id},
             {"$addToSet": {"read_by": user_id}},

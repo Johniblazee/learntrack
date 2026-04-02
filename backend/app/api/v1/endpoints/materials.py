@@ -19,6 +19,7 @@ from app.core.database import get_database
 from app.core.enhanced_auth import (
     ClerkUserContext,
     require_authenticated_user,
+    require_student,
     require_tutor,
 )
 from app.core.exceptions import NotFoundError, ValidationError
@@ -33,7 +34,10 @@ from app.models.material import (
 )
 from app.models.file import EmbeddingStatus, FileStatus, SyncStatus
 from app.services.material_service import MaterialService
-from app.services.r2_storage_service import generate_presigned_url, upload_file as r2_upload
+from app.services.r2_storage_service import (
+    generate_presigned_url,
+    upload_file as r2_upload,
+)
 from app.utils.pagination import PaginatedResponse, paginate
 
 logger = structlog.get_logger()
@@ -282,7 +286,7 @@ async def delete_material_folder(
 @router.get("/student", response_model=List[Material])
 async def get_materials_for_student(
     subject_id: Optional[str] = Query(None, description="Filter by subject ID"),
-    current_user: ClerkUserContext = Depends(require_authenticated_user),
+    current_user: ClerkUserContext = Depends(require_student),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get materials accessible to students."""

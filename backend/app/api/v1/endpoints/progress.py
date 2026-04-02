@@ -274,7 +274,10 @@ async def get_parent_progress_view(
     """Get progress view for parent's children"""
     try:
         progress_service = ProgressService(database)
-        return await progress_service.get_parent_progress_view(current_user.clerk_id)
+        return await progress_service.get_parent_progress_view(
+            current_user.clerk_id,
+            parent_tutor_id=current_user.tutor_id,
+        )
     except Exception as e:
         logger.error("Failed to get parent progress view", error=str(e))
         raise HTTPException(

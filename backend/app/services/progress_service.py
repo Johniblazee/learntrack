@@ -428,119 +428,153 @@ class ProgressService:
             raise DatabaseException(f"Failed to get assignment progress: {str(e)}")
 
     async def get_student_analytics(self, student_id: str) -> ProgressAnalytics:
-        """Get progress analytics for a student using optimized aggregation queries"""
+        """Get progress analytics for a student using assignments as the source of truth."""
         try:
-            # Use aggregation pipeline with $lookup to get all data in fewer queries
-            # This eliminates N+1 query problem by joining progress with assignments and subjects
-            pipeline = [
-                {"$match": {"student_id": student_id}},
-                # Convert assignment_id string to ObjectId for lookup (use $convert with onError)
+            max_limit = getattr(settings, "PROGRESS_AGG_LIMIT", 500)
+            assignment_docs = await self.db.assignments.find(
                 {
-                    "$addFields": {
-                        "assignment_oid": {
-                            "$convert": {
-                                "input": "$assignment_id",
-                                "to": "objectId",
-                                "onError": None,
-                            }
-                        }
-                    }
-                },
-                # Lookup assignment details
-                {
-                    "$lookup": {
-                        "from": "assignments",
-                        "localField": "assignment_oid",
-                        "foreignField": "_id",
-                        "as": "assignment_info",
-                    }
-                },
-                {
-                    "$unwind": {
-                        "path": "$assignment_info",
-                        "preserveNullAndEmptyArrays": True,
-                    }
-                },
-                # Lookup subject details
-                {
-                    "$lookup": {
-                        "from": "subjects",
-                        "localField": "assignment_info.subject_id",
-                        "foreignField": "_id",
-                        "as": "subject_info",
-                    }
-                },
-                {
-                    "$unwind": {
-                        "path": "$subject_info",
-                        "preserveNullAndEmptyArrays": True,
-                    }
-                },
-                # Project needed fields
-                {
-                    "$project": {
-                        "student_id": 1,
-                        "assignment_id": 1,
-                        "status": 1,
-                        "score": 1,
-                        "time_spent": 1,
-                        "created_at": 1,
-                        "submitted_at": 1,
-                        "updated_at": 1,
-                        "assignment_title": "$assignment_info.title",
-                        "subject_name": {"$ifNull": ["$subject_info.name", "Unknown"]},
-                    }
-                },
+                    "student_ids": student_id,
+                    "status": {"$ne": "draft"},
+                }
+            ).to_list(length=max_limit)
+
+            assignment_ids = [
+                str(assignment.get("_id"))
+                for assignment in assignment_docs
+                if assignment.get("_id")
             ]
 
-            # Execute aggregation (single query replaces N+1 queries)
-            # Allow a configurable maximum and detect truncation by requesting one extra
-            max_limit = getattr(settings, "PROGRESS_AGG_LIMIT", 500)
-            progress_records = await self.collection.aggregate(pipeline).to_list(
-                length=max_limit + 1
-            )
+            progress_docs: List[Dict[str, Any]] = []
+            if assignment_ids:
+                progress_docs = await self.collection.find(
+                    {
+                        "student_id": student_id,
+                        "assignment_id": {"$in": assignment_ids},
+                    }
+                ).to_list(length=len(assignment_ids))
 
-            # Detect truncation
-            was_truncated = len(progress_records) > max_limit
-            if was_truncated:
-                logger.warning(
-                    "Progress aggregation results truncated",
-                    requested_limit=max_limit,
-                    returned=max_limit + 1,
-                )
-                progress_records = progress_records[:max_limit]
-
-            # Calculate basic analytics from fetched records
-            total_assignments = len(progress_records)
-            subject_by_assignment_id = {
-                str(progress.get("assignment_id") or ""): progress.get(
-                    "subject_name", "Unknown"
-                )
-                for progress in progress_records
+            progress_by_assignment_id = {
+                str(progress.get("assignment_id")): progress
+                for progress in progress_docs
                 if progress.get("assignment_id")
             }
-            completed_assignments = len(
-                [p for p in progress_records if _is_completed_status(p.get("status"))]
-            )
-            pending_assignments = total_assignments - completed_assignments
 
-            # Calculate average score
+            subject_object_ids: List[ObjectId] = []
+            subject_name_by_string_id: Dict[str, str] = {}
+            for assignment in assignment_docs:
+                subject_raw = assignment.get("subject_id")
+                if isinstance(subject_raw, ObjectId):
+                    subject_object_ids.append(subject_raw)
+                elif isinstance(subject_raw, str):
+                    try:
+                        converted_subject_id = to_object_id(subject_raw)
+                        if isinstance(converted_subject_id, ObjectId):
+                            subject_object_ids.append(converted_subject_id)
+                    except Exception:
+                        subject_name_by_string_id[subject_raw] = subject_raw
+
+            subject_docs = []
+            if subject_object_ids:
+                subject_docs = await self.db.subjects.find(
+                    {"_id": {"$in": list(set(subject_object_ids))}},
+                    {"name": 1},
+                ).to_list(length=len(subject_object_ids))
+
+            subject_name_map = {
+                str(subject.get("_id")): subject.get("name", "General")
+                for subject in subject_docs
+                if subject.get("_id")
+            }
+
+            progress_records: List[Dict[str, Any]] = []
+            subject_by_assignment_id: Dict[str, str] = {}
+            now = datetime.now(timezone.utc)
+
+            for assignment in assignment_docs:
+                assignment_id = str(assignment.get("_id") or "")
+                if not assignment_id:
+                    continue
+
+                progress_doc = progress_by_assignment_id.get(assignment_id)
+                subject_raw = assignment.get("subject_id")
+                subject_key = str(subject_raw) if subject_raw is not None else ""
+                subject_name = subject_name_map.get(
+                    subject_key,
+                    subject_name_by_string_id.get(subject_key, "Unknown"),
+                )
+                due_date = assignment.get("due_date")
+
+                progress_record = {
+                    "assignment_id": assignment_id,
+                    "status": progress_doc.get("status") if progress_doc else "pending",
+                    "score": progress_doc.get("score") if progress_doc else None,
+                    "time_spent": progress_doc.get("time_spent", 0)
+                    if progress_doc
+                    else 0,
+                    "created_at": (
+                        progress_doc.get("created_at")
+                        if progress_doc
+                        else assignment.get("created_at")
+                    ),
+                    "submitted_at": progress_doc.get("submitted_at")
+                    if progress_doc
+                    else None,
+                    "updated_at": (
+                        progress_doc.get("updated_at")
+                        if progress_doc
+                        else assignment.get("updated_at")
+                    ),
+                    "assignment_title": assignment.get("title", "Assignment"),
+                    "subject_name": subject_name,
+                    "due_date": due_date,
+                    "assignment_status": assignment.get("status"),
+                }
+                progress_records.append(progress_record)
+                subject_by_assignment_id[assignment_id] = subject_name
+
+            total_assignments = len(progress_records)
+            completed_assignments = len(
+                [
+                    record
+                    for record in progress_records
+                    if _is_completed_status(record.get("status"))
+                ]
+            )
+            pending_assignments = len(
+                [
+                    record
+                    for record in progress_records
+                    if not _is_completed_status(record.get("status"))
+                    and str(record.get("assignment_status") or "") != "archived"
+                ]
+            )
+            overdue_assignments = len(
+                [
+                    record
+                    for record in progress_records
+                    if not _is_completed_status(record.get("status"))
+                    and str(record.get("assignment_status") or "") != "archived"
+                    and isinstance(record.get("due_date"), datetime)
+                    and _ensure_utc_datetime(record.get("due_date")) < now
+                ]
+            )
+
             scores = [
-                p.get("score", 0)
-                for p in progress_records
-                if p.get("score") is not None
+                float(record.get("score"))
+                for record in progress_records
+                if record.get("score") is not None
+                and _is_completed_status(record.get("status"))
             ]
             average_score = round(sum(scores) / len(scores), 1) if scores else None
-
-            # Calculate total time spent
-            total_time = sum(p.get("time_spent", 0) or 0 for p in progress_records)
+            total_time = sum(
+                record.get("time_spent", 0) or 0 for record in progress_records
+            )
 
             subject_performance = _build_subject_performance_rows(
                 progress_records,
                 subject_by_assignment_id,
             )
 
-            # Helper function to ensure datetime is timezone-aware for comparison
             def ensure_tz_aware(dt) -> Optional[datetime]:
                 if dt is None:
                     return None
@@ -550,32 +584,30 @@ class ProgressService:
                     return dt.replace(tzinfo=timezone.utc)
                 return dt
 
-            # Use timezone-aware datetime.min to avoid comparison errors with database datetimes
             min_datetime = datetime.min.replace(tzinfo=timezone.utc)
-
-            # Get recent submissions (last 5 completed) - data already fetched
             completed_records = [
-                p for p in progress_records if _is_completed_status(p.get("status"))
+                record
+                for record in progress_records
+                if _is_completed_status(record.get("status"))
             ]
             completed_records.sort(
-                key=lambda x: ensure_tz_aware(x.get("submitted_at"))
-                or ensure_tz_aware(x.get("updated_at"))
-                or min_datetime,
+                key=lambda record: (
+                    ensure_tz_aware(record.get("submitted_at"))
+                    or ensure_tz_aware(record.get("updated_at"))
+                    or min_datetime
+                ),
                 reverse=True,
             )
 
-            recent_submissions = []
-            for progress in completed_records[:5]:
-                recent_submissions.append(
-                    {
-                        "assignment_title": progress.get(
-                            "assignment_title", "Assignment"
-                        ),
-                        "subject": progress.get("subject_name", "Unknown"),
-                        "score": progress.get("score", 0),
-                        "submitted_at": progress.get("submitted_at"),
-                    }
-                )
+            recent_submissions = [
+                {
+                    "assignment_title": record.get("assignment_title", "Assignment"),
+                    "subject": record.get("subject_name", "Unknown"),
+                    "score": record.get("score", 0),
+                    "submitted_at": record.get("submitted_at"),
+                }
+                for record in completed_records[:5]
+            ]
 
             weekly_progress = [
                 row.model_dump()
@@ -586,19 +618,17 @@ class ProgressService:
                 )
             ]
 
-            analytics = ProgressAnalytics(
+            return ProgressAnalytics(
                 total_assignments=total_assignments,
                 completed_assignments=completed_assignments,
                 pending_assignments=pending_assignments,
-                overdue_assignments=0,
+                overdue_assignments=overdue_assignments,
                 average_score=average_score,
-                total_time_spent=total_time // 60,  # Convert to minutes
+                total_time_spent=total_time // 60,
                 subject_performance=subject_performance,
                 recent_submissions=recent_submissions,
                 weekly_progress=weekly_progress,
             )
-
-            return analytics
 
         except Exception as e:
             logger.error(
@@ -607,7 +637,7 @@ class ProgressService:
             raise DatabaseException(f"Failed to get student analytics: {str(e)}")
 
     async def get_parent_progress_view(
-        self, parent_id: str
+        self, parent_id: str, parent_tutor_id: Optional[str] = None
     ) -> List[ParentProgressView]:
         """Get progress view for parent's children"""
         try:
@@ -619,9 +649,14 @@ class ProgressService:
             if not child_ids:
                 return []
 
-            students = await self.db.students.find(
-                {"clerk_id": {"$in": child_ids}}
-            ).to_list(length=len(child_ids))
+            expected_tutor_id = parent_tutor_id or parent.get("tutor_id")
+            student_query: Dict[str, Any] = {"clerk_id": {"$in": child_ids}}
+            if expected_tutor_id:
+                student_query["tutor_id"] = expected_tutor_id
+
+            students = await self.db.students.find(student_query).to_list(
+                length=len(child_ids)
+            )
             students_by_id = {
                 student.get("clerk_id"): student for student in students if student
             }
@@ -639,11 +674,21 @@ class ProgressService:
                 if not child:
                     continue
 
+                child_parent_ids = child.get("parent_ids") or []
+                if child_parent_ids and parent_id not in child_parent_ids:
+                    continue
+
+                child_tutor_id = child.get("tutor_id") or expected_tutor_id
+
                 analytics = await self.get_student_analytics(child_id)
 
                 # Fetch recent progress attempts for this child
+                progress_query: Dict[str, Any] = {"student_id": child_id}
+                if child_tutor_id:
+                    progress_query["tutor_id"] = child_tutor_id
+
                 progress_docs = (
-                    await self.collection.find({"student_id": child_id})
+                    await self.collection.find(progress_query)
                     .sort("updated_at", -1)
                     .limit(20)
                     .to_list(length=20)
@@ -666,8 +711,13 @@ class ProgressService:
 
                 assignments = []
                 if assignment_object_ids:
+                    assignment_query: Dict[str, Any] = {
+                        "_id": {"$in": assignment_object_ids}
+                    }
+                    if child_tutor_id:
+                        assignment_query["tutor_id"] = child_tutor_id
                     assignments = await self.db.assignments.find(
-                        {"_id": {"$in": assignment_object_ids}}
+                        assignment_query
                     ).to_list(length=len(assignment_object_ids))
                 assignments_by_id = {
                     str(assignment.get("_id")): assignment
@@ -739,14 +789,16 @@ class ProgressService:
                 recent_assignments = recent_assignments[:5]
 
                 # Fetch upcoming assignments for this child
+                upcoming_assignment_query: Dict[str, Any] = {
+                    "student_ids": child_id,
+                    "due_date": {"$ne": None},
+                    "status": {"$nin": ["archived", "completed"]},
+                }
+                if child_tutor_id:
+                    upcoming_assignment_query["tutor_id"] = child_tutor_id
+
                 upcoming_assignment_docs = (
-                    await self.db.assignments.find(
-                        {
-                            "student_ids": child_id,
-                            "due_date": {"$ne": None, "$gte": now},
-                            "status": {"$nin": ["archived", "completed"]},
-                        }
-                    )
+                    await self.db.assignments.find(upcoming_assignment_query)
                     .sort("due_date", 1)
                     .limit(10)
                     .to_list(length=10)
@@ -759,11 +811,15 @@ class ProgressService:
                 ]
                 upcoming_progress_docs = []
                 if upcoming_assignment_ids:
+                    upcoming_progress_query: Dict[str, Any] = {
+                        "student_id": child_id,
+                        "assignment_id": {"$in": upcoming_assignment_ids},
+                    }
+                    if child_tutor_id:
+                        upcoming_progress_query["tutor_id"] = child_tutor_id
+
                     upcoming_progress_docs = await self.collection.find(
-                        {
-                            "student_id": child_id,
-                            "assignment_id": {"$in": upcoming_assignment_ids},
-                        }
+                        upcoming_progress_query
                     ).to_list(length=len(upcoming_assignment_ids))
 
                 upcoming_progress_map = {
@@ -786,12 +842,14 @@ class ProgressService:
 
                     due_date = _ensure_utc_datetime(upcoming.get("due_date"), now)
                     upcoming_subject_key = str(upcoming.get("subject_id", ""))
+                    is_overdue = due_date < now
 
                     upcoming_assignments.append(
                         {
                             "title": upcoming.get("title", "Untitled Assignment"),
                             "due_date": due_date.isoformat(),
                             "subject": subject_map.get(upcoming_subject_key, "Unknown"),
+                            "is_overdue": is_overdue,
                         }
                     )
 

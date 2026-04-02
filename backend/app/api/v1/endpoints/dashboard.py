@@ -11,11 +11,13 @@ from bson import ObjectId
 
 from app.core.database import get_database
 from app.core.enhanced_auth import (
+    require_parent,
     require_tutor,
-    require_authenticated_user,
+    require_student,
     ClerkUserContext,
 )
 from pydantic import BaseModel
+from app.services.assignment_service import AssignmentService
 from app.services.progress_service import _is_completed_status
 
 logger = structlog.get_logger()
@@ -857,38 +859,44 @@ async def get_progress_chart(
 
 @router.get("/student-stats")
 async def get_student_dashboard_stats(
-    current_user: ClerkUserContext = Depends(require_authenticated_user),
+    current_user: ClerkUserContext = Depends(require_student),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get dashboard statistics for student"""
     try:
-        # Get student's assignments
-        assignments = await database.assignments.find(
-            {"student_ids": current_user.clerk_id}
-        ).to_list(length=100)
+        assignment_service = AssignmentService(database)
+        assignment_result = await assignment_service.get_student_assignment_summaries(
+            student_id=current_user.clerk_id,
+            tutor_id=current_user.tutor_id or current_user.clerk_id,
+            page=1,
+            per_page=1000,
+        )
+        assignments = assignment_result.get("items", [])
 
-        # Get student's progress
-        progress_records = await database.progress.find(
-            {"student_id": current_user.clerk_id}
-        ).to_list(length=100)
-
-        # Calculate stats
         total_assignments = len(assignments)
         completed = len(
             [
-                p
-                for p in progress_records
-                if _is_completed_status(str(p.get("status") or ""))
+                assignment
+                for assignment in assignments
+                if str(getattr(assignment, "status", "") or "")
+                in COMPLETED_PROGRESS_STATUSES
             ]
         )
-        pending = total_assignments - completed
+        pending = len(
+            [
+                assignment
+                for assignment in assignments
+                if str(getattr(assignment, "status", "") or "")
+                not in COMPLETED_PROGRESS_STATUSES.union({"archived"})
+            ]
+        )
 
-        # Calculate average score
         completed_scores = [
-            p.get("score", 0)
-            for p in progress_records
-            if _is_completed_status(str(p.get("status") or ""))
-            and p.get("score") is not None
+            getattr(assignment, "best_score", None)
+            for assignment in assignments
+            if str(getattr(assignment, "status", "") or "")
+            in COMPLETED_PROGRESS_STATUSES
+            and getattr(assignment, "best_score", None) is not None
         ]
         avg_score = (
             round(sum(completed_scores) / len(completed_scores), 1)
@@ -912,7 +920,7 @@ async def get_student_dashboard_stats(
 
 @router.get("/parent-stats")
 async def get_parent_dashboard_stats(
-    current_user: ClerkUserContext = Depends(require_authenticated_user),
+    current_user: ClerkUserContext = Depends(require_parent),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get dashboard statistics for parent"""
@@ -921,7 +929,8 @@ async def get_parent_dashboard_stats(
 
         progress_service = ProgressService(database)
         parent_views = await progress_service.get_parent_progress_view(
-            current_user.clerk_id
+            current_user.clerk_id,
+            parent_tutor_id=current_user.tutor_id,
         )
         student_docs = await database.students.find(
             {"clerk_id": {"$in": [view.child_id for view in parent_views]}},
@@ -938,12 +947,21 @@ async def get_parent_dashboard_stats(
         children = []
         for view in parent_views:
             avg_score = view.analytics.average_score or 0
+            total_assignments = max(view.analytics.total_assignments, 0)
+            completed_assignments = min(
+                view.analytics.completed_assignments, total_assignments
+            )
+            completion_rate = (
+                round((completed_assignments / total_assignments) * 100)
+                if total_assignments > 0
+                else 0
+            )
             children.append(
                 {
                     "id": view.child_id,
                     "name": view.child_name,
                     "grade": grade_by_child_id.get(view.child_id),
-                    "overall_progress": round(avg_score, 1),
+                    "overall_progress": completion_rate,
                     "recent_grade": _grade_label(avg_score),
                     "assignments_due": len(view.upcoming_assignments),
                 }

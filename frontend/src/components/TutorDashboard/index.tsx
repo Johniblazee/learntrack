@@ -1,7 +1,7 @@
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
-import { useNavigate, useLocation, Routes, Route, Navigate } from "react-router-dom"
+import { useNavigate, useLocation, Routes, Route, Navigate, useSearchParams } from "react-router-dom"
 import { useClerk, useUser } from "@clerk/clerk-react"
 import { AppSidebar } from "./AppSidebar"
 import { DashboardHeaderActions } from "@/components/dashboard/DashboardHeaderActions"
@@ -25,6 +25,13 @@ import { useImpersonation } from "@/contexts/ImpersonationContext"
 
 interface TutorDashboardProps {
   onBack?: () => void
+}
+
+function MessagesModeRedirect() {
+  const [searchParams] = useSearchParams()
+  const mode = searchParams.get("mode") === "email" ? "emails" : "chats"
+
+  return <Navigate to={`/dashboard/messages/${mode}`} replace />
 }
 
 export default function TutorDashboard({ onBack }: TutorDashboardProps) {
@@ -77,6 +84,7 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
       'assignments/create': 'create-new',
       'assignments/templates': 'templates',
       'assignments/grading': 'grading',
+      'messages': 'chats',
       'messages/chats': 'chats',
       'messages/emails': 'emails',
     }
@@ -233,6 +241,7 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
             <Route path="assignments/grading" element={<GradingView />} />
 
             {/* Messages routes */}
+            <Route path="messages" element={<MessagesModeRedirect />} />
             <Route path="messages/chats" element={<ConversationsView routeMode="chats" />} />
             <Route path="messages/emails" element={<ConversationsView routeMode="emails" />} />
 
@@ -244,4 +253,3 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
     </SidebarProvider>
   )
 }
-

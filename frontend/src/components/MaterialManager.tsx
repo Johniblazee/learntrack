@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/config'
+import { useSubjects } from '@/hooks/useQueries'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,8 @@ export default function MaterialManager() {
 
   // Core data
   const [materials, setMaterials] = useState<Material[]>([])
-  const [subjects, setSubjects] = useState<Subject[]>([])
+  const { data: subjectsData } = useSubjects()
+  const subjects: Subject[] = (subjectsData as any) || []
   const [folders, setFolders] = useState<MaterialFolder[]>([])
   const [allFolders, setAllFolders] = useState<MaterialFolder[]>([])
   const [loading, setLoading] = useState(true)
@@ -284,19 +286,7 @@ export default function MaterialManager() {
     }
   }
 
-  const fetchSubjects = async () => {
-    try {
-      const token = await getToken()
-      const res = await fetch(`${API_BASE_URL}/subjects/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.ok) setSubjects(await res.json())
-    } catch (err) {
-      console.error('Failed to fetch subjects:', err)
-    }
-  }
-
-  const fetchFoldersForParent = async (parentId: string | null) => {
+const fetchFoldersForParent = async (parentId: string | null) => {
     try {
       setFoldersLoading(true)
       const token = await getToken()
@@ -334,7 +324,6 @@ export default function MaterialManager() {
 
   useEffect(() => {
     fetchMaterials()
-    fetchSubjects()
   }, [])
 
   useEffect(() => {

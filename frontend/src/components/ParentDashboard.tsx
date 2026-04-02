@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useClerk, useUser } from '@clerk/clerk-react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   BookOpen,
   CalendarClock,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
+import { DashboardMessagesPage } from '@/components/dashboard/DashboardMessagesPage'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -23,6 +24,7 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageShell } from '@/components/ui/page-shell'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -38,9 +40,8 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DashboardHeaderActions } from '@/components/dashboard/DashboardHeaderActions'
-import ConversationsView from '@/components/TutorDashboard/views/ConversationsView'
 import {
   useParentDashboardStats,
   useParentProgress,
@@ -51,11 +52,35 @@ import { useUserContext } from '@/contexts/UserContext'
 
 type ParentTab = 'overview' | 'children' | 'upcoming' | 'messages'
 
+const PARENT_TAB_ROUTES: Record<ParentTab, string> = {
+  overview: '/dashboard',
+  children: '/dashboard/children',
+  upcoming: '/dashboard/upcoming',
+  messages: '/dashboard/messages',
+}
+
+function getParentTabFromPath(pathname: string): ParentTab {
+  const path = pathname.replace('/dashboard', '').replace(/^\/+/, '')
+  const [rootSegment] = path.split('/')
+
+  switch (rootSegment) {
+    case 'children':
+      return 'children'
+    case 'upcoming':
+      return 'upcoming'
+    case 'messages':
+      return 'messages'
+    default:
+      return 'overview'
+  }
+}
+
 export default function ParentDashboard() {
   const { user } = useUser()
   const { backendUser } = useUserContext()
   const { isImpersonating } = useImpersonation()
   const { signOut } = useClerk()
+  const location = useLocation()
   const navigate = useNavigate()
 
   const actorName = user?.fullName || user?.firstName || 'Parent'
@@ -75,25 +100,45 @@ export default function ParentDashboard() {
       .map((token) => token[0]?.toUpperCase() || '')
       .join('') || 'P'
   const showClerkAvatar = !isImpersonating || backendUser?.clerk_id === user?.id
-  const [activeTab, setActiveTab] = useState<ParentTab>('overview')
-  const [hasAppliedPreferredTab, setHasAppliedPreferredTab] = useState(false)
 
-  const { data: dashboardStats, isLoading: isLoadingStats } = useParentDashboardStats()
-  const { data: parentProgressViews, isLoading: isLoadingProgress } = useParentProgress()
+  const {
+    data: dashboardStats,
+    isLoading: isLoadingStats,
+    error: statsError,
+  } = useParentDashboardStats()
+  const {
+    data: parentProgressViews,
+    isLoading: isLoadingProgress,
+    error: progressError,
+  } = useParentProgress()
   const { data: userSettings, isLoading: isLoadingSettings } = useUserSettings()
+  const activeTab = useMemo(() => getParentTabFromPath(location.pathname), [location.pathname])
 
   useEffect(() => {
-    if (isLoadingSettings || hasAppliedPreferredTab) {
+    if (isLoadingSettings) {
+      return
+    }
+
+    const isBaseDashboardRoute =
+      location.pathname === '/dashboard' || location.pathname === '/dashboard/'
+
+    if (!isBaseDashboardRoute) {
       return
     }
 
     const preferredTab = String(userSettings?.preferences?.default_parent_tab || '').toLowerCase()
     if (preferredTab === 'overview' || preferredTab === 'children' || preferredTab === 'upcoming' || preferredTab === 'messages') {
-      setActiveTab(preferredTab)
+      const preferredRoute = PARENT_TAB_ROUTES[preferredTab]
+      if (preferredRoute !== PARENT_TAB_ROUTES.overview) {
+        navigate(preferredRoute, { replace: true })
+      }
     }
-
-    setHasAppliedPreferredTab(true)
-  }, [hasAppliedPreferredTab, isLoadingSettings, userSettings?.preferences?.default_parent_tab])
+  }, [
+    isLoadingSettings,
+    location.pathname,
+    navigate,
+    userSettings?.preferences?.default_parent_tab,
+  ])
 
   const children = dashboardStats?.children || []
 
@@ -132,9 +177,38 @@ export default function ParentDashboard() {
         title: assignment?.title || 'Untitled assignment',
         subject: assignment?.subject || 'General',
         dueDate: assignment?.due_date || null,
+        isOverdue: Boolean(assignment?.is_overdue),
       }))
     })
   }, [parentProgressViews])
+
+  const statsErrorMessage = statsError instanceof Error ? statsError.message : null
+  const progressErrorMessage = progressError instanceof Error ? progressError.message : null
+
+  const renderErrorCard = (title: string, message: string) => {
+    return (
+      <Card className="border-destructive/30 bg-destructive/5 shadow-sm">
+        <CardContent className="space-y-2 p-6">
+          <p className="font-semibold text-foreground">{title}</p>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const formatDueDateLabel = (value: string | null, isOverdue: boolean) => {
+    if (!value) {
+      return 'TBD'
+    }
+
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) {
+      return value
+    }
+
+    const prefix = isOverdue ? 'Overdue ' : 'Due '
+    return `${prefix}${parsed.toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+  }
 
   const handleSignOut = async () => {
     await signOut()
@@ -144,12 +218,171 @@ export default function ParentDashboard() {
     navigate('/settings')
   }
 
+  const handleTabChange = (tab: ParentTab) => {
+    navigate(PARENT_TAB_ROUTES[tab])
+  }
+
   const navItems: Array<{ label: string; tab: ParentTab; icon: any }> = [
     { label: 'Overview', tab: 'overview', icon: Heart },
     { label: 'Children', tab: 'children', icon: Users },
     { label: 'Upcoming', tab: 'upcoming', icon: CalendarClock },
     { label: 'Messages', tab: 'messages', icon: MessageCircle },
   ]
+
+  const renderOverviewPage = () => {
+    if (statsErrorMessage) {
+      return renderErrorCard('Unable to load child progress', statsErrorMessage)
+    }
+
+    return (
+      <Card className="border-0 bg-card shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Target className="h-5 w-5 text-primary" />
+            Child Progress Snapshot
+          </CardTitle>
+          <CardDescription>Quick progress and grade overview by child</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isLoadingStats ? (
+            Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} className="h-16 w-full" />
+            ))
+          ) : children.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">No children linked yet</div>
+          ) : (
+            children.map((child) => (
+              <div key={child.id} className="rounded-lg border p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-foreground">{child.name}</p>
+                    <p className="text-xs text-muted-foreground">Grade {child.grade || 'N/A'}</p>
+                  </div>
+                  <Badge variant="outline">{child.recent_grade || '--'}</Badge>
+                </div>
+                <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Overall Progress</span>
+                  <span>{child.overall_progress || 0}%</span>
+                </div>
+                <Progress value={child.overall_progress || 0} className="h-2" />
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const renderChildrenPage = () => {
+    if (statsErrorMessage) {
+      return renderErrorCard('Unable to load child details', statsErrorMessage)
+    }
+
+    return (
+      <Card className="border-0 bg-card shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-primary" />
+            Children Details
+          </CardTitle>
+          <CardDescription>Current standing and workload per child</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingStats ? (
+            Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} className="mb-3 h-20 w-full" />
+            ))
+          ) : children.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">No children linked yet</div>
+          ) : (
+            <div className="space-y-4">
+              {children.map((child) => (
+                <div key={child.id} className="rounded-lg border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground">{child.name}</h3>
+                      <p className="text-sm text-muted-foreground">Grade {child.grade || 'N/A'}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge>{child.recent_grade || '--'}</Badge>
+                      <Badge variant="outline">
+                        <BookOpen className="mr-1 h-3 w-3" />
+                        {child.assignments_due || 0} due
+                      </Badge>
+                    </div>
+                  </div>
+                  <Separator className="my-3" />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Overall Progress</span>
+                    <span className="font-medium text-foreground">
+                      {child.overall_progress || 0}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const renderUpcomingPage = () => {
+    if (progressErrorMessage) {
+      return renderErrorCard('Unable to load upcoming work', progressErrorMessage)
+    }
+
+    return (
+      <Card className="border-0 bg-card shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CalendarClock className="h-5 w-5 text-primary" />
+            Upcoming Work
+          </CardTitle>
+          <CardDescription>Assignments that need attention soon</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingProgress ? (
+            Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} className="mb-3 h-16 w-full" />
+            ))
+          ) : upcomingFromProgress.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">No upcoming assignments</div>
+          ) : (
+            <div className="space-y-3">
+              {upcomingFromProgress.map((item, index) => (
+                <div
+                  key={`${item.childName}-${item.title}-${index}`}
+                  className="rounded-lg border p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">{item.title}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {item.subject} • {item.childName}
+                      </p>
+                    </div>
+                    <Badge variant={item.isOverdue ? 'destructive' : 'outline'}>
+                      {formatDueDateLabel(item.dueDate, item.isOverdue)}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const renderMessagesPage = () => {
+    return (
+      <DashboardMessagesPage
+        title="Messages"
+        description="Stay in touch with your child's teacher in real time."
+      />
+    )
+  }
 
   return (
     <SidebarProvider>
@@ -172,7 +405,7 @@ export default function ParentDashboard() {
                     <SidebarMenuButton
                       tooltip={item.label}
                       isActive={activeTab === item.tab}
-                      onClick={() => setActiveTab(item.tab)}
+                      onClick={() => handleTabChange(item.tab)}
                     >
                       <item.icon />
                       <span>{item.label}</span>
@@ -200,7 +433,7 @@ export default function ParentDashboard() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>Parent Dashboard</BreadcrumbPage>
+                  <BreadcrumbPage>{navItems.find((item) => item.tab === activeTab)?.label || 'Parent Dashboard'}</BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
@@ -220,220 +453,91 @@ export default function ParentDashboard() {
 
         <div className="flex flex-1 flex-col gap-4 bg-background p-4">
           <div className="flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-7xl space-y-6 px-4 py-4 sm:px-6 sm:py-6">
-            <div>
-              <h1 className="mb-2 text-3xl font-bold text-foreground">Welcome back, {parentName}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Track your children&apos;s progress, upcoming work, and outcomes in one place.
-              </p>
-            </div>
+            <PageShell>
+              <div>
+                <h1 className="mb-2 text-3xl font-bold text-foreground">Welcome back, {parentName}</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Track your children&apos;s progress, upcoming work, and outcomes in one place.
+                </p>
+              </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {statsErrorMessage ? (
+                renderErrorCard('Parent dashboard summary unavailable', statsErrorMessage)
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <Card className="border-0 bg-card shadow-sm">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                      <CardTitle className="text-sm font-medium">Children</CardTitle>
+                      <Users className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      {isLoadingStats ? (
+                        <Skeleton className="h-8 w-16" />
+                      ) : (
+                        <div className="text-2xl font-bold">{aggregate.totalChildren}</div>
+                      )}
+                      <p className="text-xs text-muted-foreground">Linked students</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-0 bg-card shadow-sm">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                      <CardTitle className="text-sm font-medium">Assignments Due</CardTitle>
+                      <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      {isLoadingStats ? (
+                        <Skeleton className="h-8 w-16" />
+                      ) : (
+                        <div className="text-2xl font-bold">{aggregate.totalAssignmentsDue}</div>
+                      )}
+                      <p className="text-xs text-muted-foreground">Across all children</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-0 bg-card shadow-sm">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                      <CardTitle className="text-sm font-medium">Completion Progress</CardTitle>
+                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      {isLoadingStats ? (
+                        <Skeleton className="h-8 w-24" />
+                      ) : (
+                        <div className="text-2xl font-bold">{aggregate.avgProgress}%</div>
+                      )}
+                      <p className="text-xs text-muted-foreground">Overall completion</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              <Tabs value={activeTab} onValueChange={(value) => handleTabChange(value as ParentTab)}>
+                <TabsList className="grid w-full grid-cols-4 md:w-[560px]">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="children">Children</TabsTrigger>
+                  <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
+                  <TabsTrigger value="messages">Messages</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <Routes>
+                <Route index element={renderOverviewPage()} />
+                <Route path="children" element={renderChildrenPage()} />
+                <Route path="upcoming" element={renderUpcomingPage()} />
+                <Route path="messages" element={renderMessagesPage()} />
+                <Route path="messages/chats" element={<Navigate to="/dashboard/messages?mode=chat" replace />} />
+                <Route path="messages/emails" element={<Navigate to="/dashboard/messages?mode=email" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+
               <Card className="border-0 bg-card shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Children</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  {isLoadingStats ? (
-                    <Skeleton className="h-8 w-16" />
-                  ) : (
-                    <div className="text-2xl font-bold">{aggregate.totalChildren}</div>
-                  )}
-                  <p className="text-xs text-muted-foreground">Linked students</p>
+                <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
+                  <Trophy className="h-4 w-4" />
+                  Tip: Use the children and upcoming tabs to spot risk early and follow up before deadlines.
                 </CardContent>
               </Card>
-
-              <Card className="border-0 bg-card shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Assignments Due</CardTitle>
-                  <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  {isLoadingStats ? (
-                    <Skeleton className="h-8 w-16" />
-                  ) : (
-                    <div className="text-2xl font-bold">{aggregate.totalAssignmentsDue}</div>
-                  )}
-                  <p className="text-xs text-muted-foreground">Across all children</p>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 bg-card shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Average Progress</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  {isLoadingStats ? (
-                    <Skeleton className="h-8 w-24" />
-                  ) : (
-                    <div className="text-2xl font-bold">{aggregate.avgProgress}%</div>
-                  )}
-                  <p className="text-xs text-muted-foreground">Overall completion</p>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ParentTab)}>
-              <TabsList className="grid w-full grid-cols-4 md:w-[560px]">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="children">Children</TabsTrigger>
-                <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
-                <TabsTrigger value="messages">Messages</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="overview" className="mt-4">
-                <Card className="border-0 bg-card shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Target className="h-5 w-5 text-primary" />
-                      Child Progress Snapshot
-                    </CardTitle>
-                    <CardDescription>Quick progress and grade overview by child</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {isLoadingStats ? (
-                      Array.from({ length: 3 }).map((_, index) => (
-                        <Skeleton key={index} className="h-16 w-full" />
-                      ))
-                    ) : children.length === 0 ? (
-                      <div className="py-8 text-center text-muted-foreground">No children linked yet</div>
-                    ) : (
-                      children.map((child) => (
-                        <div key={child.id} className="rounded-lg border p-4">
-                          <div className="mb-2 flex items-center justify-between">
-                            <div>
-                              <p className="font-medium text-foreground">{child.name}</p>
-                              <p className="text-xs text-muted-foreground">Grade {child.grade || 'N/A'}</p>
-                            </div>
-                            <Badge variant="outline">{child.recent_grade || '--'}</Badge>
-                          </div>
-                          <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Overall Progress</span>
-                            <span>{child.overall_progress || 0}%</span>
-                          </div>
-                          <Progress value={child.overall_progress || 0} className="h-2" />
-                        </div>
-                      ))
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="children" className="mt-4">
-                <Card className="border-0 bg-card shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Users className="h-5 w-5 text-primary" />
-                      Children Details
-                    </CardTitle>
-                    <CardDescription>Current standing and workload per child</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {isLoadingStats ? (
-                      Array.from({ length: 3 }).map((_, index) => (
-                        <Skeleton key={index} className="mb-3 h-20 w-full" />
-                      ))
-                    ) : children.length === 0 ? (
-                      <div className="py-8 text-center text-muted-foreground">No children linked yet</div>
-                    ) : (
-                      <div className="space-y-4">
-                        {children.map((child) => (
-                          <div key={child.id} className="rounded-lg border p-4">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <h3 className="font-semibold text-foreground">{child.name}</h3>
-                                <p className="text-sm text-muted-foreground">Grade {child.grade || 'N/A'}</p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Badge>{child.recent_grade || '--'}</Badge>
-                                <Badge variant="outline">
-                                  <BookOpen className="mr-1 h-3 w-3" />
-                                  {child.assignments_due || 0} due
-                                </Badge>
-                              </div>
-                            </div>
-                            <Separator className="my-3" />
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-muted-foreground">Overall Progress</span>
-                              <span className="font-medium text-foreground">
-                                {child.overall_progress || 0}%
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="upcoming" className="mt-4">
-                <Card className="border-0 bg-card shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CalendarClock className="h-5 w-5 text-primary" />
-                      Upcoming Work
-                    </CardTitle>
-                    <CardDescription>Assignments that need attention soon</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {isLoadingProgress ? (
-                      Array.from({ length: 3 }).map((_, index) => (
-                        <Skeleton key={index} className="mb-3 h-16 w-full" />
-                      ))
-                    ) : upcomingFromProgress.length === 0 ? (
-                      <div className="py-8 text-center text-muted-foreground">No upcoming assignments</div>
-                    ) : (
-                      <div className="space-y-3">
-                        {upcomingFromProgress.map((item, index) => (
-                          <div
-                            key={`${item.childName}-${item.title}-${index}`}
-                            className="rounded-lg border p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="font-medium text-foreground">{item.title}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {item.subject} • {item.childName}
-                                </p>
-                              </div>
-                              <Badge variant="outline">{item.dueDate || 'TBD'}</Badge>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="messages" className="mt-4">
-                <Card className="border-0 bg-card shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <MessageCircle className="h-5 w-5 text-primary" />
-                      Messages
-                    </CardTitle>
-                    <CardDescription>Stay in touch with your child&apos;s teacher in real time.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <div className="h-[620px] overflow-hidden rounded-b-xl border-t">
-                      <ConversationsView routeMode="chats" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-
-            <Card className="border-0 bg-card shadow-sm">
-              <CardContent className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
-                <Trophy className="h-4 w-4" />
-                Tip: Use the children and upcoming tabs to spot risk early and follow up before deadlines.
-              </CardContent>
-            </Card>
-            </div>
+            </PageShell>
           </div>
         </div>
       </SidebarInset>

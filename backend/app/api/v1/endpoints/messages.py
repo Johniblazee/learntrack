@@ -104,9 +104,9 @@ async def _notify_recipient(
         else f"New message from {sender_name}"
     )
     action_url = (
-        "/dashboard/messages/emails"
+        "/dashboard/messages?mode=email"
         if delivery_method == MessageDeliveryMethod.EMAIL
-        else "/dashboard/messages/chats"
+        else "/dashboard/messages?mode=chat"
     )
 
     try:
@@ -526,6 +526,8 @@ async def mark_message_as_read(
             tutor_id=_resolve_tenant_id(current_user),
         )
         return None
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(
             "Failed to mark message as read", error=str(e), message_id=message_id

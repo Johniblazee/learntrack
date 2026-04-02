@@ -547,10 +547,27 @@ class EnhancedClerkJWTBearer:
             if role == UserRole.TUTOR or role == UserRole.SUPER_ADMIN:
                 tutor_id = user_id  # Tutors and super admins use their own clerk_id as tutor_id
             else:
-                # For students and parents, look up their tutor_id from the database
-                tutor_id = (
-                    db_user.get("tutor_id") if db_user else None
-                ) or user_id  # Fall back to own ID rather than a shared placeholder
+                # For students and parents, look up their tutor_id from the database.
+                # Legacy parent records may only be linked through child records.
+                tutor_id = db_user.get("tutor_id") if db_user else None
+                if not tutor_id and role == UserRole.PARENT and db_user:
+                    child_ids = db_user.get("student_ids") or db_user.get(
+                        "parent_children", []
+                    )
+                    if child_ids:
+                        db = await get_database()
+                        child = await db.students.find_one(
+                            {"clerk_id": {"$in": child_ids}}, {"tutor_id": 1}
+                        )
+                        tutor_id = child.get("tutor_id") if child else None
+
+                tutor_id = tutor_id or user_id
+
+            student_ids = []
+            if db_user:
+                student_ids = db_user.get("student_ids") or db_user.get(
+                    "parent_children", []
+                )
 
             # Create user context
             user_context = ClerkUserContext(
@@ -568,7 +585,7 @@ class EnhancedClerkJWTBearer:
                 ),
                 last_sign_in=datetime.now(timezone.utc),
                 tutor_id=tutor_id,
-                student_ids=db_user.get("student_ids", []) if db_user else [],
+                student_ids=student_ids,
                 is_super_admin=is_super_admin,
                 admin_permissions=admin_permissions,
             )

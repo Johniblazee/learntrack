@@ -54,7 +54,11 @@ interface Conversation {
 export default function ConversationsView({ routeMode = 'chats' }: ConversationsViewProps) {
   const { getToken, userId } = useAuth()
   const client = useApiClient()
-  const { visibleUserIds, loading: visibilityLoading } = useVisibility()
+  const {
+    visibleUserIds,
+    loading: visibilityLoading,
+    error: visibilityError,
+  } = useVisibility()
   const [searchQuery, setSearchQuery] = useState("")
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
@@ -68,6 +72,8 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
   const [isTyping, setIsTyping] = useState(false)
   const [loading, setLoading] = useState(true)
   const [messagesLoading, setMessagesLoading] = useState(false)
+  const [conversationsError, setConversationsError] = useState<string | null>(null)
+  const [messagesError, setMessagesError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   // Scroll container for the conversation list — used by the virtualizer (H8)
@@ -157,6 +163,7 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
   const loadConversations = async () => {
     try {
       setLoading(true)
+      setConversationsError(null)
       const response = await client.get('/conversations')
       if (response.error) {
         throw new Error(response.error)
@@ -171,6 +178,9 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
 
       setConversations(nextConversations)
     } catch (error) {
+      setConversationsError(
+        error instanceof Error ? error.message : 'Failed to load conversations'
+      )
       console.error("Failed to load conversations:", error)
     } finally {
       setLoading(false)
@@ -182,12 +192,16 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
       return []
     }
 
+    if (visibilityError) {
+      return conversations
+    }
+
     return conversations.filter((conv) => {
       return conv.participants.every(
         (participantId) => participantId === userId || visibleUserIds.includes(participantId)
       )
     })
-  }, [conversations, userId, visibilityLoading, visibleUserIds])
+  }, [conversations, userId, visibilityError, visibilityLoading, visibleUserIds])
 
   useEffect(() => {
     if (!selectedConversation || visibilityLoading) {
@@ -207,6 +221,7 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
   const loadMessages = async (conversationId: string) => {
     try {
       setMessagesLoading(true)
+      setMessagesError(null)
       const response = await client.get(
         `/messages/conversation/${conversationId}?page=1&page_size=50`
       )
@@ -219,6 +234,7 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
       socketClient.joinConversation(conversationId)
       markConversationAsRead(conversationId)
     } catch (error) {
+      setMessagesError(error instanceof Error ? error.message : 'Failed to load messages')
       console.error("Failed to load messages:", error)
     } finally {
       setMessagesLoading(false)
@@ -495,7 +511,7 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
 
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] bg-background rounded-lg overflow-hidden border border-border">
+    <div className="flex h-[calc(100vh-8rem)] min-h-[600px] bg-background rounded-lg overflow-hidden border border-border">
       {/* Left Panel - Conversations List */}
       <div className="w-80 border-r border-border flex flex-col bg-card">
         {/* Header */}
@@ -536,6 +552,10 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : conversationsError ? (
+              <div className="m-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                Unable to load conversations. {conversationsError}
               </div>
             ) : filteredConversations.length === 0 ? (
               <div className="text-center py-8">
@@ -635,6 +655,16 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
                       </div>
                     </div>
                   </>
+                ) : messagesError ? (
+                  <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+                    <div>
+                      <ListEmptyIcon className="mx-auto mb-3 h-10 w-10 text-destructive" />
+                      <p className="text-sm font-medium text-foreground">
+                        Unable to load this conversation
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">{messagesError}</p>
+                    </div>
+                  </div>
                 ) : visibleMessages.length === 0 ? (
                   <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-card/40 p-6 text-center">
                     <div>

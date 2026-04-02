@@ -274,7 +274,7 @@ async def send_message(sid, data):
                         tutor_id=tenant_id,
                         related_entity_id=conversation_id,
                         related_entity_type="conversation",
-                        action_url="/dashboard/messages/chats",
+                        action_url="/dashboard/messages?mode=chat",
                     )
                 )
             except Exception as event_error:

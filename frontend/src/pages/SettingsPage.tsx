@@ -18,7 +18,7 @@ import { useUserContext } from '@/contexts/UserContext'
 import { useApiClient } from '../lib/api-client'
 import { AIConfigTab } from '@/components/settings/AIConfigTab'
 
-type StudentDefaultTab = 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library'
+type StudentDefaultTab = 'dashboard' | 'courses' | 'assignments' | 'grades' | 'library' | 'messages'
 type ParentDefaultTab = 'overview' | 'children' | 'upcoming' | 'messages'
 
 interface SettingsState {
@@ -63,7 +63,8 @@ function normalizeDefaultStudentTab(value: unknown): StudentDefaultTab {
     value === 'courses' ||
     value === 'assignments' ||
     value === 'grades' ||
-    value === 'library'
+    value === 'library' ||
+    value === 'messages'
   ) {
     return value
   }
@@ -448,6 +449,7 @@ export default function SettingsPage() {
                         <option value="assignments">Assignments</option>
                         <option value="grades">Grades</option>
                         <option value="library">Library</option>
+                        <option value="messages">Messages</option>
                       </select>
                       <p className="text-sm text-muted-foreground">
                         Choose which tab opens first when you enter the student dashboard.

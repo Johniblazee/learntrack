@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CheckCircle, XCircle, AlertTriangle, Eye, Edit, ThumbsUp, ThumbsDown, Star, Search, BookOpen, MessageSquare, Flag, Clock } from "lucide-react"
+import { CheckCircle, XCircle, AlertTriangle, Eye, Edit, ThumbsUp, ThumbsDown, Star, Search, BookOpen, MessageSquare, Flag, Clock, RefreshCw } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { toast } from '@/contexts/ToastContext'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -15,6 +15,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { MathText } from '@/components/ui/math-text'
 import { Checkbox } from '@/components/ui/checkbox'
 import { API_BASE_URL } from '@/lib/config'
+import { DIFFICULTIES, DIFFICULTY_LABELS } from '@/lib/constants'
+import { useSubjects } from '@/hooks/useQueries'
 
 interface Question {
   id: string
@@ -105,6 +107,7 @@ export default function QuestionReviewer() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [subjectFilter, setSubjectFilter] = useState("all")
+  const [difficultyFilter, setDifficultyFilter] = useState("all")
   const [questions, setQuestions] = useState<Question[]>([])
   const [approvedQuestions, setApprovedQuestions] = useState<Question[]>([])
   const [rejectedQuestions, setRejectedQuestions] = useState<Question[]>([])
@@ -123,6 +126,9 @@ export default function QuestionReviewer() {
     correct_answer: '',
     explanation: '',
   })
+
+  const { data: subjectsData } = useSubjects()
+  const subjects = subjectsData || []
 
   // Fetch pending questions from backend
   useEffect(() => {
@@ -688,13 +694,13 @@ export default function QuestionReviewer() {
   }
 
   const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty) {
-      case 'beginner':
-        return 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400'
-      case 'intermediate':
-        return 'bg-yellow-50 text-yellow-700 dark:bg-yellow-950/30 dark:text-yellow-400'
-      case 'advanced':
-        return 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400'
+    switch (difficulty.toLowerCase()) {
+      case DIFFICULTIES.EASY:
+        return 'bg-emerald-500/20 text-emerald-400'
+      case DIFFICULTIES.MEDIUM:
+        return 'bg-amber-500/20 text-amber-400'
+      case DIFFICULTIES.HARD:
+        return 'bg-red-500/20 text-red-400'
       default:
         return 'bg-muted text-muted-foreground'
     }
@@ -717,8 +723,9 @@ export default function QuestionReviewer() {
                          question.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesStatus = statusFilter === "all" || question.status === statusFilter
     const matchesSubject = subjectFilter === "all" || question.subject === subjectFilter
+    const matchesDifficulty = difficultyFilter === "all" || question.difficulty.toLowerCase() === difficultyFilter
 
-    return matchesSearch && matchesStatus && matchesSubject
+    return matchesSearch && matchesStatus && matchesSubject && matchesDifficulty
   })
 
   const filteredApprovedQuestions = approvedQuestions.filter((question) => {
@@ -751,7 +758,17 @@ export default function QuestionReviewer() {
             Review and approve AI-generated questions for quality assurance
           </p>
         </div>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={fetchPendingQuestions}
+          disabled={loading}
+          className="flex items-center gap-2 self-start sm:self-auto"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+      </div>
 
       {/* Stats Cards - Responsive grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
@@ -886,7 +903,7 @@ export default function QuestionReviewer() {
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:flex gap-3">
+                <div className="grid grid-cols-3 sm:flex gap-3">
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger className="w-full sm:w-[150px] h-9 sm:h-10 border-border text-sm">
                       <SelectValue placeholder="Status" />
@@ -904,11 +921,20 @@ export default function QuestionReviewer() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Subjects</SelectItem>
-                      <SelectItem value="Mathematics">Mathematics</SelectItem>
-                      <SelectItem value="Physics">Physics</SelectItem>
-                      <SelectItem value="Chemistry">Chemistry</SelectItem>
-                      <SelectItem value="Biology">Biology</SelectItem>
-                      <SelectItem value="Geography">Geography</SelectItem>
+                      {(Array.isArray(subjects) ? subjects : (subjects as any)?.items || []).map((s: any) => (
+                        <SelectItem key={s._id || s.id} value={s.name}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
+                    <SelectTrigger className="w-full sm:w-[150px] h-9 sm:h-10 border-border text-sm">
+                      <SelectValue placeholder="Difficulty" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Levels</SelectItem>
+                      {Object.values(DIFFICULTIES).map(diff => (
+                        <SelectItem key={diff} value={diff}>{DIFFICULTY_LABELS[diff]}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

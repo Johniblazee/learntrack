@@ -8,6 +8,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -68,6 +78,10 @@ export default function StudentAssignmentWorkspace({
   const [answers, setAnswers] = useState<Record<string, AnswerState>>({})
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false)
+  const [submitDialogMessage, setSubmitDialogMessage] = useState("")
 
   const totalQuestions = questions.length
 
@@ -89,6 +103,7 @@ export default function StudentAssignmentWorkspace({
     const loadWorkspace = async () => {
       try {
         setLoading(true)
+        setLoadError(null)
         setCurrentQuestionIndex(0)
 
         const assignmentResponse = await client.get(`/assignments/${assignmentId}`)
@@ -166,15 +181,19 @@ export default function StudentAssignmentWorkspace({
         setAnswers(answerMap)
       } catch (error) {
         console.error("Failed to load assignment workspace:", error)
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : "Failed to open assignment workspace"
+        )
         toast.error("Failed to open assignment workspace")
-        onOpenChange(false)
       } finally {
         setLoading(false)
       }
     }
 
     loadWorkspace()
-  }, [activeStudentId, assignmentId, client, onOpenChange, open])
+  }, [activeStudentId, assignmentId, client, loadAttempt, open])
 
   const updateAnswer = (questionId: string, nextState: Partial<AnswerState>) => {
     setAnswers((prev) => ({
@@ -221,30 +240,27 @@ export default function StudentAssignmentWorkspace({
     }
   }
 
-  const handleSubmitAssignment = async () => {
+  const handleRequestSubmit = () => {
     if (!assignmentId || submissionResult) return
-
     const unansweredCount = Math.max(totalQuestions - answeredCount, 0)
-    const confirmationMessage = unansweredCount > 0
+    const msg = unansweredCount > 0
       ? `You still have ${unansweredCount} unanswered question${unansweredCount === 1 ? "" : "s"}. Submit anyway?`
       : "Submit this assignment now? You will not be able to edit it after submission."
+    setSubmitDialogMessage(msg)
+    setSubmitDialogOpen(true)
+  }
 
-    if (!window.confirm(confirmationMessage)) {
-      return
-    }
-
+  const handleConfirmSubmit = async () => {
+    if (!assignmentId || submissionResult) return
     try {
       setSubmitting(true)
-
       const response = await client.post(`/progress/assignment/${assignmentId}/answer`, {
         answers: serializeAnswers(),
         submit_assignment: true,
       })
-
       if (response.error || !response.data) {
         throw new Error(response.error || "Failed to submit assignment")
       }
-
       const score = (response.data as any).score
       const status = String((response.data as any).status || "submitted")
       const feedback = typeof (response.data as any).feedback === "string"
@@ -253,19 +269,16 @@ export default function StudentAssignmentWorkspace({
       toast.success("Assignment submitted", {
         description: typeof score === "number" ? `Score: ${score}%` : "Submission sent for review",
       })
-
       setSubmissionResult({
         status,
         score: typeof score === "number" ? score : null,
         feedback,
       })
-
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["assignments", "my"] }),
         queryClient.invalidateQueries({ queryKey: ["student-dashboard-stats"] }),
         queryClient.invalidateQueries({ queryKey: ["student-progress-analytics"] }),
       ])
-
       onSubmitted?.()
     } catch (error) {
       console.error("Failed to submit assignment:", error)
@@ -362,6 +375,21 @@ export default function StudentAssignmentWorkspace({
             <Skeleton className="h-36 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
+        ) : loadError ? (
+          <div className="space-y-4 rounded-lg border border-destructive/30 bg-destructive/5 p-6">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground">Unable to open assignment</h3>
+              <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+              <Button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+                Retry
+              </Button>
+            </div>
+          </div>
         ) : totalQuestions === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
             This assignment has no available questions yet.
@@ -454,13 +482,26 @@ export default function StudentAssignmentWorkspace({
               <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={savingDraft || submitting}>
                 {savingDraft ? "Saving..." : "Save Progress"}
               </Button>
-              <Button type="button" onClick={handleSubmitAssignment} disabled={submitting}>
+              <Button type="button" onClick={handleRequestSubmit} disabled={submitting}>
                 {submitting ? "Submitting..." : "Submit Assignment"}
               </Button>
             </div>
           </div>
         )}
       </DialogContent>
+
+      <AlertDialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Submit Assignment</AlertDialogTitle>
+            <AlertDialogDescription>{submitDialogMessage}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSubmit}>Submit</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }
