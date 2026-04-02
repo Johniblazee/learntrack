@@ -1,9 +1,4 @@
-"""
-AI provider enums.
-
-The ``BaseAIProvider`` ABC has been removed — all LLM calls now go through
-LiteLLM via ``app.ai.litellm_provider``.
-"""
+"""AI provider enums used by the app-owned chat runtime."""
 
 from enum import Enum
 

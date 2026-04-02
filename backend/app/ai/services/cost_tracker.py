@@ -70,7 +70,7 @@ MODEL_COSTS: Dict[str, Dict[str, Dict[str, Decimal]]] = {
             "output": Decimal("0.00015"),  # $0.15 per 1M tokens = $0.00015 per 1K
         },
         # Approximate family-level pricing for current Gemini models until live
-        # model pricing is sourced directly from LiteLLM metadata.
+        # pricing metadata is sourced directly from provider catalogs.
         "gemini-2.0-flash": {
             "input": Decimal("0.000075"),
             "output": Decimal("0.00015"),

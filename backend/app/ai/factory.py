@@ -1,24 +1,15 @@
-"""Unified LiteLLM provider factory."""
+"""Unified custom chat runtime factory."""
 
 from typing import Optional
 
 import structlog
-from langchain_community.chat_models import ChatLiteLLM
 
-from app.ai.litellm_runtime import LiteLLMRuntime
+from app.ai.runtime import AIChatRuntime
 from app.core.config import settings
 from app.core.encryption import decrypt_api_key
 from app.core.exceptions import AIProviderError
 
 logger = structlog.get_logger()
-
-# Map provider_id → LiteLLM model prefix
-_PROVIDER_PREFIX = {
-    "openai": "openai",
-    "anthropic": "anthropic",
-    "gemini": "gemini",
-    "groq": "groq",
-}
 
 # Map provider_id → settings attribute for the system env-var key
 _SYSTEM_KEY_ATTR = {
@@ -63,14 +54,14 @@ def _resolve_api_key(
     )
 
 
-def create_litellm_chat_model(
+def create_chat_model(
     provider_id: str,
     model_id: str,
     encrypted_tutor_key: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
 ):
-    """Return an app-owned LiteLLM runtime wrapper.
+    """Return the app-owned runtime wrapper.
 
     Args:
         provider_id: One of ``"openai"``, ``"anthropic"``, ``"gemini"``, ``"groq"``.
@@ -79,40 +70,33 @@ def create_litellm_chat_model(
         temperature: Sampling temperature.
         max_tokens: Maximum output tokens.
 
-    Returns:
-        A runtime wrapper that implements ``ainvoke`` / ``astream`` plus
-        app-level structured output, tool calling, retry, and usage helpers.
+    The runtime provides a shared app-owned interface over the supported
+    providers.
     """
-    prefix = _PROVIDER_PREFIX.get(provider_id)
-    if prefix is None:
+    if provider_id not in _SYSTEM_KEY_ATTR:
         raise AIProviderError(f"Unsupported provider: {provider_id}")
 
     api_key = _resolve_api_key(provider_id, encrypted_tutor_key)
-    litellm_model = f"{prefix}/{model_id}"
 
     logger.debug(
-        "Creating LiteLLM chat model",
+        "Creating provider chat model",
         provider=provider_id,
-        model=litellm_model,
+        model=model_id,
     )
 
-    return LiteLLMRuntime(
+    return AIChatRuntime(
         provider_id=provider_id,
         model_id=model_id,
-        litellm_model=litellm_model,
+        provider_model=model_id,
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
     )
 
 
-async def test_api_key(provider_id: str, plaintext_key: str) -> bool:
-    """Fire a minimal LLM call to verify a key works.
-
-    Returns ``True`` on success, raises on failure.
-    """
-    prefix = _PROVIDER_PREFIX.get(provider_id)
-    if prefix is None:
+async def test_provider_key(provider_id: str, plaintext_key: str) -> bool:
+    """Fire a minimal provider call to verify a key works."""
+    if provider_id not in _SYSTEM_KEY_ATTR:
         raise AIProviderError(f"Unsupported provider: {provider_id}")
 
     # Pick a cheap model per provider for the test call
@@ -124,14 +108,14 @@ async def test_api_key(provider_id: str, plaintext_key: str) -> bool:
     }
     model_id = test_models.get(provider_id, "gpt-4o-mini")
 
-    llm = ChatLiteLLM(
-        model=f"{prefix}/{model_id}",
+    llm = AIChatRuntime(
+        provider_id=provider_id,
+        model_id=model_id,
+        provider_model=model_id,
         api_key=plaintext_key,
         temperature=0,
         max_tokens=5,
     )
 
-    from langchain_core.messages import HumanMessage
-
-    await llm.ainvoke([HumanMessage(content="Hi")])
+    await llm.ainvoke("Hi")
     return True

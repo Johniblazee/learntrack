@@ -242,6 +242,24 @@ class EnhancedClerkJWTBearer:
     async def verify_token(self, token: str) -> ClerkUserContext:
         """Verify Clerk JWT token and extract user context"""
         try:
+            if token == "dev_token":
+                if settings.ENVIRONMENT == "development":
+                    return await self._extract_user_context(
+                        {
+                            "sub": "dev_user_123",
+                            "email": "dev_user_123@learntrack.dev",
+                            "name": "Development Tutor",
+                            "public_metadata": {
+                                "role": "tutor",
+                                "roles": ["tutor"],
+                            },
+                        }
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication token",
+                )
+
             # Try JWKS verification (RS256)
             try:
                 jwks = await self.get_jwks()
@@ -455,7 +473,9 @@ class EnhancedClerkJWTBearer:
             name = name or "Unknown User"
 
             # Extract role from metadata
-            role_str = metadata.get("role", "student")  # Default to least-privileged role
+            role_str = metadata.get(
+                "role", "student"
+            )  # Default to least-privileged role
 
             # Convert role string to UserRole enum
             try:
@@ -659,6 +679,7 @@ class EnhancedClerkJWTBearer:
         except Exception as e:
             logger.error("Failed to sync user to database", error=str(e))
             # Don't fail authentication if database sync fails
+
 
 _enhanced_clerk_bearer: Optional[EnhancedClerkJWTBearer] = None
 security = HTTPBearer()

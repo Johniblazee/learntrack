@@ -142,7 +142,7 @@ async def resolve_tenant_chat_model(
     requested_model: Optional[str] = None,
     tenant_config: Optional[Any] = None,
 ) -> ResolvedTenantModel:
-    from app.ai.litellm_provider import create_litellm_chat_model
+    from app.ai.factory import create_chat_model
     from app.services.tenant_ai_config_service import TenantAIConfigService
 
     config_service = TenantAIConfigService(db)
@@ -235,7 +235,7 @@ async def resolve_tenant_chat_model(
             "Configure a system key or add your own in Settings -> AI."
         )
 
-    llm = create_litellm_chat_model(
+    llm = create_chat_model(
         provider_id=provider_id,
         model_id=model_id,
         encrypted_tutor_key=encrypted_tutor_key,

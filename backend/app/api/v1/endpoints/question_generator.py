@@ -16,7 +16,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.ai.litellm_runtime import persist_usage_snapshot
+from app.ai.runtime import persist_usage_snapshot
 from app.core.dependencies import get_rag_service, get_database, get_question_service
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
 from app.core.exceptions import AIProviderError
@@ -95,7 +95,7 @@ async def _resolve_tenant_llm_provider(
     requested_provider: Optional[str] = None,
     requested_model: Optional[str] = None,
 ):
-    """Resolve the tenant's LLM via LiteLLM (BYOK key → system key fallback)."""
+    """Resolve the tenant's LLM with BYOK -> system-key fallback."""
     from app.ai.services.tenant_ai_resolver import resolve_tenant_chat_model
 
     try:
@@ -133,7 +133,7 @@ async def _persist_question_generator_usage(
         )
     except Exception as exc:
         logger.warning(
-            "Failed to persist LiteLLM usage snapshot",
+            "Failed to persist chat runtime usage snapshot",
             provider=provider_id,
             model=model_id,
             operation=operation,

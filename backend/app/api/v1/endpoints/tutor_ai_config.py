@@ -137,7 +137,7 @@ async def test_provider_key(
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Test an API key without saving it (fires a minimal LLM call)."""
-    from app.ai.litellm_provider import test_api_key
+    from app.ai.factory import test_provider_key
 
     provider_id = normalize_provider(provider_id)
     if provider_id not in PROVIDER_NAMES:
@@ -152,7 +152,7 @@ async def test_provider_key(
         )
 
     try:
-        await test_api_key(provider_id, body.api_key)
+        await test_provider_key(provider_id, body.api_key)
         return {"status": "ok", "message": "Key is valid"}
     except Exception as exc:
         logger.warning(

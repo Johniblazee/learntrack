@@ -1,15 +1,10 @@
-"""
-Simplified AI Manager — all LLM calls go through LiteLLM.
-
-The ``generate_questions`` / ``generate_questions_with_rag`` methods now use
-``create_litellm_chat_model()`` directly (no old provider subclasses needed).
-"""
+"""Simplified AI manager for the app-owned chat runtime."""
 
 from typing import List, Dict, Any, Optional
 import json
 import structlog
 
-from app.ai.litellm_runtime import persist_usage_snapshot
+from app.ai.runtime import persist_usage_snapshot
 from app.ai.structured_outputs import QuestionBatchOutput
 from app.core.config import settings
 from app.ai.providers.base import AIProvider
@@ -34,7 +29,7 @@ _PROVIDER_KEY_MAP = {
 
 
 class AIManager:
-    """Thin AI manager — delegates to LiteLLM for all LLM calls."""
+    """Thin AI manager for provider-backed LLM calls."""
 
     def __init__(self):
         self._available: List[str] = []
@@ -44,7 +39,7 @@ class AIManager:
                 self._available.append(pid)
 
     # ------------------------------------------------------------------
-    # LiteLLM-based chat model
+    # Shared chat runtime factory
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -54,10 +49,10 @@ class AIManager:
         encrypted_tutor_key: Optional[str] = None,
         **kwargs,
     ):
-        """Return a LangChain ``BaseChatModel`` via LiteLLM."""
-        from app.ai.litellm_provider import create_litellm_chat_model
+        """Return the app-owned chat runtime."""
+        from app.ai.factory import create_chat_model
 
-        return create_litellm_chat_model(
+        return create_chat_model(
             provider_id=provider_id,
             model_id=model_id,
             encrypted_tutor_key=encrypted_tutor_key,
@@ -253,10 +248,10 @@ Generate exactly {question_count} questions."""
                 preferred_provider or provider_id
             )
 
-        from app.ai.litellm_provider import create_litellm_chat_model
+        from app.ai.factory import create_chat_model
         from langchain_core.messages import HumanMessage
 
-        llm = create_litellm_chat_model(
+        llm = create_chat_model(
             provider_id=pid,
             model_id=model,
             encrypted_tutor_key=encrypted_tutor_key,

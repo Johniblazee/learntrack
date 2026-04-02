@@ -176,9 +176,9 @@ class SettingsService:
             }
 
         try:
-            from app.ai.litellm_provider import test_api_key
+            from app.ai.factory import test_provider_key
 
-            await test_api_key(provider.value, provider_config.api_key)
+            await test_provider_key(provider.value, provider_config.api_key)
 
             return {
                 "success": True,

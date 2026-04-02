@@ -19,7 +19,7 @@ from fastapi import (
 )
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.ai.litellm_runtime import persist_usage_snapshot
+from app.ai.runtime import persist_usage_snapshot
 from app.core.database import get_database
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
 from app.core.rate_limit import limiter, RATE_LIMITS
