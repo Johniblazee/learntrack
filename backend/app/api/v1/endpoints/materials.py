@@ -48,6 +48,18 @@ class MoveMaterialRequest(BaseModel):
     folder_id: Optional[str] = None
 
 
+class BulkMaterialActionRequest(BaseModel):
+    material_ids: List[str]
+
+
+class BulkMoveMaterialRequest(BulkMaterialActionRequest):
+    folder_id: Optional[str] = None
+
+
+class BulkShareMaterialRequest(BulkMaterialActionRequest):
+    shared_with_students: bool
+
+
 def _material_type_from_file(file_name: str, content_type: Optional[str]) -> str:
     extension = FilePath(file_name).suffix.lower()
 
@@ -421,6 +433,73 @@ async def upload_material_file(
         "processing_status": processing_updates["status"],
         "processing_error": processing_updates.get("error_message"),
     }
+
+
+@router.post("/bulk-move", response_model=dict)
+async def bulk_move_materials(
+    move_data: BulkMoveMaterialRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Move multiple materials to another folder or back to root."""
+    try:
+        material_service = MaterialService(database)
+        return await material_service.bulk_move_materials(
+            material_ids=move_data.material_ids,
+            tutor_id=current_user.clerk_id,
+            folder_id=move_data.folder_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk move materials", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to bulk move materials")
+
+
+@router.post("/bulk-share", response_model=dict)
+async def bulk_share_materials(
+    share_data: BulkShareMaterialRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Update student visibility for multiple materials."""
+    try:
+        material_service = MaterialService(database)
+        return await material_service.bulk_update_material_sharing(
+            material_ids=share_data.material_ids,
+            tutor_id=current_user.clerk_id,
+            shared_with_students=share_data.shared_with_students,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk update material sharing", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to bulk update material sharing",
+        )
+
+
+@router.post("/bulk-delete", response_model=dict)
+async def bulk_delete_materials(
+    delete_data: BulkMaterialActionRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Archive multiple materials at once."""
+    try:
+        material_service = MaterialService(database)
+        return await material_service.bulk_archive_materials(
+            material_ids=delete_data.material_ids,
+            tutor_id=current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk delete materials", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to bulk delete materials")
 
 
 @router.get("/files/{file_name}")

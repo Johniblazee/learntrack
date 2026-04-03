@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -22,7 +23,7 @@ import { toast } from '@/contexts/ToastContext'
 import {
   Upload, Trash2, Edit, Share2, FileText, FileImage, FileVideo,
   File, Link, Search, FolderPlus, FolderInput, MoreVertical,
-  Pencil, ChevronRight, ChevronDown, Folder,
+  Pencil, ChevronRight, ChevronDown, Folder, Plus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { API_BASE_URL } from '@/lib/config'
@@ -68,6 +69,38 @@ interface BreadcrumbSegment {
   id: string
   name: string
 }
+
+interface BulkMaterialActionResponse {
+  requested_count?: number
+  updated_count?: number
+  updated_material_ids?: string[]
+  skipped_count?: number
+  skipped_material_ids?: string[]
+}
+
+interface MaterialFormState {
+  title: string
+  description: string
+  material_type: Material['material_type']
+  file_url: string
+  subject_id: string
+  topic: string
+  tags: string
+  shared_with_students: boolean
+  file_size: number
+}
+
+const createEmptyMaterialForm = (): MaterialFormState => ({
+  title: '',
+  description: '',
+  material_type: 'link',
+  file_url: '',
+  subject_id: '',
+  topic: '',
+  tags: '',
+  shared_with_students: true,
+  file_size: 0,
+})
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -204,11 +237,18 @@ export default function MaterialManager() {
   // Core data
   const [materials, setMaterials] = useState<Material[]>([])
   const { data: subjectsData } = useSubjects()
-  const subjects: Subject[] = (subjectsData as any) || []
+  const subjects = useMemo<Subject[]>(() => {
+    if (Array.isArray(subjectsData)) {
+      return subjectsData as Subject[]
+    }
+
+    return ((subjectsData as { items?: Subject[] } | undefined)?.items || []) as Subject[]
+  }, [subjectsData])
   const [folders, setFolders] = useState<MaterialFolder[]>([])
   const [allFolders, setAllFolders] = useState<MaterialFolder[]>([])
   const [loading, setLoading] = useState(true)
   const [foldersLoading, setFoldersLoading] = useState(true)
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<Set<string>>(new Set())
 
   // Folder navigation
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
@@ -225,22 +265,17 @@ export default function MaterialManager() {
   const [uploadSubjectId, setUploadSubjectId] = useState<string | null>(null)
   const [uploadFolderId, setUploadFolderId] = useState<string | null>(null)
 
+  // Manual create dialog
+  const [isCreateMaterialOpen, setIsCreateMaterialOpen] = useState(false)
+  const [isCreatingMaterial, setIsCreatingMaterial] = useState(false)
+  const [createFormData, setCreateFormData] = useState<MaterialFormState>(createEmptyMaterialForm)
+
   // Edit dialog
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [isTogglingShareId, setIsTogglingShareId] = useState<string | null>(null)
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null)
-  const [editFormData, setEditFormData] = useState({
-    title: '',
-    description: '',
-    material_type: 'pdf' as Material['material_type'],
-    file_url: '',
-    subject_id: '',
-    topic: '',
-    tags: '',
-    shared_with_students: true,
-    file_size: 0,
-  })
+  const [editFormData, setEditFormData] = useState<MaterialFormState>(createEmptyMaterialForm)
 
   // Create folder dialog
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false)
@@ -259,11 +294,17 @@ export default function MaterialManager() {
   const [moveTarget, setMoveTarget] = useState<{ type: 'folder' | 'file'; id: string; name: string } | null>(null)
   const [selectedDestination, setSelectedDestination] = useState<string | null>(null)
   const [isMoving, setIsMoving] = useState(false)
+  const [isBulkMoveDialogOpen, setIsBulkMoveDialogOpen] = useState(false)
+  const [bulkMoveDestination, setBulkMoveDestination] = useState<string | null>(null)
+  const [isBulkMoving, setIsBulkMoving] = useState(false)
 
   // Delete confirmation
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'folder' | 'file'; id: string; name: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false)
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [isBulkSharing, setIsBulkSharing] = useState(false)
 
   // ─── Data fetching ──────────────────────────────────────────────────────────
 
@@ -271,16 +312,31 @@ export default function MaterialManager() {
     try {
       setLoading(true)
       const token = await getToken()
-      const res = await fetch(`${API_BASE_URL}/materials/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.ok) {
+      const collectedMaterials: Material[] = []
+      let page = 1
+      let hasNext = true
+
+      while (hasNext) {
+        const res = await fetch(`${API_BASE_URL}/materials/?page=${page}&per_page=100&status=active`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+
+        if (!res.ok) {
+          const payload = await res.json().catch(() => null)
+          throw new Error(payload?.detail || 'Failed to load materials')
+        }
+
         const data = await res.json()
-        setMaterials(data?.items || (Array.isArray(data) ? data : []))
+        const pageItems = data?.items || (Array.isArray(data) ? data : [])
+        collectedMaterials.push(...pageItems)
+        hasNext = Boolean(data?.meta?.has_next)
+        page += 1
       }
+
+      setMaterials(collectedMaterials)
     } catch (err) {
       console.error('Failed to fetch materials:', err)
-      toast.error('Failed to load materials')
+      toast.error(err instanceof Error ? err.message : 'Failed to load materials')
     } finally {
       setLoading(false)
     }
@@ -328,6 +384,10 @@ const fetchFoldersForParent = async (parentId: string | null) => {
 
   useEffect(() => {
     fetchFoldersForParent(currentFolderId)
+  }, [currentFolderId])
+
+  useEffect(() => {
+    setSelectedMaterialIds(new Set())
   }, [currentFolderId])
 
   // ─── Navigation ─────────────────────────────────────────────────────────────
@@ -395,6 +455,11 @@ const fetchFoldersForParent = async (parentId: string | null) => {
         : a.title.localeCompare(b.title),
     )
   }, [filteredMaterials, sortBy])
+
+  const allVisibleMaterialsSelected =
+    sortedMaterials.length > 0 && sortedMaterials.every((material) => selectedMaterialIds.has(material._id))
+  const someVisibleMaterialsSelected =
+    sortedMaterials.some((material) => selectedMaterialIds.has(material._id)) && !allVisibleMaterialsSelected
 
   // ─── Folder CRUD ────────────────────────────────────────────────────────────
 
@@ -468,6 +533,13 @@ const fetchFoldersForParent = async (parentId: string | null) => {
       toast.success(`${deleteTarget.type === 'folder' ? 'Folder' : 'Material'} deleted`)
       setIsDeleteDialogOpen(false)
       setDeleteTarget(null)
+      if (deleteTarget.type === 'file') {
+        setSelectedMaterialIds((prev) => {
+          const next = new Set(prev)
+          next.delete(deleteTarget.id)
+          return next
+        })
+      }
       if (deleteTarget.type === 'folder') fetchFoldersForParent(currentFolderId)
       fetchMaterials()
     } catch (err) {
@@ -530,6 +602,195 @@ const fetchFoldersForParent = async (parentId: string | null) => {
   const openDeleteDialog = (type: 'folder' | 'file', item: { _id: string; name?: string; title?: string }) => {
     setDeleteTarget({ type, id: item._id, name: (item.name || item.title)! })
     setIsDeleteDialogOpen(true)
+  }
+
+  const handleToggleSelectMaterial = (materialId: string) => {
+    setSelectedMaterialIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(materialId)) {
+        next.delete(materialId)
+      } else {
+        next.add(materialId)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllVisibleMaterials = () => {
+    const visibleIds = sortedMaterials.map((material) => material._id)
+    setSelectedMaterialIds((prev) => {
+      const next = new Set(prev)
+      if (visibleIds.every((id) => next.has(id))) {
+        visibleIds.forEach((id) => next.delete(id))
+      } else {
+        visibleIds.forEach((id) => next.add(id))
+      }
+      return next
+    })
+  }
+
+  const handleDeselectAllMaterials = () => {
+    setSelectedMaterialIds(new Set())
+  }
+
+  const openCreateMaterialDialog = () => {
+    setCreateFormData(createEmptyMaterialForm())
+    setIsCreateMaterialOpen(true)
+  }
+
+  const handleCreateMaterial = async () => {
+    if (!createFormData.title.trim()) {
+      toast.error('Material title is required')
+      return
+    }
+
+    if (createFormData.material_type === 'link' && !createFormData.file_url.trim()) {
+      toast.error('Link URL is required for link materials')
+      return
+    }
+
+    try {
+      setIsCreatingMaterial(true)
+      const token = await getToken()
+      const payload = {
+        title: createFormData.title.trim(),
+        description: createFormData.description.trim() || null,
+        material_type: createFormData.material_type,
+        file_url: createFormData.file_url.trim() || null,
+        file_size: createFormData.file_size || null,
+        subject_id: createFormData.subject_id || null,
+        folder_id: currentFolderId,
+        topic: createFormData.topic.trim() || null,
+        tags: createFormData.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        shared_with_students: createFormData.shared_with_students,
+      }
+
+      const res = await fetch(`${API_BASE_URL}/materials/`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to create material')
+      }
+
+      toast.success('Material created')
+      setIsCreateMaterialOpen(false)
+      setCreateFormData(createEmptyMaterialForm())
+      fetchMaterials()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create material')
+    } finally {
+      setIsCreatingMaterial(false)
+    }
+  }
+
+  const openBulkMoveDialog = () => {
+    setBulkMoveDestination(currentFolderId)
+    fetchAllFolders()
+    setIsBulkMoveDialogOpen(true)
+  }
+
+  const handleBulkMove = async () => {
+    if (selectedMaterialIds.size === 0) {
+      return
+    }
+
+    try {
+      setIsBulkMoving(true)
+      const token = await getToken()
+      const res = await fetch(`${API_BASE_URL}/materials/bulk-move`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          material_ids: [...selectedMaterialIds],
+          folder_id: bulkMoveDestination,
+        }),
+      })
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to move selected materials')
+      }
+
+      const result = await res.json() as BulkMaterialActionResponse
+      toast.success('Bulk move completed', {
+        description: `${result.updated_count || 0} moved${result.skipped_count ? `, ${result.skipped_count} skipped` : ''}`,
+      })
+      setIsBulkMoveDialogOpen(false)
+      setSelectedMaterialIds(new Set())
+      fetchMaterials()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to move selected materials')
+    } finally {
+      setIsBulkMoving(false)
+    }
+  }
+
+  const handleBulkShare = async (sharedWithStudents: boolean) => {
+    if (selectedMaterialIds.size === 0) {
+      return
+    }
+
+    try {
+      setIsBulkSharing(true)
+      const token = await getToken()
+      const res = await fetch(`${API_BASE_URL}/materials/bulk-share`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          material_ids: [...selectedMaterialIds],
+          shared_with_students: sharedWithStudents,
+        }),
+      })
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to update sharing')
+      }
+
+      const result = await res.json() as BulkMaterialActionResponse
+      toast.success(sharedWithStudents ? 'Materials shared with students' : 'Materials made private', {
+        description: `${result.updated_count || 0} updated${result.skipped_count ? `, ${result.skipped_count} skipped` : ''}`,
+      })
+      setSelectedMaterialIds(new Set())
+      fetchMaterials()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update sharing settings')
+    } finally {
+      setIsBulkSharing(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedMaterialIds.size === 0) {
+      return
+    }
+
+    try {
+      setIsBulkDeleting(true)
+      const token = await getToken()
+      const res = await fetch(`${API_BASE_URL}/materials/bulk-delete`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ material_ids: [...selectedMaterialIds] }),
+      })
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to delete selected materials')
+      }
+
+      const result = await res.json() as BulkMaterialActionResponse
+      toast.success('Bulk delete completed', {
+        description: `${result.updated_count || 0} archived${result.skipped_count ? `, ${result.skipped_count} skipped` : ''}`,
+      })
+      setIsBulkDeleteDialogOpen(false)
+      setSelectedMaterialIds(new Set())
+      fetchMaterials()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete selected materials')
+    } finally {
+      setIsBulkDeleting(false)
+    }
   }
 
   // ─── Upload logic ───────────────────────────────────────────────────────────
@@ -637,6 +898,14 @@ const fetchFoldersForParent = async (parentId: string | null) => {
 
   const handleUpdateMaterial = async () => {
     if (!editingMaterial) return
+    if (!editFormData.title.trim()) {
+      toast.error('Material title is required')
+      return
+    }
+    if (editFormData.material_type === 'link' && !editFormData.file_url.trim()) {
+      toast.error('Link URL is required for link materials')
+      return
+    }
     try {
       setIsSavingEdit(true)
       const token = await getToken()
@@ -656,14 +925,17 @@ const fetchFoldersForParent = async (parentId: string | null) => {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) throw new Error('Failed to update material')
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.detail || 'Failed to update material')
+      }
       toast.success('Material updated')
       setIsEditDialogOpen(false)
       setEditingMaterial(null)
       fetchMaterials()
     } catch (err) {
       console.error('Failed to update material:', err)
-      toast.error('Failed to update material')
+      toast.error(err instanceof Error ? err.message : 'Failed to update material')
     } finally {
       setIsSavingEdit(false)
     }
@@ -773,6 +1045,10 @@ const fetchFoldersForParent = async (parentId: string | null) => {
             <FolderPlus className="w-4 h-4 mr-2" />
             New Folder
           </Button>
+          <Button variant="outline" onClick={openCreateMaterialDialog}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Material
+          </Button>
           <Button onClick={openUploadModal}>
             <Upload className="w-4 h-4 mr-2" />
             Upload New
@@ -875,19 +1151,27 @@ const fetchFoldersForParent = async (parentId: string | null) => {
       {/* Table */}
       {loading ? (
         <div className="border border-border rounded-lg overflow-hidden bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50 hover:bg-muted/50">
-                <TableHead>File Name</TableHead>
-                <TableHead>Uploaded</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead>Access</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={allVisibleMaterialsSelected ? true : someVisibleMaterialsSelected ? 'indeterminate' : false}
+                      onCheckedChange={handleSelectAllVisibleMaterials}
+                      aria-label="Select all visible materials"
+                    />
+                  </TableHead>
+                  <TableHead>File Name</TableHead>
+                  <TableHead>Uploaded</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Access</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
+                  <TableCell><Skeleton className="h-4 w-4" /></TableCell>
                   <TableCell><div className="flex items-center gap-3"><Skeleton className="w-5 h-5 rounded" /><Skeleton className="h-4 w-40" /></div></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -903,6 +1187,13 @@ const fetchFoldersForParent = async (parentId: string | null) => {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50 hover:bg-muted/50">
+                <TableHead className="w-12">
+                  <Checkbox
+                    checked={allVisibleMaterialsSelected ? true : someVisibleMaterialsSelected ? 'indeterminate' : false}
+                    onCheckedChange={handleSelectAllVisibleMaterials}
+                    aria-label="Select all visible materials"
+                  />
+                </TableHead>
                 <TableHead>File Name</TableHead>
                 <TableHead>Uploaded</TableHead>
                 <TableHead>Size</TableHead>
@@ -912,7 +1203,14 @@ const fetchFoldersForParent = async (parentId: string | null) => {
             </TableHeader>
             <TableBody>
               {sortedMaterials.map((material) => (
-                <TableRow key={material._id} className="hover:bg-muted/30 transition-colors">
+                <TableRow key={material._id} className={cn('hover:bg-muted/30 transition-colors', selectedMaterialIds.has(material._id) && 'bg-primary/5')}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedMaterialIds.has(material._id)}
+                      onCheckedChange={() => handleToggleSelectMaterial(material._id)}
+                      aria-label={`Select ${material.title}`}
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       {getFileIcon(material.material_type)}
@@ -962,6 +1260,37 @@ const fetchFoldersForParent = async (parentId: string | null) => {
           </p>
         </div>
       ) : null}
+
+      {selectedMaterialIds.size > 0 && (
+        <div className="sticky bottom-0 z-40 pt-2">
+          <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground">
+              {selectedMaterialIds.size} material{selectedMaterialIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleDeselectAllMaterials}>
+                Deselect All
+              </Button>
+              <Button variant="outline" size="sm" onClick={openBulkMoveDialog}>
+                <FolderInput className="w-4 h-4 mr-1" />
+                Move
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => handleBulkShare(true)} disabled={isBulkSharing}>
+                <Share2 className="w-4 h-4 mr-1" />
+                Share
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => handleBulkShare(false)} disabled={isBulkSharing}>
+                <Share2 className="w-4 h-4 mr-1" />
+                Make Private
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setIsBulkDeleteDialogOpen(true)}>
+                <Trash2 className="w-4 h-4 mr-1" />
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Create Folder Dialog ──────────────────────────────────────── */}
       <Dialog open={isCreateFolderOpen} onOpenChange={setIsCreateFolderOpen}>
@@ -1127,6 +1456,137 @@ const fetchFoldersForParent = async (parentId: string | null) => {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={isCreateMaterialOpen}
+        onOpenChange={(open) => {
+          setIsCreateMaterialOpen(open)
+          if (!open) setCreateFormData(createEmptyMaterialForm())
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Material</DialogTitle>
+            <DialogDescription>
+              Create a link or external resource record for the current folder.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="create-material-title">Title *</Label>
+              <Input
+                id="create-material-title"
+                value={createFormData.title}
+                onChange={(e) => setCreateFormData({ ...createFormData, title: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="create-material-description">Description</Label>
+              <Textarea
+                id="create-material-description"
+                value={createFormData.description}
+                onChange={(e) => setCreateFormData({ ...createFormData, description: e.target.value })}
+                rows={2}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="create-material-type">Material Type *</Label>
+                <Select
+                  value={createFormData.material_type}
+                  onValueChange={(value: Material['material_type']) => setCreateFormData({ ...createFormData, material_type: value })}
+                >
+                  <SelectTrigger id="create-material-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pdf">PDF</SelectItem>
+                    <SelectItem value="doc">Document</SelectItem>
+                    <SelectItem value="video">Video</SelectItem>
+                    <SelectItem value="image">Image</SelectItem>
+                    <SelectItem value="link">Link</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="create-material-url">
+                  {createFormData.material_type === 'link' ? 'Link URL *' : 'External URL'}
+                </Label>
+                <Input
+                  id="create-material-url"
+                  value={createFormData.file_url}
+                  onChange={(e) => setCreateFormData({ ...createFormData, file_url: e.target.value })}
+                  placeholder="https://example.com/resource"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="create-material-subject">Subject</Label>
+                <Select
+                  value={createFormData.subject_id || 'none'}
+                  onValueChange={(value) => setCreateFormData({ ...createFormData, subject_id: value === 'none' ? '' : value })}
+                >
+                  <SelectTrigger id="create-material-subject"><SelectValue placeholder="Select subject" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {subjects.map((subject) => (
+                      <SelectItem key={subject._id} value={subject._id}>{subject.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="create-material-topic">Topic</Label>
+                <Input
+                  id="create-material-topic"
+                  value={createFormData.topic}
+                  onChange={(e) => setCreateFormData({ ...createFormData, topic: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="create-material-tags">Tags (comma-separated)</Label>
+              <Input
+                id="create-material-tags"
+                value={createFormData.tags}
+                onChange={(e) => setCreateFormData({ ...createFormData, tags: e.target.value })}
+              />
+            </div>
+
+            <div className="rounded-lg border border-border p-3 bg-muted/30 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">Student Access</p>
+                <p className="text-xs text-muted-foreground">
+                  {createFormData.shared_with_students ? 'Visible to students' : 'Hidden from students'}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateFormData({ ...createFormData, shared_with_students: !createFormData.shared_with_students })}
+              >
+                {createFormData.shared_with_students ? 'Set Private' : 'Share with Students'}
+              </Button>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsCreateMaterialOpen(false)} disabled={isCreatingMaterial}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreateMaterial} disabled={isCreatingMaterial || !createFormData.title.trim()}>
+                {isCreatingMaterial ? 'Creating...' : 'Create Material'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Edit Material Dialog ──────────────────────────────────────── */}
       <Dialog
         open={isEditDialogOpen}
@@ -1159,6 +1619,37 @@ const fetchFoldersForParent = async (parentId: string | null) => {
                 onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
                 rows={2}
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-material-type">Material Type</Label>
+                <Select
+                  value={editFormData.material_type}
+                  onValueChange={(value: Material['material_type']) => setEditFormData({ ...editFormData, material_type: value })}
+                >
+                  <SelectTrigger id="edit-material-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pdf">PDF</SelectItem>
+                    <SelectItem value="doc">Document</SelectItem>
+                    <SelectItem value="video">Video</SelectItem>
+                    <SelectItem value="image">Image</SelectItem>
+                    <SelectItem value="link">Link</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-file-url">{editingMaterial?.file_id ? 'Stored File URL' : 'External URL'}</Label>
+                <Input
+                  id="edit-file-url"
+                  value={editFormData.file_url}
+                  onChange={(e) => setEditFormData({ ...editFormData, file_url: e.target.value })}
+                  disabled={Boolean(editingMaterial?.file_id)}
+                  placeholder="https://example.com/resource"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1220,6 +1711,40 @@ const fetchFoldersForParent = async (parentId: string | null) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={isBulkMoveDialogOpen} onOpenChange={setIsBulkMoveDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move Selected Materials</DialogTitle>
+            <DialogDescription>
+              Select a destination folder for the selected materials.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <FolderTreePicker
+              folders={allFolders}
+              excludeIds={new Set()}
+              selectedId={bulkMoveDestination}
+              onSelect={setBulkMoveDestination}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsBulkMoveDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleBulkMove} disabled={isBulkMoving}>
+                {isBulkMoving ? 'Moving...' : 'Move Selected'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDeleteModal
+        open={isBulkDeleteDialogOpen}
+        onOpenChange={setIsBulkDeleteDialogOpen}
+        onConfirm={handleBulkDelete}
+        title="Delete selected materials?"
+        description={`The selected ${selectedMaterialIds.size} material${selectedMaterialIds.size !== 1 ? 's will' : ' will'} be archived and removed from the active library.`}
+        loading={isBulkDeleting}
+      />
     </div>
   )
 }

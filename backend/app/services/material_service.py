@@ -42,6 +42,16 @@ class MaterialService:
     def _normalize_folder_name(name: str) -> str:
         return name.strip()
 
+    @staticmethod
+    def _normalize_material_ids(material_ids: List[str]) -> List[str]:
+        return list(
+            dict.fromkeys(
+                str(material_id).strip()
+                for material_id in material_ids
+                if str(material_id).strip()
+            )
+        )
+
     def _material_query(
         self, material_id: str, tutor_id: Optional[str]
     ) -> Dict[str, Any]:
@@ -106,6 +116,58 @@ class MaterialService:
             raise ValidationError(
                 f"A folder named '{name}' already exists at this location"
             )
+
+    async def _resolve_owned_material_ids(
+        self,
+        material_ids: List[str],
+        tutor_id: str,
+        *,
+        allow_archived: bool = False,
+    ) -> tuple[List[str], List[str]]:
+        normalized_ids = self._normalize_material_ids(material_ids)
+        candidate_oids = [to_object_id(material_id) for material_id in normalized_ids]
+        requested_by_id = {
+            str(candidate_oid): material_id
+            for material_id, candidate_oid in zip(normalized_ids, candidate_oids)
+        }
+
+        query: Dict[str, Any] = {
+            "_id": {"$in": candidate_oids},
+            "tutor_id": tutor_id,
+        }
+        if not allow_archived:
+            query["status"] = {"$ne": MaterialStatus.ARCHIVED}
+
+        owned_docs = await self.collection.find(query, {"_id": 1}).to_list(length=None)
+        owned_id_set = {
+            requested_by_id[str(doc.get("_id"))]
+            for doc in owned_docs
+            if doc.get("_id") is not None
+        }
+
+        owned_ids = [
+            material_id for material_id in normalized_ids if material_id in owned_id_set
+        ]
+        skipped_ids = [
+            material_id
+            for material_id in normalized_ids
+            if material_id not in owned_id_set
+        ]
+        return owned_ids, skipped_ids
+
+    @staticmethod
+    def _bulk_action_summary(
+        requested_ids: List[str],
+        updated_ids: List[str],
+        skipped_ids: List[str],
+    ) -> Dict[str, Any]:
+        return {
+            "requested_count": len(requested_ids),
+            "updated_count": len(updated_ids),
+            "updated_material_ids": updated_ids,
+            "skipped_count": len(skipped_ids),
+            "skipped_material_ids": skipped_ids,
+        }
 
     async def _resolve_folder_placement(
         self, tutor_id: str, folder_id: Optional[str]
@@ -400,6 +462,171 @@ class MaterialService:
                 "Failed to delete material", material_id=material_id, error=str(e)
             )
             raise DatabaseException(f"Failed to delete material: {str(e)}")
+
+    async def bulk_archive_materials(
+        self, material_ids: List[str], tutor_id: str
+    ) -> Dict[str, Any]:
+        """Archive multiple materials owned by a tutor."""
+        try:
+            normalized_ids = self._normalize_material_ids(material_ids)
+            if not normalized_ids:
+                raise ValidationError("Select at least one material")
+
+            owned_ids, skipped_ids = await self._resolve_owned_material_ids(
+                normalized_ids,
+                tutor_id,
+                allow_archived=False,
+            )
+            updated_ids: List[str] = []
+
+            if owned_ids:
+                result = await self.collection.update_many(
+                    {
+                        "_id": {
+                            "$in": [
+                                to_object_id(material_id) for material_id in owned_ids
+                            ]
+                        },
+                        "tutor_id": tutor_id,
+                        "status": {"$ne": MaterialStatus.ARCHIVED},
+                    },
+                    {
+                        "$set": {
+                            "status": MaterialStatus.ARCHIVED,
+                            "updated_at": self._now(),
+                        }
+                    },
+                )
+                if result.modified_count:
+                    updated_ids = owned_ids
+
+            logger.info(
+                "Bulk archived materials",
+                tutor_id=tutor_id,
+                requested_count=len(normalized_ids),
+                archived_count=len(updated_ids),
+                skipped_count=len(skipped_ids),
+            )
+            return self._bulk_action_summary(normalized_ids, updated_ids, skipped_ids)
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error("Failed to bulk archive materials", error=str(e))
+            raise DatabaseException(f"Failed to bulk archive materials: {str(e)}")
+
+    async def bulk_move_materials(
+        self,
+        material_ids: List[str],
+        tutor_id: str,
+        folder_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Move multiple materials to another folder or root."""
+        try:
+            normalized_ids = self._normalize_material_ids(material_ids)
+            if not normalized_ids:
+                raise ValidationError("Select at least one material")
+
+            folder_payload = await self._resolve_folder_placement(
+                tutor_id=tutor_id,
+                folder_id=folder_id,
+            )
+            owned_ids, skipped_ids = await self._resolve_owned_material_ids(
+                normalized_ids,
+                tutor_id,
+                allow_archived=False,
+            )
+            updated_ids: List[str] = []
+
+            if owned_ids:
+                result = await self.collection.update_many(
+                    {
+                        "_id": {
+                            "$in": [
+                                to_object_id(material_id) for material_id in owned_ids
+                            ]
+                        },
+                        "tutor_id": tutor_id,
+                        "status": {"$ne": MaterialStatus.ARCHIVED},
+                    },
+                    {
+                        "$set": {
+                            **folder_payload,
+                            "updated_at": self._now(),
+                        }
+                    },
+                )
+                if result.modified_count:
+                    updated_ids = owned_ids
+
+            logger.info(
+                "Bulk moved materials",
+                tutor_id=tutor_id,
+                requested_count=len(normalized_ids),
+                moved_count=len(updated_ids),
+                skipped_count=len(skipped_ids),
+                destination_folder_id=folder_payload.get("folder_id"),
+            )
+            return self._bulk_action_summary(normalized_ids, updated_ids, skipped_ids)
+        except (ValidationError, NotFoundError):
+            raise
+        except Exception as e:
+            logger.error("Failed to bulk move materials", error=str(e))
+            raise DatabaseException(f"Failed to bulk move materials: {str(e)}")
+
+    async def bulk_update_material_sharing(
+        self,
+        material_ids: List[str],
+        tutor_id: str,
+        shared_with_students: bool,
+    ) -> Dict[str, Any]:
+        """Update student visibility for multiple materials."""
+        try:
+            normalized_ids = self._normalize_material_ids(material_ids)
+            if not normalized_ids:
+                raise ValidationError("Select at least one material")
+
+            owned_ids, skipped_ids = await self._resolve_owned_material_ids(
+                normalized_ids,
+                tutor_id,
+                allow_archived=False,
+            )
+            updated_ids: List[str] = []
+
+            if owned_ids:
+                result = await self.collection.update_many(
+                    {
+                        "_id": {
+                            "$in": [
+                                to_object_id(material_id) for material_id in owned_ids
+                            ]
+                        },
+                        "tutor_id": tutor_id,
+                        "status": {"$ne": MaterialStatus.ARCHIVED},
+                    },
+                    {
+                        "$set": {
+                            "shared_with_students": shared_with_students,
+                            "updated_at": self._now(),
+                        }
+                    },
+                )
+                if result.modified_count:
+                    updated_ids = owned_ids
+
+            logger.info(
+                "Bulk updated material sharing",
+                tutor_id=tutor_id,
+                requested_count=len(normalized_ids),
+                updated_count=len(updated_ids),
+                skipped_count=len(skipped_ids),
+                shared_with_students=shared_with_students,
+            )
+            return self._bulk_action_summary(normalized_ids, updated_ids, skipped_ids)
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error("Failed to bulk update material sharing", error=str(e))
+            raise DatabaseException(f"Failed to bulk update material sharing: {str(e)}")
 
     async def link_to_question(
         self, material_id: str, question_id: str, tutor_id: Optional[str] = None
