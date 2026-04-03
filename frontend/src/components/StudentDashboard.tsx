@@ -19,6 +19,7 @@ import {
   Sparkles,
   TrendingUp,
   Trophy,
+  type LucideIcon,
 } from "lucide-react"
 
 import { DashboardMessagesPage } from "@/components/dashboard/DashboardMessagesPage"
@@ -59,6 +60,13 @@ import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { toast } from "@/contexts/ToastContext"
 import { useUserContext } from "@/contexts/UserContext"
 import {
+  type AssignmentSummaryRecord,
+  type NotificationItem,
+  type StudentActivityRecord,
+  type StudentMaterialRecord,
+  type StudentRecentSubmission,
+  type StudentSubjectPerformance,
+  type StudentWeeklyProgress,
   useAnnouncements,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -131,6 +139,24 @@ interface TimelineItem {
   tone: "primary" | "success" | "info"
 }
 
+interface AnnouncementSummary {
+  id: string
+  notificationId: string | null
+  title: string
+  message: string
+  stamp: string
+  isRead: boolean
+  actionUrl: string | null
+}
+
+interface RecentSubmissionSummary {
+  id: string
+  assignmentTitle: string
+  subject: string
+  score: number | null
+  submittedAt: string | null
+}
+
 const NAV_LABELS: Record<StudentNavSection, string> = {
   dashboard: "Student Dashboard",
   courses: "My Courses",
@@ -158,7 +184,7 @@ const MATERIAL_FILTER_LABELS: Record<MaterialFilter, string> = {
   other: "Other",
 }
 
-const NAV_ITEMS: Array<{ label: string; section: StudentNavSection; icon: any }> = [
+const NAV_ITEMS: Array<{ label: string; section: StudentNavSection; icon: LucideIcon }> = [
   { label: "Dashboard", section: "dashboard", icon: LayoutDashboard },
   { label: "My Courses", section: "courses", icon: BookOpen },
   { label: "Assignments", section: "assignments", icon: CheckCircle2 },
@@ -233,7 +259,49 @@ function normalizeAssignmentStatus(rawStatus: string, dueDate: Date | null): Ass
   return "pending"
 }
 
-function toAssignmentCards(items: any[]): AssignmentCardData[] {
+function parseOptionalDate(value: string | null | undefined): Date | null {
+  return value ? new Date(value) : null
+}
+
+function resolveAssignmentSubjectLabel(item: AssignmentSummaryRecord): string {
+  if (typeof item.subject_name === "string" && item.subject_name.trim()) {
+    return item.subject_name
+  }
+  if (typeof item.subject === "string" && item.subject.trim()) {
+    return item.subject
+  }
+  if (item.subject && typeof item.subject === "object" && typeof item.subject.name === "string" && item.subject.name.trim()) {
+    return item.subject.name
+  }
+  if (typeof item.subject_id === "string" && item.subject_id.trim()) {
+    return item.subject_id
+  }
+  if (item.subject_id && typeof item.subject_id === "object" && typeof item.subject_id.name === "string" && item.subject_id.name.trim()) {
+    return item.subject_id.name
+  }
+  return "General Studies"
+}
+
+function resolveMaterialSubjectLabel(item: StudentMaterialRecord): string {
+  if (typeof item.subject_name === "string" && item.subject_name.trim()) {
+    return item.subject_name
+  }
+  if (typeof item.subject === "string" && item.subject.trim()) {
+    return item.subject
+  }
+  if (item.subject && typeof item.subject === "object" && typeof item.subject.name === "string" && item.subject.name.trim()) {
+    return item.subject.name
+  }
+  if (typeof item.subject_id === "string" && item.subject_id.trim()) {
+    return item.subject_id
+  }
+  if (item.subject_id && typeof item.subject_id === "object" && typeof item.subject_id.name === "string" && item.subject_id.name.trim()) {
+    return item.subject_id.name
+  }
+  return "General"
+}
+
+function toAssignmentCards(items: AssignmentSummaryRecord[]): AssignmentCardData[] {
   return items.map((item, index) => {
     const questionCount = Number(
       item?.question_count ?? item?.questionCount ?? item?.questions?.length ?? 0
@@ -244,7 +312,7 @@ function toAssignmentCards(items: any[]): AssignmentCardData[] {
         (String(item?.status || "").toLowerCase() === "completed" ? questionCount : 0)
     )
 
-    const dueDate = item?.due_date || item?.dueDate ? new Date(item?.due_date ?? item?.dueDate) : null
+    const dueDate = parseOptionalDate(item?.due_date ?? item?.dueDate)
     const rawStatus = String(item?.status ?? "pending")
     const status = normalizeAssignmentStatus(rawStatus, dueDate)
     const backendProgress = Number(item?.progress_percent ?? item?.progressPercent)
@@ -264,13 +332,7 @@ function toAssignmentCards(items: any[]): AssignmentCardData[] {
     return {
       id: String(item?.id ?? item?._id ?? `assignment-${index}`),
       title: String(item?.title ?? "Untitled Assignment"),
-      subject: String(
-        item?.subject_name ??
-          item?.subject?.name ??
-          item?.subject_id?.name ??
-          item?.subject_id ??
-          "General Studies"
-      ),
+      subject: resolveAssignmentSubjectLabel(item),
       subjectId,
       dueDate,
       questionCount,
@@ -362,25 +424,14 @@ function toMaterialType(value: string): MaterialFilter {
   return "other"
 }
 
-function toMaterialCards(items: any[]): StudentMaterialItem[] {
+function toMaterialCards(items: StudentMaterialRecord[]): StudentMaterialItem[] {
   return items.map((item, index) => {
     const id = String(item?.id ?? item?._id ?? `material-${index}`)
     const rawType = String(item?.material_type ?? "other")
     const materialType = toMaterialType(rawType)
     const fileSize = typeof item?.file_size === "number" ? item.file_size : null
-    const createdAt = item?.created_at ? new Date(item.created_at) : null
-    const subject =
-      typeof item?.subject_name === "string" && item.subject_name.trim()
-        ? item.subject_name
-        : typeof item?.subject === "string" && item.subject.trim()
-          ? item.subject
-          : typeof item?.subject?.name === "string" && item.subject.name.trim()
-            ? item.subject.name
-            : typeof item?.subject_id === "string" && item.subject_id.trim()
-              ? item.subject_id
-              : typeof item?.subject_id?.name === "string" && item.subject_id.name.trim()
-                ? item.subject_id.name
-                : "General"
+    const createdAt = parseOptionalDate(item?.created_at)
+    const subject = resolveMaterialSubjectLabel(item)
 
     return {
       id,
@@ -574,10 +625,7 @@ export default function StudentDashboard() {
     contentScrollRef.current?.scrollTo({ top: 0, behavior: "auto" })
   }, [activeNavSection])
 
-  const assignments = useMemo(
-    () => toAssignmentCards(Array.isArray(rawAssignments) ? (rawAssignments as any[]) : []),
-    [rawAssignments]
-  )
+  const assignments = useMemo(() => toAssignmentCards(rawAssignments), [rawAssignments])
 
   const actionableAssignments = useMemo(
     () => assignments.filter((item) => item.status !== "completed" && item.status !== "archived"),
@@ -664,12 +712,12 @@ export default function StudentDashboard() {
       ? Math.min(4, Math.max(0, averageScore / 25)).toFixed(2)
       : "--"
 
-  const recentSubmissions = useMemo(() => {
+  const recentSubmissions = useMemo<RecentSubmissionSummary[]>(() => {
     if (!Array.isArray(progressAnalytics?.recent_submissions)) {
       return []
     }
 
-    return progressAnalytics.recent_submissions.map((item: any, index: number) => ({
+    return progressAnalytics.recent_submissions.map((item: StudentRecentSubmission, index: number) => ({
       id: String(item?.assignment_id || item?.id || index),
       assignmentTitle: String(item?.assignment_title || "Assignment"),
       subject: String(item?.subject || "General"),
@@ -680,7 +728,7 @@ export default function StudentDashboard() {
 
   const activityItems = useMemo<TimelineItem[]>(() => {
     if (Array.isArray(activityFeed) && activityFeed.length > 0) {
-      return activityFeed.slice(0, 6).map((item: any) => {
+      return activityFeed.slice(0, 6).map((item: StudentActivityRecord) => {
         const activityType = String(item?.activity_type ?? "activity")
         const title = item?.description || readableActivityType(activityType)
         const tone: TimelineItem["tone"] =
@@ -704,12 +752,12 @@ export default function StudentDashboard() {
     return []
   }, [activityFeed])
 
-  const announcementItems = useMemo(() => {
+  const announcementItems = useMemo<AnnouncementSummary[]>(() => {
     if (!Array.isArray(announcements)) {
       return []
     }
 
-    return announcements.slice(0, 5).map((item: any, index: number) => ({
+    return announcements.slice(0, 5).map((item: NotificationItem, index: number) => ({
       id: String(item?.id ?? item?._id ?? `announcement-${index}`),
       notificationId:
         typeof (item?.id ?? item?._id) === "string" ? String(item.id ?? item._id) : null,
@@ -759,7 +807,7 @@ export default function StudentDashboard() {
       ? progressAnalytics.subject_performance
       : []
 
-    subjectPerformance.forEach((entry: any) => {
+    subjectPerformance.forEach((entry: StudentSubjectPerformance) => {
       const subject = String(entry?.subject || "General")
       if (!subject) return
       scoreLookup.set(subject.toLowerCase(), Number(entry?.score || 0))
@@ -813,7 +861,7 @@ export default function StudentDashboard() {
       : []
 
     return subjectPerformance
-      .map((entry: any, index: number) => ({
+      .map((entry: StudentSubjectPerformance, index: number) => ({
         id: `${entry?.subject || "subject"}-${index}`,
         subject: String(entry?.subject || "General"),
         score: Number(entry?.score || 0),
@@ -822,10 +870,7 @@ export default function StudentDashboard() {
       .sort((a, b) => b.score - a.score)
   }, [progressAnalytics?.subject_performance])
 
-  const materialItems = useMemo(
-    () => toMaterialCards(Array.isArray(materials) ? (materials as any[]) : []),
-    [materials]
-  )
+  const materialItems = useMemo(() => toMaterialCards(materials), [materials])
 
   const filteredMaterials = useMemo(() => {
     const query = materialSearchTerm.trim().toLowerCase()
@@ -861,7 +906,7 @@ export default function StudentDashboard() {
     )
   }, [materialItems])
 
-  const weeklyProgressRows = Array.isArray(progressAnalytics?.weekly_progress)
+  const weeklyProgressRows: StudentWeeklyProgress[] = Array.isArray(progressAnalytics?.weekly_progress)
     ? progressAnalytics.weekly_progress
     : []
 
@@ -1602,7 +1647,7 @@ export default function StudentDashboard() {
               ) : weeklyProgressRows.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Progress trends will appear after submissions are logged.</p>
               ) : (
-                weeklyProgressRows.map((row: any, index: number) => {
+                weeklyProgressRows.map((row: StudentWeeklyProgress, index: number) => {
                   const assigned = Number(row?.assigned || 0)
                   const completed = Number(row?.completed || 0)
                   const ratio = assigned > 0 ? Math.round((completed / assigned) * 100) : 0

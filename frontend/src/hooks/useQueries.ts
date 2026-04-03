@@ -19,6 +19,125 @@ export interface PaginatedResponse<T> {
   meta: PaginationMeta
 }
 
+export type JsonRecord = Record<string, unknown>
+
+export interface NotificationItem {
+  id?: string
+  _id?: string
+  title?: string
+  message?: string
+  notification_type?: string
+  created_at?: string
+  is_read?: boolean
+  action_url?: string | null
+}
+
+export interface UnreadNotificationCountResponse {
+  unread_count?: number
+}
+
+export interface AssignmentSummaryRecord {
+  id?: string
+  _id?: string
+  title?: string
+  subject_name?: string
+  subject?: string | { name?: string }
+  subject_id?: string | { _id?: string; name?: string } | null
+  due_date?: string | null
+  dueDate?: string | null
+  question_count?: number
+  questionCount?: number
+  questions?: unknown[]
+  completed_questions?: number
+  completedQuestions?: number
+  status?: string
+  progress_percent?: number
+  progressPercent?: number
+  best_score?: number
+  score?: number
+  feedback?: string
+  review_available?: boolean
+  submitted_at?: string | null
+  graded_at?: string | null
+}
+
+export interface StudentActivityRecord {
+  description?: string
+  activity_type?: string
+  related_entity_type?: string
+  created_at?: string
+}
+
+export interface ParentUpcomingAssignmentRecord {
+  title?: string
+  subject?: string
+  due_date?: string | null
+  is_overdue?: boolean
+}
+
+export interface ParentProgressViewRecord {
+  child_id?: string
+  child_name?: string
+  upcoming_assignments?: ParentUpcomingAssignmentRecord[]
+}
+
+export interface StudentDashboardStatsResponse {
+  total_assignments: number
+  completed: number
+  pending: number
+  overall_average: number
+  current_grade: string
+}
+
+export interface StudentSubjectPerformance {
+  subject: string
+  score: number
+  assignments: number
+  completed?: number
+}
+
+export interface StudentRecentSubmission {
+  assignment_id?: string
+  id?: string
+  assignment_title?: string
+  subject?: string
+  score?: number | null
+  submitted_at?: string | null
+}
+
+export interface StudentWeeklyProgress {
+  week: string
+  completed: number
+  assigned: number
+}
+
+export interface StudentProgressAnalyticsResponse {
+  total_assignments: number
+  completed_assignments: number
+  pending_assignments: number
+  overdue_assignments: number
+  average_score: number | null
+  total_time_spent: number
+  subject_performance: StudentSubjectPerformance[]
+  recent_submissions: StudentRecentSubmission[]
+  weekly_progress: StudentWeeklyProgress[]
+}
+
+export interface StudentMaterialRecord {
+  id?: string
+  _id?: string
+  title?: string
+  description?: string
+  material_type?: string
+  file_url?: string | null
+  file_size?: number | null
+  subject_name?: string
+  subject?: string | { name?: string }
+  subject_id?: string | { name?: string } | null
+  topic?: string
+  created_at?: string | null
+}
+
 // Student interface
 export interface Student {
   _id: string
@@ -100,7 +219,7 @@ export function useStudentAssignments(
 ) {
   const client = useApiClient()
 
-  return useQuery<PaginatedResponse<any>>({
+  return useQuery<PaginatedResponse<AssignmentSummaryRecord>>({
     queryKey: ['assignments', 'student', studentId, status, page, perPage],
     queryFn: async () => {
       if (!studentId) throw new Error('Student ID is required')
@@ -112,7 +231,7 @@ export function useStudentAssignments(
 
       const response = await client.get(`/assignments/student/${studentId}?${params.toString()}`)
       if (response.error) throw new Error(response.error)
-      return response.data as PaginatedResponse<any>
+      return response.data as PaginatedResponse<AssignmentSummaryRecord>
     },
     enabled: !!studentId,
   })
@@ -146,13 +265,13 @@ export function useStudentActivities(
 ) {
   const client = useApiClient()
 
-  return useQuery<PaginatedResponse<any>>({
+  return useQuery<PaginatedResponse<JsonRecord>>({
     queryKey: ['activities', 'student', studentId, page, perPage],
     queryFn: async () => {
       if (!studentId) throw new Error('Student ID is required')
       const response = await client.get(`/activity/student/${studentId}?page=${page}&per_page=${perPage}`)
       if (response.error) throw new Error(response.error)
-      return response.data as PaginatedResponse<any>
+      return response.data as PaginatedResponse<JsonRecord>
     },
     enabled: !!studentId,
   })
@@ -187,7 +306,7 @@ export function useNotifications(
 ) {
   const client = useApiClient()
 
-  return useQuery<PaginatedResponse<any>>({
+  return useQuery<PaginatedResponse<NotificationItem>>({
     queryKey: ['notifications', page, perPage, unreadOnly],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -197,7 +316,7 @@ export function useNotifications(
       })
       const response = await client.get(`/notifications?${params.toString()}`)
       if (response.error) throw new Error(response.error)
-      return response.data as PaginatedResponse<any>
+      return response.data as PaginatedResponse<NotificationItem>
     },
     staleTime: 15 * 1000,
     refetchOnWindowFocus: true,
@@ -371,7 +490,7 @@ export function useAssignments(
 ) {
   const client = useApiClient()
 
-  return useQuery<PaginatedResponse<any>>({
+  return useQuery<PaginatedResponse<JsonRecord>>({
     queryKey: ['assignments', page, perPage, filters],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -383,7 +502,7 @@ export function useAssignments(
 
       const response = await client.get(`/assignments?${params.toString()}`)
       if (response.error) throw new Error(response.error)
-      return response.data as PaginatedResponse<any>
+      return response.data as PaginatedResponse<JsonRecord>
     },
   })
 }
@@ -394,13 +513,13 @@ export function useAssignments(
 export function useMyAssignments() {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<AssignmentSummaryRecord[]>({
     queryKey: ['assignments', 'my'],
     queryFn: async () => {
       const perPage = 100
       let page = 1
       let totalPages = 1
-      const items: any[] = []
+      const items: AssignmentSummaryRecord[] = []
 
       while (page <= totalPages) {
         const response = await client.get(
@@ -408,7 +527,7 @@ export function useMyAssignments() {
         )
         if (response.error) throw new Error(response.error)
 
-        const payload = response.data as PaginatedResponse<any> | any[]
+        const payload = response.data as PaginatedResponse<AssignmentSummaryRecord> | AssignmentSummaryRecord[]
         const pageItems = Array.isArray(payload)
           ? payload
           : Array.isArray(payload?.items)
@@ -481,7 +600,7 @@ export function useQuestions(
 ) {
   const client = useApiClient()
 
-  return useQuery<PaginatedResponse<any>>({
+  return useQuery<PaginatedResponse<JsonRecord>>({
     queryKey: ['questions', page, perPage, filters],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -495,7 +614,7 @@ export function useQuestions(
 
       const response = await client.get(`/questions?${params.toString()}`)
       if (response.error) throw new Error(response.error)
-      return response.data as PaginatedResponse<any>
+      return response.data as PaginatedResponse<JsonRecord>
     },
   })
 }
@@ -506,7 +625,7 @@ export function useQuestions(
 export function usePendingQuestions(page: number = 1, perPage: number = 20) {
   const client = useApiClient()
 
-  return useQuery<PaginatedResponse<any>>({
+  return useQuery<PaginatedResponse<JsonRecord>>({
     queryKey: ['questions', 'pending', page, perPage],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -515,7 +634,7 @@ export function usePendingQuestions(page: number = 1, perPage: number = 20) {
       })
       const response = await client.get(`/questions/pending?${params.toString()}`)
       if (response.error) throw new Error(response.error)
-      return response.data as PaginatedResponse<any>
+      return response.data as PaginatedResponse<JsonRecord>
     },
   })
 }
@@ -534,7 +653,7 @@ export function useMaterials(
 ) {
   const client = useApiClient()
 
-  return useQuery<PaginatedResponse<any>>({
+  return useQuery<PaginatedResponse<JsonRecord>>({
     queryKey: ['materials', page, perPage, filters],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -547,7 +666,7 @@ export function useMaterials(
 
       const response = await client.get(`/materials?${params.toString()}`)
       if (response.error) throw new Error(response.error)
-      return response.data as PaginatedResponse<any>
+      return response.data as PaginatedResponse<JsonRecord>
     },
   })
 }
@@ -582,7 +701,7 @@ export function useGroups(limit: number = 200) {
 export function useParentProgress() {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<ParentProgressViewRecord[]>({
     queryKey: ['progress', 'parent'],
     queryFn: async () => {
       const response = await client.get('/progress/parent')
@@ -598,7 +717,16 @@ export function useParentProgress() {
 export function useParentDashboardStats() {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<{
+    children: Array<{
+      id: string
+      name: string
+      grade?: string
+      overall_progress: number
+      recent_grade?: string
+      assignments_due: number
+    }>
+  }>({
     queryKey: ['parent-dashboard-stats'],
     queryFn: async () => {
       const response = await client.get('/dashboard/parent-stats')
@@ -670,7 +798,7 @@ export function useMessages(conversationId: string | undefined, page: number = 1
 export function useAnnouncements() {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<NotificationItem[]>({
     queryKey: ['announcements'],
     queryFn: async () => {
       const response = await client.get('/notifications?per_page=10')
@@ -693,18 +821,12 @@ export function useAnnouncements() {
 export function useStudentDashboardStats() {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<StudentDashboardStatsResponse>({
     queryKey: ['student-dashboard-stats'],
     queryFn: async () => {
       const response = await client.get('/dashboard/student-stats')
       if (response.error) throw new Error(response.error)
-      return response.data as {
-        total_assignments: number
-        completed: number
-        pending: number
-        overall_average: number
-        current_grade: string
-      }
+      return response.data as StudentDashboardStatsResponse
     },
     staleTime: 60 * 1000, // 1 minute
     refetchOnWindowFocus: true,
@@ -718,22 +840,12 @@ export function useStudentDashboardStats() {
 export function useStudentProgressAnalytics() {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<StudentProgressAnalyticsResponse>({
     queryKey: ['student-progress-analytics'],
     queryFn: async () => {
       const response = await client.get('/progress/student')
       if (response.error) throw new Error(response.error)
-      return response.data as {
-        total_assignments: number
-        completed_assignments: number
-        pending_assignments: number
-        overdue_assignments: number
-        average_score: number | null
-        total_time_spent: number
-        subject_performance: Array<{ subject: string; score: number; assignments: number }>
-        recent_submissions: Array<any>
-        weekly_progress: Array<{ week: string; completed: number; assigned: number }>
-      }
+      return response.data as StudentProgressAnalyticsResponse
     },
     staleTime: 60 * 1000, // 1 minute
     refetchOnWindowFocus: true,
@@ -747,7 +859,7 @@ export function useStudentProgressAnalytics() {
 export function useMyActivities(limit: number = 20) {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<StudentActivityRecord[]>({
     queryKey: ['activities', 'me', limit],
     queryFn: async () => {
       const response = await client.get(`/activity/me?limit=${limit}`)
@@ -766,7 +878,7 @@ export function useMyActivities(limit: number = 20) {
 export function useStudentMaterials(subjectId?: string) {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<StudentMaterialRecord[]>({
     queryKey: ['materials', 'student', subjectId || 'all'],
     queryFn: async () => {
       const suffix = subjectId ? `?subject_id=${encodeURIComponent(subjectId)}` : ''
@@ -876,13 +988,13 @@ export function useGenerationStats() {
 export function useAllGeneratedQuestions() {
   const client = useApiClient()
 
-  return useQuery({
+  return useQuery<JsonRecord[]>({
     queryKey: ['all-generated-questions'],
     queryFn: async () => {
       const response = await client.get('/question-generator/all-questions?per_page=200')
       if (response.error) throw new Error(response.error)
       const data = response.data
-      return (data?.items || (Array.isArray(data) ? data : [])) as Array<Record<string, any>>
+      return (data?.items || (Array.isArray(data) ? data : [])) as JsonRecord[]
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
   })

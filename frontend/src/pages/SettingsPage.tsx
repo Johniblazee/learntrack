@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { LoadingSpinner } from '@/components/ui/loading-state'
 import { useTheme } from '../contexts/ThemeContext'
 import { toast } from '../contexts/ToastContext'
+import { type UserSettingsResponse } from '@/hooks/useQueries'
 import { useUserContext } from '@/contexts/UserContext'
 import { useApiClient } from '../lib/api-client'
 import { AIConfigTab } from '@/components/settings/AIConfigTab'
@@ -116,7 +117,7 @@ export default function SettingsPage() {
           throw new Error('Unable to load your settings right now.')
         }
 
-        const data = response.data as any
+        const data = response.data as UserSettingsResponse
         setSettings((prev) => ({
           ...prev,
           displayName: data.profile?.display_name || user?.fullName || '',
@@ -188,9 +189,9 @@ export default function SettingsPage() {
 
       toast.success('Settings saved successfully!')
       queryClient.invalidateQueries({ queryKey: ['user-settings'] })
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to save settings:', error)
-      toast.error(error.message || 'Failed to save settings')
+      toast.error(error instanceof Error ? error.message : 'Failed to save settings')
     } finally {
       setIsSaving(false)
     }

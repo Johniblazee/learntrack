@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Heart,
   Layers,
+  type LucideIcon,
   MessageCircle,
   Target,
   TrendingUp,
@@ -45,6 +46,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DashboardHeaderActions } from '@/components/dashboard/DashboardHeaderActions'
 import {
+  type ParentProgressViewRecord,
+  type ParentUpcomingAssignmentRecord,
   useParentDashboardStats,
   useParentProgress,
   useUserSettings,
@@ -53,6 +56,14 @@ import { useImpersonation } from '@/contexts/ImpersonationContext'
 import { useUserContext } from '@/contexts/UserContext'
 
 type ParentTab = 'overview' | 'children' | 'upcoming' | 'messages'
+
+interface UpcomingAssignmentRow {
+  childName: string
+  title: string
+  subject: string
+  dueDate: string | null
+  isOverdue: boolean
+}
 
 const PARENT_TAB_ROUTES: Record<ParentTab, string> = {
   overview: '/dashboard',
@@ -190,13 +201,13 @@ export default function ParentDashboard() {
   const upcomingFromProgress = useMemo(() => {
     if (!Array.isArray(parentProgressViews)) return []
 
-    return parentProgressViews.flatMap((view: any) => {
+    return parentProgressViews.flatMap((view: ParentProgressViewRecord): UpcomingAssignmentRow[] => {
       const childName = view?.child_name || 'Child'
-      const assignments = Array.isArray(view?.upcoming_assignments)
+      const assignments: ParentUpcomingAssignmentRecord[] = Array.isArray(view?.upcoming_assignments)
         ? view.upcoming_assignments
         : []
 
-      return assignments.map((assignment: any) => ({
+      return assignments.map((assignment) => ({
         childName,
         title: assignment?.title || 'Untitled assignment',
         subject: assignment?.subject || 'General',
@@ -246,7 +257,7 @@ export default function ParentDashboard() {
     navigate(PARENT_TAB_ROUTES[tab])
   }
 
-  const navItems: Array<{ label: string; tab: ParentTab; icon: any }> = [
+  const navItems: Array<{ label: string; tab: ParentTab; icon: LucideIcon }> = [
     { label: 'Overview', tab: 'overview', icon: Heart },
     { label: 'Children', tab: 'children', icon: Users },
     { label: 'Upcoming', tab: 'upcoming', icon: CalendarClock },

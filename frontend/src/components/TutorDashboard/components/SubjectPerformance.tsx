@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
-import { useAssignments } from "@/hooks/useQueries"
+import { type AssignmentSummaryRecord, useAssignments } from "@/hooks/useQueries"
 
 interface CalendarDay {
   day: number
@@ -45,9 +45,10 @@ export function SubjectPerformance() {
     // Get assignment deadlines for highlighting
     const deadlineDates = new Set(
       assignments
-        .filter(a => a.due_date)
-        .map(a => {
-          const date = new Date(a.due_date)
+        .map((assignment: AssignmentSummaryRecord) => assignment.due_date)
+        .filter((dueDate): dueDate is string => typeof dueDate === 'string' && dueDate.length > 0)
+        .map((dueDate) => {
+          const date = new Date(dueDate)
           date.setHours(0, 0, 0, 0)
           return date.getTime()
         })
@@ -212,4 +213,3 @@ export function SubjectPerformance() {
     </Card>
   )
 }
-

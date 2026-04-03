@@ -4,7 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/hooks/useQueries'
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  type NotificationItem,
+  useNotifications,
+} from '@/hooks/useQueries'
 
 export default function NotificationsPage() {
   const navigate = useNavigate()
@@ -15,7 +20,7 @@ export default function NotificationsPage() {
   const notifications = Array.isArray(data?.items) ? data.items : []
   const errorMessage = error instanceof Error ? error.message : null
 
-  const handleOpenNotification = (notification: any) => {
+  const handleOpenNotification = (notification: NotificationItem) => {
     const notificationId = notification?.id || notification?._id
     if (notificationId && !notification?.is_read) {
       markNotificationRead.mutate(String(notificationId))
@@ -75,7 +80,7 @@ export default function NotificationsPage() {
               No notifications yet.
             </div>
           ) : (
-            notifications.map((notification: any, index: number) => (
+            notifications.map((notification, index: number) => (
               <button
                 key={String(notification?.id || notification?._id || index)}
                 type="button"

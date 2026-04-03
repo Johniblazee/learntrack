@@ -18,6 +18,7 @@ import { ThemeToggle } from '@/components/ui/theme-toggle'
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
+  type NotificationItem,
   useNotifications,
   useUnreadNotificationCount,
 } from '@/hooks/useQueries'
@@ -72,7 +73,7 @@ export function DashboardHeaderActions({
     return labels[notificationType] || 'Notification'
   }
 
-  const resolveNotificationTitle = (notification: any): string => {
+  const resolveNotificationTitle = (notification: NotificationItem): string => {
     if (typeof notification?.title === 'string' && notification.title.trim()) {
       return notification.title.trim()
     }
@@ -84,14 +85,14 @@ export function DashboardHeaderActions({
     return mapTypeToTitle(type)
   }
 
-  const resolveNotificationMessage = (notification: any): string => {
+  const resolveNotificationMessage = (notification: NotificationItem): string => {
     if (typeof notification?.message === 'string' && notification.message.trim()) {
       return notification.message.trim()
     }
     return 'No details available.'
   }
 
-  const resolveNotificationTime = (notification: any): string => {
+  const resolveNotificationTime = (notification: NotificationItem): string => {
     const raw = notification?.created_at
     if (typeof raw !== 'string' || !raw.trim()) {
       return 'just now'
@@ -105,7 +106,7 @@ export function DashboardHeaderActions({
     return formatDistanceToNow(parsed, { addSuffix: true })
   }
 
-  const getNotificationId = (notification: any): string | null => {
+  const getNotificationId = (notification: NotificationItem): string | null => {
     const raw = notification?.id ?? notification?._id
     return typeof raw === 'string' && raw.trim() ? raw : null
   }
@@ -122,7 +123,7 @@ export function DashboardHeaderActions({
     markAllNotificationsRead.mutate()
   }
 
-  const handleNotificationSelect = (notification: any) => {
+  const handleNotificationSelect = (notification: NotificationItem) => {
     const notificationId = getNotificationId(notification)
     const isRead = Boolean(notification?.is_read)
 
@@ -185,7 +186,7 @@ export function DashboardHeaderActions({
                 <span className="text-sm text-muted-foreground">No notifications</span>
               </DropdownMenuItem>
             ) : (
-              notifications.slice(0, 6).map((notification: any, index: number) => {
+              notifications.slice(0, 6).map((notification, index: number) => {
                 const notificationId = getNotificationId(notification)
                 const isRead = Boolean(notification?.is_read)
 

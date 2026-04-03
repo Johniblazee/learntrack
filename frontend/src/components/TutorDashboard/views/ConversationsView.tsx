@@ -51,6 +51,14 @@ interface Conversation {
   unread_count: Record<string, number>
 }
 
+interface ConversationsPayload {
+  conversations?: Conversation[]
+}
+
+interface MessagesPayload {
+  messages?: Message[]
+}
+
 export default function ConversationsView({ routeMode = 'chats' }: ConversationsViewProps) {
   const { getToken, userId } = useAuth()
   const client = useApiClient()
@@ -169,11 +177,11 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
         throw new Error(response.error)
       }
 
-      const payload = response.data as any
-      const nextConversations = Array.isArray(payload?.conversations)
-        ? payload.conversations
-        : Array.isArray(payload)
-          ? payload
+      const payload = response.data as ConversationsPayload | Conversation[] | undefined
+      const nextConversations = Array.isArray(payload)
+        ? payload
+        : payload && Array.isArray(payload.conversations)
+          ? payload.conversations
           : []
 
       setConversations(nextConversations)
@@ -229,8 +237,8 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
         throw new Error(response.error)
       }
 
-      const data = response.data as any
-      setMessages(data.messages || [])
+      const data = response.data as MessagesPayload | undefined
+      setMessages(data?.messages || [])
       socketClient.joinConversation(conversationId)
       markConversationAsRead(conversationId)
     } catch (error) {
@@ -342,9 +350,9 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
       setNewMessage("")
       await loadMessages(selectedConversation._id)
       await loadConversations()
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to send message:', error)
-      toast.error(error.message || 'Failed to send message')
+      toast.error(error instanceof Error ? error.message : 'Failed to send message')
     } finally {
       setSendingMessage(false)
     }

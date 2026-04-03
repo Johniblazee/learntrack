@@ -44,12 +44,12 @@ export default function DashboardPage() {
       return validBackendRole
     }
 
-    if (!isBackendLoaded && validClerkRole) {
+    if (validClerkRole) {
       return validClerkRole
     }
 
     return null
-  }, [isBackendLoaded, isImpersonating, validBackendRole, validClerkRole, validImpersonatedRole])
+  }, [isImpersonating, validBackendRole, validClerkRole, validImpersonatedRole])
 
   useEffect(() => {
     if (!isLoaded) {
@@ -61,7 +61,7 @@ export default function DashboardPage() {
     }
 
     if (!effectiveView && !hasRoleMismatch) {
-      navigate('/role-setup')
+      navigate('/onboarding/teacher')
     }
   }, [effectiveView, hasRoleMismatch, isBackendLoaded, isLoaded, navigate, validClerkRole])
 
