@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, Path, Query, HTTPException, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
+from pydantic import BaseModel
 
 from app.core.database import get_database
 from app.core.dependencies import get_question_service
@@ -30,6 +31,10 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
+class BulkQuestionDeleteRequest(BaseModel):
+    question_ids: List[str]
+
+
 @router.post("/", response_model=Question)
 async def create_question(
     question_data: QuestionCreate,
@@ -42,6 +47,8 @@ async def create_question(
             question_data, current_user.clerk_id
         )
         return question
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Failed to create question", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to create question")
@@ -54,6 +61,7 @@ async def get_questions(
     difficulty: Optional[str] = Query(None, description="Filter by difficulty"),
     question_type: Optional[str] = Query(None, description="Filter by question type"),
     search: Optional[str] = Query(None, description="Search in question text"),
+    status: Optional[str] = Query(None, description="Filter by question status"),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: ClerkUserContext = Depends(require_tutor),
@@ -68,6 +76,7 @@ async def get_questions(
             difficulty=difficulty,
             question_type=question_type,
             search=search,
+            status=status,
             page=page,
             per_page=per_page,
         )
@@ -140,6 +149,10 @@ async def get_question(
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
         return question
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -183,6 +196,12 @@ async def update_question(
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
         return question
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -215,6 +234,28 @@ async def delete_question(
     except Exception as e:
         logger.error("Failed to delete question", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to delete question")
+
+
+@router.post("/bulk-delete", response_model=dict)
+@limiter.limit(RATE_LIMITS["bulk"])
+async def bulk_delete_questions(
+    request: Request,
+    payload: BulkQuestionDeleteRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    question_service: QuestionService = Depends(get_question_service),
+):
+    """Soft delete multiple questions at once."""
+    try:
+        del request
+        return await question_service.bulk_delete_questions(
+            payload.question_ids,
+            current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk delete questions", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to bulk delete questions")
 
 
 @router.put("/{question_id}/approve", response_model=Question)

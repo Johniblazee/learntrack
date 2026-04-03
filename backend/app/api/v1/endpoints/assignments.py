@@ -9,6 +9,7 @@ import structlog
 
 from app.core.database import get_database
 from app.core.dependencies import get_assignment_service
+from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.enhanced_auth import (
     require_tutor,
     require_authenticated_user,
@@ -40,6 +41,12 @@ async def create_assignment(
             assignment_data, current_user.clerk_id
         )
         return assignment
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error("Failed to create assignment", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to create assignment")

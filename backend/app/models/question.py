@@ -91,6 +91,7 @@ class QuestionUpdate(BaseModel):
 
     question_text: Optional[str] = None
     question_type: Optional[QuestionType] = None
+    subject_id: Optional[str] = None
     topic: Optional[str] = None
     difficulty: Optional[QuestionDifficulty] = None
     points: Optional[int] = None

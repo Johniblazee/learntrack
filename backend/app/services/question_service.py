@@ -442,6 +442,110 @@ class QuestionService:
             )
             raise DatabaseException(f"Failed to delete question: {str(e)}")
 
+    async def bulk_delete_questions(
+        self, question_ids: List[str], tutor_id: str
+    ) -> Dict[str, Any]:
+        """Soft delete multiple questions owned by a tutor."""
+        try:
+            normalized_ids = list(
+                dict.fromkeys(
+                    str(question_id).strip()
+                    for question_id in question_ids
+                    if str(question_id).strip()
+                )
+            )
+            if not normalized_ids:
+                raise ValidationError("Select at least one question")
+
+            candidate_oids = [
+                to_object_id(question_id) for question_id in normalized_ids
+            ]
+            requested_by_id = {
+                str(candidate_oid): question_id
+                for question_id, candidate_oid in zip(normalized_ids, candidate_oids)
+            }
+
+            owned_docs = await self.collection.find(
+                {
+                    "_id": {"$in": candidate_oids},
+                    "tutor_id": tutor_id,
+                    "status": {"$ne": QuestionStatus.DELETED.value},
+                },
+                {"_id": 1},
+            ).to_list(length=None)
+
+            owned_id_set = {
+                requested_by_id[str(doc.get("_id"))]
+                for doc in owned_docs
+                if doc.get("_id") is not None
+            }
+            owned_ids = [
+                question_id
+                for question_id in normalized_ids
+                if question_id in owned_id_set
+            ]
+            skipped_ids = [
+                question_id
+                for question_id in normalized_ids
+                if question_id not in owned_id_set
+            ]
+
+            blocked_ids: List[str] = []
+            deletable_ids: List[str] = []
+
+            for question_id in owned_ids:
+                assignment_count = await self.db.assignments.count_documents(
+                    {"questions.question_id": question_id}
+                )
+                if assignment_count > 0:
+                    blocked_ids.append(question_id)
+                else:
+                    deletable_ids.append(question_id)
+
+            deleted_ids: List[str] = []
+            if deletable_ids:
+                delete_oids = [
+                    to_object_id(question_id) for question_id in deletable_ids
+                ]
+                result = await self.collection.update_many(
+                    {"_id": {"$in": delete_oids}, "tutor_id": tutor_id},
+                    {
+                        "$set": {
+                            "status": QuestionStatus.DELETED.value,
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+                if result.modified_count:
+                    deleted_ids = deletable_ids
+
+            logger.info(
+                "Bulk deleted questions",
+                tutor_id=tutor_id,
+                requested_count=len(normalized_ids),
+                deleted_count=len(deleted_ids),
+                blocked_count=len(blocked_ids),
+                skipped_count=len(skipped_ids),
+            )
+
+            return {
+                "requested_count": len(normalized_ids),
+                "deleted_count": len(deleted_ids),
+                "deleted_question_ids": deleted_ids,
+                "blocked_count": len(blocked_ids),
+                "blocked_question_ids": blocked_ids,
+                "skipped_count": len(skipped_ids),
+                "skipped_question_ids": skipped_ids,
+            }
+
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                "Failed to bulk delete questions", tutor_id=tutor_id, error=str(e)
+            )
+            raise DatabaseException(f"Failed to bulk delete questions: {str(e)}")
+
     async def increment_usage_count(self, question_id: str) -> bool:
         """Increment question usage count"""
         try:

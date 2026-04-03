@@ -8,6 +8,7 @@ import inspect
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 import os
+from bson import ObjectId
 
 from app.models.assignment import (
     Assignment,
@@ -19,6 +20,7 @@ from app.models.assignment import (
     AssignmentStatus,
     QuestionAssignment,
 )
+from app.models.question import QuestionStatus
 from app.models.notification import NotificationCreate, NotificationType
 from app.models.activity import ActivityCreate, ActivityType
 from app.core.exceptions import (
@@ -143,6 +145,33 @@ class AssignmentService:
     ) -> Assignment:
         """Create a new assignment with support for groups and subject-based assignment"""
         try:
+            question_ids = list(
+                dict.fromkeys(
+                    str(question_id).strip()
+                    for question_id in assignment_data.question_ids
+                    if str(question_id).strip()
+                )
+            )
+            question_oids = [to_object_id(question_id) for question_id in question_ids]
+            question_docs = await self.db.questions.find(
+                {
+                    "_id": {"$in": question_oids},
+                    "tutor_id": tutor_id,
+                    "status": QuestionStatus.ACTIVE.value,
+                },
+                {"_id": 1, "points": 1},
+            ).to_list(length=None)
+            question_points = {
+                str(question_doc.get("_id")): int(question_doc.get("points") or 1)
+                for question_doc in question_docs
+                if question_doc.get("_id") is not None
+            }
+
+            if len(question_points) != len(question_ids):
+                raise ValidationError(
+                    "One or more selected questions are unavailable or do not belong to you"
+                )
+
             # Resolve student IDs from groups and subject filters
             student_ids = set(assignment_data.student_ids or [])
             group_ids = assignment_data.group_ids or []
@@ -165,8 +194,12 @@ class AssignmentService:
                 exclude={"group_ids", "subject_filter", "question_ids"}
             )
             questions = [
-                QuestionAssignment(question_id=qid, order=index)
-                for index, qid in enumerate(assignment_data.question_ids)
+                QuestionAssignment(
+                    question_id=qid,
+                    order=index,
+                    points=question_points.get(qid, 1),
+                )
+                for index, qid in enumerate(question_ids)
             ]
             assignment_dict["tutor_id"] = tutor_id
             assignment_dict["created_at"] = datetime.now(timezone.utc)
@@ -909,7 +942,7 @@ class AssignmentService:
             if not group:
                 raise NF("StudentGroup", group_id)
 
-            return group.get("studentIds", [])
+            return await self._resolve_student_clerk_ids(group.get("studentIds", []))
 
         except Exception as e:
             logger.error(
@@ -922,22 +955,78 @@ class AssignmentService:
     ) -> List[str]:
         """Helper: Get student IDs enrolled in a subject"""
         try:
-            # Get all groups for this subject
-            groups = await self.db.student_groups.find(
-                {"tutor_id": tutor_id, "subjects": subject_id}
+            subject_names = {subject_id}
+            subject = await self.db.subjects.find_one(
+                {"_id": to_object_id(subject_id)}, {"name": 1}
+            )
+            if subject and subject.get("name"):
+                subject_names.add(str(subject.get("name")))
+
+            students = await self.db.students.find(
+                {
+                    "tutor_id": tutor_id,
+                    "subjects": {"$in": list(subject_names)},
+                },
+                {"clerk_id": 1},
             ).to_list(length=None)
 
-            # Collect unique student IDs
-            student_ids = set()
-            for group in groups:
-                student_ids.update(group.get("studentIds", []))
-
-            return list(student_ids)
+            return [
+                str(student.get("clerk_id"))
+                for student in students
+                if student.get("clerk_id")
+            ]
 
         except Exception as e:
             logger.error(
                 "Failed to get students by subject", subject_id=subject_id, error=str(e)
             )
+            return []
+
+    async def _resolve_student_clerk_ids(self, identifiers: List[str]) -> List[str]:
+        """Normalize legacy group student identifiers to student Clerk IDs."""
+        try:
+            cleaned_identifiers = list(
+                dict.fromkeys(
+                    str(identifier).strip()
+                    for identifier in identifiers
+                    if str(identifier).strip()
+                )
+            )
+            if not cleaned_identifiers:
+                return []
+
+            object_ids = [
+                candidate
+                for identifier in cleaned_identifiers
+                if isinstance((candidate := to_object_id(identifier)), ObjectId)
+            ]
+            clerk_ids = [
+                identifier
+                for identifier in cleaned_identifiers
+                if not ObjectId.is_valid(identifier)
+            ]
+
+            query_filters = []
+            if object_ids:
+                query_filters.append({"_id": {"$in": object_ids}})
+            if clerk_ids:
+                query_filters.append({"clerk_id": {"$in": clerk_ids}})
+
+            if not query_filters:
+                return []
+
+            students = await self.db.students.find(
+                {"$or": query_filters},
+                {"clerk_id": 1},
+            ).to_list(length=None)
+
+            return [
+                str(student.get("clerk_id"))
+                for student in students
+                if student.get("clerk_id")
+            ]
+        except Exception as e:
+            logger.error("Failed to normalize student identifiers", error=str(e))
             return []
 
     async def get_student_assignments_count(

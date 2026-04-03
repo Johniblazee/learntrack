@@ -38,6 +38,7 @@ class TestAssignmentService:
         """Create mock database"""
         db = AsyncMock(spec=AsyncIOMotorDatabase)
         db.assignments = AsyncMock()
+        db.questions = AsyncMock()
         db.users = AsyncMock()
         return db
 
@@ -50,6 +51,7 @@ class TestAssignmentService:
     async def test_create_assignment(self, assignment_service, mock_db):
         """Test creating a new assignment"""
         # Arrange
+        question_id = ObjectId()
         assignment_data = AssignmentCreate(
             title="Test Assignment",
             description="Test Description",
@@ -57,9 +59,13 @@ class TestAssignmentService:
             tutor_id="tutor_123",
             student_ids=["student_1", "student_2"],
             due_date=datetime.now(timezone.utc),
-            question_ids=[str(ObjectId())],  # At least one question required
+            question_ids=[str(question_id)],  # At least one question required
         )
         tutor_id = "tutor_123"
+
+        mock_questions_cursor = AsyncMock()
+        mock_questions_cursor.to_list.return_value = [{"_id": question_id, "points": 1}]
+        mock_db.questions.find = Mock(return_value=mock_questions_cursor)
 
         mock_db.assignments.insert_one.return_value = Mock(
             inserted_id=ObjectId("507f1f77bcf86cd799439011")

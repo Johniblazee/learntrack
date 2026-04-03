@@ -46,6 +46,7 @@ import {
   X,
   CheckCircle,
   ClipboardList,
+  Users,
 } from "lucide-react"
 
 import { 
@@ -71,6 +72,49 @@ interface Question {
   tags?: string[]
   status?: string
   lastModified: string
+}
+
+interface SubjectRecord {
+  _id?: string
+  id?: string
+  name?: string
+  topics?: string[]
+}
+
+interface QuestionOptionRecord {
+  text?: string
+  is_correct?: boolean
+}
+
+interface BulkDeleteQuestionsResponse {
+  deleted_count?: number
+  deleted_question_ids?: string[]
+  blocked_count?: number
+  blocked_question_ids?: string[]
+  skipped_count?: number
+  skipped_question_ids?: string[]
+}
+
+const getOptionText = (option: string | QuestionOptionRecord) => {
+  if (typeof option === 'string') {
+    return option
+  }
+
+  return typeof option?.text === 'string' ? option.text : ''
+}
+
+const buildMultipleChoicePayload = (options: string[], correctAnswerIndex: number) => {
+  const preparedOptions = options
+    .map((option, index) => ({
+      text: option.trim(),
+      is_correct: index === correctAnswerIndex,
+    }))
+    .filter((option) => option.text)
+
+  return {
+    options: preparedOptions,
+    correctAnswer: preparedOptions.find((option) => option.is_correct)?.text || '',
+  }
 }
 
 // Helper function to get difficulty badge color
@@ -128,6 +172,7 @@ export default function QuestionBankManager() {
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false)
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -160,21 +205,41 @@ export default function QuestionBankManager() {
 
   // Fetch subjects for dropdowns
   const { data: subjectsData } = useSubjects()
-  const subjects = subjectsData || []
+  const subjects = useMemo<SubjectRecord[]>(() => {
+    if (Array.isArray(subjectsData)) {
+      return subjectsData as SubjectRecord[]
+    }
+
+    return ((subjectsData as { items?: SubjectRecord[] } | undefined)?.items || []) as SubjectRecord[]
+  }, [subjectsData])
+
+  const subjectNamesById = useMemo(() => {
+    return new Map(
+      subjects
+        .map((subject) => {
+          const subjectId = String(subject._id || subject.id || '')
+          if (!subjectId) {
+            return null
+          }
+
+          return [subjectId, subject.name || subjectId] as const
+        })
+        .filter(Boolean) as Array<readonly [string, string]>
+    )
+  }, [subjects])
 
   // Derive available topics from subjects
   const availableTopics = useMemo(() => {
-    const source = Array.isArray(subjects) ? subjects : (subjects as any)?.items || []
     if (subjectFilter === 'all') {
       const allTopics = new Set<string>()
-      source.forEach((s: any) => {
-        if (Array.isArray(s.topics)) {
-          s.topics.forEach((t: string) => { if (t) allTopics.add(t) })
-        }
+      subjects.forEach((subject) => {
+        const topics = Array.isArray(subject.topics) ? subject.topics : []
+        topics.forEach((topic) => { if (topic) allTopics.add(topic) })
       })
       return Array.from(allTopics).sort()
     }
-    const selected = source.find((s: any) => (s._id || s.id) === subjectFilter)
+
+    const selected = subjects.find((subject) => String(subject._id || subject.id || '') === subjectFilter)
     return Array.isArray(selected?.topics) ? selected.topics.filter(Boolean).sort() : []
   }, [subjects, subjectFilter])
 
@@ -209,9 +274,12 @@ export default function QuestionBankManager() {
     setSelectedIds(new Set())
   }
 
-  const handleAssignSelected = () => {
+  const handleAssignSelected = (assignmentType: 'individual' | 'group') => {
     navigate('/dashboard/assignments/create', {
-      state: { questionBankIds: [...selectedIds] }
+      state: {
+        questionBankIds: [...selectedIds],
+        initialAssignmentType: assignmentType,
+      }
     })
   }
 
@@ -255,6 +323,11 @@ export default function QuestionBankManager() {
 
       toast.success('Question deleted successfully')
       setDeleteDialogOpen(false)
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(selectedQuestion.id)
+        return next
+      })
       setSelectedQuestion(null)
       // Refresh the list
       fetchQuestions()
@@ -266,13 +339,64 @@ export default function QuestionBankManager() {
     }
   }
 
+  const confirmBulkDelete = async () => {
+    if (selectedIds.size === 0) {
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      const response = await client.post<BulkDeleteQuestionsResponse>('/questions/bulk-delete', {
+        question_ids: [...selectedIds],
+      })
+
+      if (response.error) {
+        toast.error('Failed to delete selected questions', { description: response.error })
+        return
+      }
+
+      const deletedIds = new Set((response.data?.deleted_question_ids || []).map(String))
+      const deletedCount = response.data?.deleted_count || 0
+      const blockedCount = response.data?.blocked_count || 0
+      const skippedCount = response.data?.skipped_count || 0
+      const summary = [
+        deletedCount > 0 ? `${deletedCount} deleted` : null,
+        blockedCount > 0 ? `${blockedCount} in use` : null,
+        skippedCount > 0 ? `${skippedCount} unavailable` : null,
+      ].filter(Boolean).join(', ')
+
+      if (deletedIds.size > 0) {
+        setSelectedIds((prev) => new Set([...prev].filter((id) => !deletedIds.has(id))))
+      }
+
+      setBulkDeleteDialogOpen(false)
+
+      if (deletedCount > 0) {
+        toast.success('Bulk delete completed', {
+          description: summary || 'Selected questions were deleted.',
+        })
+      } else {
+        toast.warning('No questions were deleted', {
+          description: summary || 'Selected questions could not be deleted.',
+        })
+      }
+
+      fetchQuestions()
+    } catch (err) {
+      console.error('Failed to bulk delete questions:', err)
+      toast.error('Failed to delete selected questions')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   // Handle edit
   const handleEdit = (id: string) => {
     const question = questions.find(q => q.id === id)
     if (question) {
       setSelectedQuestion(question)
       const options = question.options?.length 
-        ? question.options.filter((o: any) => typeof o === 'string')
+        ? question.options.filter((option) => typeof option === 'string')
         : ['', '', '', '']
       const correctAnswer = question.correctAnswer || ''
       // Find index of correct answer in options for multiple choice
@@ -317,10 +441,9 @@ export default function QuestionBankManager() {
 
     try {
       setIsSubmitting(true)
-      // Convert correctAnswerIndex to the actual option text for MCQ
-      const correctAnswerValue = formData.type === QUESTION_TYPES.MULTIPLE_CHOICE
-        ? formData.options[formData.correctAnswerIndex]
-        : formData.correctAnswer
+      const multipleChoicePayload = formData.type === QUESTION_TYPES.MULTIPLE_CHOICE
+        ? buildMultipleChoicePayload(formData.options, formData.correctAnswerIndex)
+        : null
       
       const updateData = {
         question_text: formData.text,
@@ -328,8 +451,8 @@ export default function QuestionBankManager() {
         topic: formData.topic,
         question_type: formData.type,
         difficulty: formData.difficulty,
-        options: formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.options.filter(o => o.trim()) : undefined,
-        correct_answer: correctAnswerValue,
+        options: multipleChoicePayload?.options,
+        correct_answer: multipleChoicePayload?.correctAnswer || formData.correctAnswer,
         explanation: formData.explanation,
         points: formData.points,
         tags: formData.tags.split(',').map(t => t.trim()).filter(t => t),
@@ -390,10 +513,9 @@ export default function QuestionBankManager() {
 
     try {
       setIsSubmitting(true)
-      // Convert correctAnswerIndex to the actual option text for MCQ
-      const correctAnswerValue = formData.type === QUESTION_TYPES.MULTIPLE_CHOICE
-        ? formData.options[formData.correctAnswerIndex]
-        : formData.correctAnswer
+      const multipleChoicePayload = formData.type === QUESTION_TYPES.MULTIPLE_CHOICE
+        ? buildMultipleChoicePayload(formData.options, formData.correctAnswerIndex)
+        : null
       
       const createData = {
         question_text: formData.text,
@@ -401,8 +523,8 @@ export default function QuestionBankManager() {
         topic: formData.topic,
         question_type: formData.type,
         difficulty: formData.difficulty,
-        options: formData.type === QUESTION_TYPES.MULTIPLE_CHOICE ? formData.options.filter(o => o.trim()) : undefined,
-        correct_answer: correctAnswerValue,
+        options: multipleChoicePayload?.options,
+        correct_answer: multipleChoicePayload?.correctAnswer || formData.correctAnswer,
         explanation: formData.explanation,
         points: formData.points,
         tags: formData.tags.split(',').map(t => t.trim()).filter(t => t),
@@ -491,13 +613,19 @@ export default function QuestionBankManager() {
         const questionsArray = response.data?.items || []
         const mappedQuestions = questionsArray.map((q: any) => ({
           id: q._id || q.id,
-          text: q.question_text || q.text,
-          subject: q.subject_id?.name || q.subject_id || 'Unknown',
-          subjectId: typeof q.subject_id === 'object' ? q.subject_id?._id : q.subject_id,
+          text: q.question_text || q.text || '',
+          subject: typeof q.subject_id === 'object'
+            ? q.subject_id?.name || 'Unknown'
+            : subjectNamesById.get(String(q.subject_id || '')) || q.subject_id || 'Unknown',
+          subjectId: typeof q.subject_id === 'object'
+            ? q.subject_id?._id
+            : q.subject_id,
           type: q.question_type || q.type,
           difficulty: q.difficulty,
           topic: q.topic,
-          options: Array.isArray(q.options) ? q.options.filter((o: any) => typeof o === 'string') : [],
+          options: Array.isArray(q.options)
+            ? q.options.map((option: string | QuestionOptionRecord) => getOptionText(option)).filter(Boolean)
+            : [],
           correctAnswer: q.correct_answer || q.correctAnswer,
           explanation: q.explanation,
           points: q.points,
@@ -594,11 +722,18 @@ export default function QuestionBankManager() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Subjects</SelectItem>
-                {subjects.map((subject: any) => (
-                  <SelectItem key={subject._id || subject.id || subject} value={subject._id || subject.id || subject}>
-                    {subject.name || subject}
-                  </SelectItem>
-                ))}
+                {subjects.map((subject) => {
+                  const subjectId = String(subject._id || subject.id || '')
+                  if (!subjectId) {
+                    return null
+                  }
+
+                  return (
+                    <SelectItem key={subjectId} value={subjectId}>
+                      {subject.name || subjectId}
+                    </SelectItem>
+                  )
+                })}
               </SelectContent>
             </Select>
             <Select value={topicFilter} onValueChange={setTopicFilter} disabled={availableTopics.length === 0}>
@@ -702,7 +837,9 @@ export default function QuestionBankManager() {
                   <TableCell className="font-medium text-foreground max-w-sm">
                     <span className="line-clamp-2">{question.text}</span>
                   </TableCell>
-                  <TableCell className="text-foreground">{question.subject}</TableCell>
+                  <TableCell className="text-foreground">
+                    {question.subjectId ? subjectNamesById.get(question.subjectId) || question.subject : question.subject}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{question.type}</TableCell>
                   <TableCell>
                     <Badge className={getDifficultyColor(question.difficulty)}>
@@ -804,9 +941,17 @@ export default function QuestionBankManager() {
                 <X className="w-4 h-4 mr-1" />
                 Deselect All
               </Button>
-              <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleAssignSelected}>
+              <Button variant="outline" size="sm" onClick={() => setBulkDeleteDialogOpen(true)}>
+                <Trash2 className="w-4 h-4 mr-1" />
+                Bulk Delete
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => handleAssignSelected('individual')}>
+                <Users className="w-4 h-4 mr-1" />
+                Assign to Students
+              </Button>
+              <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => handleAssignSelected('group')}>
                 <ClipboardList className="w-4 h-4 mr-1" />
-                Assign Selected
+                Assign to Groups
               </Button>
             </div>
           </div>
@@ -1330,6 +1475,29 @@ export default function QuestionBankManager() {
               disabled={isSubmitting}
             >
               {isSubmitting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Bulk Delete Questions</DialogTitle>
+            <DialogDescription>
+              Delete the selected questions from your bank. Questions already used in assignments will be skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <p className="text-sm text-muted-foreground">Selected questions</p>
+            <p className="font-medium">{selectedIds.size} question{selectedIds.size !== 1 ? 's' : ''}</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeleteDialogOpen(false)} disabled={isSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmBulkDelete} disabled={isSubmitting || selectedIds.size === 0}>
+              {isSubmitting ? 'Deleting...' : 'Delete Selected'}
             </Button>
           </DialogFooter>
         </DialogContent>

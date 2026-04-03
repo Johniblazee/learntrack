@@ -86,3 +86,79 @@ async def test_delete_question_raises_validation_error_when_used_in_assignments(
         ValidationError, match="Cannot delete question that is used in assignments"
     ):
         await service.delete_question(str(question_id), "tutor-1")
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_questions_reports_deleted_blocked_and_skipped_items():
+    deletable_question_id = ObjectId()
+    blocked_question_id = ObjectId()
+
+    async def _count_documents(query):
+        if query.get("questions.question_id") == str(blocked_question_id):
+            return 1
+        return 0
+
+    service = QuestionService(
+        SimpleNamespace(
+            questions=FakeCollection(
+                [
+                    {
+                        "_id": deletable_question_id,
+                        "question_text": "Delete me",
+                        "question_type": QuestionType.MULTIPLE_CHOICE.value,
+                        "subject_id": "subject-1",
+                        "topic": "Cells",
+                        "difficulty": "medium",
+                        "points": 1,
+                        "tutor_id": "tutor-1",
+                        "options": [
+                            {"text": "A", "is_correct": True},
+                            {"text": "B", "is_correct": False},
+                        ],
+                        "correct_answer": "A",
+                        "status": QuestionStatus.ACTIVE.value,
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                    },
+                    {
+                        "_id": blocked_question_id,
+                        "question_text": "Still in use",
+                        "question_type": QuestionType.MULTIPLE_CHOICE.value,
+                        "subject_id": "subject-1",
+                        "topic": "Cells",
+                        "difficulty": "medium",
+                        "points": 1,
+                        "tutor_id": "tutor-1",
+                        "options": [
+                            {"text": "A", "is_correct": True},
+                            {"text": "B", "is_correct": False},
+                        ],
+                        "correct_answer": "A",
+                        "status": QuestionStatus.ACTIVE.value,
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                    },
+                ]
+            ),
+            assignments=SimpleNamespace(
+                count_documents=AsyncMock(side_effect=_count_documents)
+            ),
+        )
+    )
+
+    result = await service.bulk_delete_questions(
+        [str(deletable_question_id), str(blocked_question_id), "missing-question"],
+        "tutor-1",
+    )
+
+    assert result["deleted_count"] == 1
+    assert result["blocked_count"] == 1
+    assert result["skipped_count"] == 1
+    assert result["deleted_question_ids"] == [str(deletable_question_id)]
+    assert result["blocked_question_ids"] == [str(blocked_question_id)]
+
+    deleted_doc = await service.collection.find_one({"_id": deletable_question_id})
+    blocked_doc = await service.collection.find_one({"_id": blocked_question_id})
+
+    assert deleted_doc["status"] == QuestionStatus.DELETED.value
+    assert blocked_doc["status"] == QuestionStatus.ACTIVE.value

@@ -8,6 +8,13 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Users, BookOpen, Plus, X, Save, ArrowLeft } from "lucide-react"
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
@@ -15,13 +22,20 @@ import GroupSelector from '@/components/GroupSelector'
 import SubjectFilter from '@/components/SubjectFilter'
 import StudentSelector from '@/components/StudentSelector'
 import QuestionBankSelector, { QuestionItem } from '@/components/QuestionBankSelector'
+import { useSubjects } from '@/hooks/useQueries'
 
 export default function CreateAssignmentView() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
+  const initialAssignmentType = (() => {
+    const maybeAssignmentType = (location.state as any)?.initialAssignmentType
+    return maybeAssignmentType === 'group' || maybeAssignmentType === 'subject'
+      ? maybeAssignmentType
+      : 'individual'
+  })()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [assignmentType, setAssignmentType] = useState<'individual' | 'group' | 'subject'>('individual')
+  const [assignmentType, setAssignmentType] = useState<'individual' | 'group' | 'subject'>(initialAssignmentType)
   const [isQuestionSelectorOpen, setIsQuestionSelectorOpen] = useState(false)
   const [selectedQuestionData, setSelectedQuestionData] = useState<QuestionItem[]>([])
   const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(null)
@@ -39,10 +53,23 @@ export default function CreateAssignmentView() {
   })
 
   const client = useApiClient()
+  const { data: subjectsData } = useSubjects()
+  const subjects = Array.isArray(subjectsData)
+    ? subjectsData
+    : subjectsData?.items || []
 
   useEffect(() => {
     const maybeTemplate = (location.state as any)?.template
     const maybeQuestionBankIds = (location.state as any)?.questionBankIds
+    const maybeInitialAssignmentType = (location.state as any)?.initialAssignmentType
+
+    if (
+      maybeInitialAssignmentType === 'individual' ||
+      maybeInitialAssignmentType === 'group' ||
+      maybeInitialAssignmentType === 'subject'
+    ) {
+      setAssignmentType(maybeInitialAssignmentType)
+    }
 
     if (maybeTemplate) {
       const templateId = String(maybeTemplate.id || maybeTemplate._id || '')
@@ -56,6 +83,7 @@ export default function CreateAssignmentView() {
         ...prev,
         title: prev.title || `${maybeTemplate.name || 'Template'} Assignment`,
         description: maybeTemplate.instructions || maybeTemplate.description || prev.description,
+        subject: prev.subject || String(maybeTemplate.subject_id || ''),
         selectedSubject: String(maybeTemplate.subject_id || ''),
         selectedQuestions: questionIds,
       }))
@@ -89,7 +117,28 @@ export default function CreateAssignmentView() {
             })
           )
 
-          setSelectedQuestionData(questions.filter(Boolean) as QuestionItem[])
+          const validQuestions = questions.filter(Boolean) as QuestionItem[]
+          const uniqueSubjectIds = Array.from(
+            new Set(
+              validQuestions
+                .map((question) => {
+                  if (typeof question.subject_id === 'string') {
+                    return question.subject_id
+                  }
+
+                  return question.subject_id?._id || ''
+                })
+                .filter(Boolean),
+            ),
+          )
+
+          setSelectedQuestionData(validQuestions)
+          if (uniqueSubjectIds.length === 1) {
+            setFormData((prev) => ({
+              ...prev,
+              subject: prev.subject || uniqueSubjectIds[0],
+            }))
+          }
         } catch (error) {
           console.error('Failed to load template questions:', error)
           toast.error('Some template questions could not be loaded')
@@ -133,7 +182,28 @@ export default function CreateAssignmentView() {
             })
           )
 
-          setSelectedQuestionData(questions.filter(Boolean) as QuestionItem[])
+          const validQuestions = questions.filter(Boolean) as QuestionItem[]
+          const uniqueSubjectIds = Array.from(
+            new Set(
+              validQuestions
+                .map((question) => {
+                  if (typeof question.subject_id === 'string') {
+                    return question.subject_id
+                  }
+
+                  return question.subject_id?._id || ''
+                })
+                .filter(Boolean),
+            ),
+          )
+
+          setSelectedQuestionData(validQuestions)
+          if (uniqueSubjectIds.length === 1) {
+            setFormData((prev) => ({
+              ...prev,
+              subject: prev.subject || uniqueSubjectIds[0],
+            }))
+          }
         } catch (error) {
           console.error('Failed to load question bank questions:', error)
           toast.error('Some questions could not be loaded')
@@ -159,7 +229,8 @@ export default function CreateAssignmentView() {
       return
     }
 
-    const resolvedSubject = formData.subject || formData.selectedSubject
+    const resolvedSubject =
+      formData.subject || (assignmentType === 'subject' ? formData.selectedSubject : '')
     if (!resolvedSubject) {
       toast.error('Please select a subject')
       return
@@ -306,12 +377,28 @@ export default function CreateAssignmentView() {
 
               <div className="space-y-2">
                 <Label htmlFor="subject">Subject</Label>
-                <Input
-                  id="subject"
-                  placeholder="e.g., Mathematics"
+                <Select
                   value={formData.subject}
-                  onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-                />
+                  onValueChange={(value) => setFormData({ ...formData, subject: value })}
+                >
+                  <SelectTrigger id="subject">
+                    <SelectValue placeholder="Select subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {subjects.map((subject: any) => {
+                      const subjectId = String(subject._id || subject.id || '')
+                      if (!subjectId) {
+                        return null
+                      }
+
+                      return (
+                        <SelectItem key={subjectId} value={subjectId}>
+                          {subject.name || subjectId}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -490,7 +577,25 @@ export default function CreateAssignmentView() {
           onOpenChange={setIsQuestionSelectorOpen}
           selectedQuestions={formData.selectedQuestions}
           onConfirm={(questionIds, questionData) => {
-            setFormData({ ...formData, selectedQuestions: questionIds })
+            const uniqueSubjectIds = Array.from(
+              new Set(
+                questionData
+                  .map((question) => {
+                    if (typeof question.subject_id === 'string') {
+                      return question.subject_id
+                    }
+
+                    return question.subject_id?._id || ''
+                  })
+                  .filter(Boolean),
+              ),
+            )
+
+            setFormData({
+              ...formData,
+              selectedQuestions: questionIds,
+              subject: formData.subject || (uniqueSubjectIds.length === 1 ? uniqueSubjectIds[0] : ''),
+            })
             setSelectedQuestionData(questionData)
           }}
         />
@@ -509,4 +614,3 @@ export default function CreateAssignmentView() {
     </div>
   )
 }
-

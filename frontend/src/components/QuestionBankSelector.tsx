@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Search, BookOpen, AlertCircle, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react"
+import { QUESTION_TYPES } from '@/lib/constants'
 
 export interface QuestionItem {
   id: string
@@ -91,7 +92,7 @@ export default function QuestionBankSelector({
       }
     }
     if (open) fetchSubjects()
-  }, [open])
+  }, [client, open])
 
   // Fetch questions
   const fetchQuestions = useCallback(async () => {
@@ -101,7 +102,7 @@ export default function QuestionBankSelector({
       
       const params = new URLSearchParams()
       params.append('per_page', '100')
-      params.append('status', 'approved') // Only show approved questions
+      params.append('status', 'active')
       
       if (subjectFilter !== 'all') params.append('subject_id', subjectFilter)
       if (difficultyFilter !== 'all') params.append('difficulty', difficultyFilter)
@@ -116,14 +117,24 @@ export default function QuestionBankSelector({
       setQuestions(items.map((q: any) => ({
         id: q._id || q.id,
         _id: q._id,
-        text: q.text || q.content || '',
+        text: q.question_text || q.text || q.content || '',
         subject_id: q.subject_id,
         subject: typeof q.subject_id === 'object' ? q.subject_id?.name : q.subject_id,
         topic: q.topic,
         difficulty: q.difficulty,
         type: q.question_type || q.type,
         question_type: q.question_type,
-        options: q.options,
+        options: Array.isArray(q.options)
+          ? q.options
+              .map((option: any) => {
+                if (typeof option === 'string') {
+                  return option
+                }
+
+                return typeof option?.text === 'string' ? option.text : ''
+              })
+              .filter(Boolean)
+          : [],
         correct_answer: q.correct_answer,
       })))
     } catch (err: any) {
@@ -132,7 +143,7 @@ export default function QuestionBankSelector({
     } finally {
       setLoading(false)
     }
-  }, [subjectFilter, difficultyFilter])
+  }, [client, difficultyFilter, subjectFilter])
 
   useEffect(() => {
     if (open) fetchQuestions()
@@ -243,10 +254,10 @@ export default function QuestionBankSelector({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="multiple_choice">Multiple Choice</SelectItem>
-              <SelectItem value="short_answer">Short Answer</SelectItem>
-              <SelectItem value="true_false">True/False</SelectItem>
-              <SelectItem value="essay">Essay</SelectItem>
+              <SelectItem value={QUESTION_TYPES.MULTIPLE_CHOICE}>Multiple Choice</SelectItem>
+              <SelectItem value={QUESTION_TYPES.SHORT_ANSWER}>Short Answer</SelectItem>
+              <SelectItem value={QUESTION_TYPES.TRUE_FALSE}>True/False</SelectItem>
+              <SelectItem value={QUESTION_TYPES.ESSAY}>Essay</SelectItem>
             </SelectContent>
           </Select>
         </div>
