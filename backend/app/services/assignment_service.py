@@ -127,6 +127,44 @@ class AssignmentService:
                 pass
         self.collection: Any = collection
 
+    @staticmethod
+    def _normalize_ids(values: List[str]) -> List[str]:
+        return list(
+            dict.fromkeys(str(value).strip() for value in values if str(value).strip())
+        )
+
+    async def _resolve_owned_assignment_ids(
+        self, assignment_ids: List[str], tutor_id: str
+    ) -> tuple[List[str], List[str]]:
+        normalized_ids = self._normalize_ids(assignment_ids)
+        assignment_docs = await self.collection.find(
+            {
+                "_id": {
+                    "$in": [
+                        to_object_id(assignment_id) for assignment_id in normalized_ids
+                    ]
+                },
+                "tutor_id": tutor_id,
+            },
+            {"_id": 1},
+        ).to_list(length=None)
+        found_ids = {
+            str(assignment_doc.get("_id"))
+            for assignment_doc in assignment_docs
+            if assignment_doc.get("_id") is not None
+        }
+        owned_ids = [
+            assignment_id
+            for assignment_id in normalized_ids
+            if assignment_id in found_ids
+        ]
+        skipped_ids = [
+            assignment_id
+            for assignment_id in normalized_ids
+            if assignment_id not in found_ids
+        ]
+        return owned_ids, skipped_ids
+
     async def get_assignment(self, assignment_id: str) -> Assignment:
         """Backward-compatible alias for get_assignment_by_id."""
         return await self.get_assignment_by_id(assignment_id)
@@ -748,6 +786,105 @@ class AssignmentService:
                 "Failed to delete assignment", assignment_id=assignment_id, error=str(e)
             )
             raise DatabaseException(f"Failed to delete assignment: {str(e)}")
+
+    async def bulk_update_status(
+        self,
+        assignment_ids: List[str],
+        tutor_id: str,
+        status: AssignmentStatus,
+    ) -> Dict[str, Any]:
+        """Update status for multiple tutor-owned assignments."""
+        try:
+            normalized_ids = self._normalize_ids(assignment_ids)
+            if not normalized_ids:
+                raise ValidationError("Select at least one assignment")
+
+            owned_ids, skipped_ids = await self._resolve_owned_assignment_ids(
+                normalized_ids,
+                tutor_id,
+            )
+            updated_ids: List[str] = []
+
+            if owned_ids:
+                result = await self.collection.update_many(
+                    {
+                        "_id": {
+                            "$in": [
+                                to_object_id(assignment_id)
+                                for assignment_id in owned_ids
+                            ]
+                        },
+                        "tutor_id": tutor_id,
+                    },
+                    {
+                        "$set": {
+                            "status": status.value,
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    },
+                )
+                if result.modified_count:
+                    updated_ids = owned_ids
+
+            return {
+                "requested_count": len(normalized_ids),
+                "updated_count": len(updated_ids),
+                "updated_assignment_ids": updated_ids,
+                "skipped_count": len(skipped_ids),
+                "skipped_assignment_ids": skipped_ids,
+            }
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error("Failed to bulk update assignment status", error=str(e))
+            raise DatabaseException(
+                f"Failed to bulk update assignment status: {str(e)}"
+            )
+
+    async def bulk_delete_assignments(
+        self,
+        assignment_ids: List[str],
+        tutor_id: str,
+    ) -> Dict[str, Any]:
+        """Delete multiple tutor-owned assignments."""
+        try:
+            normalized_ids = self._normalize_ids(assignment_ids)
+            if not normalized_ids:
+                raise ValidationError("Select at least one assignment")
+
+            owned_ids, skipped_ids = await self._resolve_owned_assignment_ids(
+                normalized_ids,
+                tutor_id,
+            )
+            deleted_ids: List[str] = []
+
+            if owned_ids:
+                result = await self.collection.delete_many(
+                    {
+                        "_id": {
+                            "$in": [
+                                to_object_id(assignment_id)
+                                for assignment_id in owned_ids
+                            ]
+                        },
+                        "tutor_id": tutor_id,
+                    }
+                )
+                if result.deleted_count:
+                    deleted_ids = owned_ids
+
+            return {
+                "requested_count": len(normalized_ids),
+                "deleted_count": len(deleted_ids),
+                "deleted_assignment_ids": deleted_ids,
+                "skipped_count": len(skipped_ids),
+                "skipped_assignment_ids": skipped_ids,
+            }
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error("Failed to bulk delete assignments", error=str(e))
+            raise DatabaseException(f"Failed to bulk delete assignments: {str(e)}")
 
     async def add_questions_to_assignment(
         self, assignment_id: str, question_ids: List[str], tutor_id: str

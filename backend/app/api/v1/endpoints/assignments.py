@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, Path, Query, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
+from pydantic import BaseModel
 
 from app.core.database import get_database
 from app.core.dependencies import get_assignment_service
@@ -19,6 +20,7 @@ from app.models.assignment import (
     Assignment,
     AssignmentCreate,
     AssignmentForStudent,
+    AssignmentStatus,
     AssignmentUpdate,
 )
 from app.services.assignment_service import AssignmentService
@@ -27,6 +29,14 @@ from app.utils.pagination import PaginationParams, PaginatedResponse, paginate
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+class BulkAssignmentActionRequest(BaseModel):
+    assignment_ids: List[str]
+
+
+class BulkAssignmentStatusRequest(BulkAssignmentActionRequest):
+    status: str
 
 
 @router.post("/", response_model=Assignment)
@@ -151,6 +161,51 @@ async def get_student_assignments(
         raise HTTPException(status_code=500, detail="Failed to get student assignments")
 
 
+@router.post("/bulk-status", response_model=dict)
+async def bulk_update_assignment_status(
+    payload: BulkAssignmentStatusRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    assignment_service: AssignmentService = Depends(get_assignment_service),
+):
+    """Update status for multiple tutor assignments."""
+    try:
+        status_value = AssignmentStatus(payload.status)
+        return await assignment_service.bulk_update_status(
+            payload.assignment_ids,
+            current_user.clerk_id,
+            status_value,
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid assignment status")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk update assignment status", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to bulk update assignment status",
+        )
+
+
+@router.post("/bulk-delete", response_model=dict)
+async def bulk_delete_assignments(
+    payload: BulkAssignmentActionRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    assignment_service: AssignmentService = Depends(get_assignment_service),
+):
+    """Delete multiple tutor assignments."""
+    try:
+        return await assignment_service.bulk_delete_assignments(
+            payload.assignment_ids,
+            current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk delete assignments", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to bulk delete assignments")
+
+
 @router.get("/{assignment_id}", response_model=Assignment)
 async def get_assignment(
     assignment_id: str = Path(..., description="Assignment ID"),
@@ -198,6 +253,12 @@ async def update_assignment(
         if not assignment:
             raise HTTPException(status_code=404, detail="Assignment not found")
         return assignment
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -219,6 +280,10 @@ async def delete_assignment(
         if not success:
             raise HTTPException(status_code=404, detail="Assignment not found")
         return {"message": "Assignment deleted successfully"}
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:

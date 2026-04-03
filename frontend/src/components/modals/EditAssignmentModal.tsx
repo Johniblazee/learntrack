@@ -11,6 +11,13 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Edit } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
 import { useApiClient } from '@/lib/api-client'
@@ -19,14 +26,12 @@ interface Assignment {
   _id: string
   title: string
   description?: string
-  due_date?: string
-  duration_minutes?: number
-  passing_score: number
-  settings: {
-    allow_retakes: boolean
-    shuffle_questions: boolean
-    show_correct_answers: boolean
-  }
+  due_date?: string | null
+  time_limit?: number | null
+  max_attempts?: number | null
+  shuffle_questions?: boolean
+  show_results_immediately?: boolean
+  status?: 'draft' | 'scheduled' | 'published' | 'active' | 'completed' | 'archived'
 }
 
 interface EditAssignmentModalProps {
@@ -45,10 +50,11 @@ export function EditAssignmentModal({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [dueDate, setDueDate] = useState('')
-  const [duration, setDuration] = useState('')
-  const [passingScore, setPassingScore] = useState('')
-  const [allowRetakes, setAllowRetakes] = useState(false)
+  const [timeLimit, setTimeLimit] = useState('')
+  const [maxAttempts, setMaxAttempts] = useState('1')
   const [shuffleQuestions, setShuffleQuestions] = useState(false)
+  const [showResultsImmediately, setShowResultsImmediately] = useState(true)
+  const [status, setStatus] = useState<Assignment['status']>('published')
   const [loading, setLoading] = useState(false)
   const client = useApiClient()
 
@@ -57,10 +63,11 @@ export function EditAssignmentModal({
       setTitle(assignment.title)
       setDescription(assignment.description || '')
       setDueDate(assignment.due_date?.split('T')[0] || '') // Format for date input
-      setDuration(assignment.duration_minutes?.toString() || '')
-      setPassingScore(assignment.passing_score.toString())
-      setAllowRetakes(assignment.settings?.allow_retakes || false)
-      setShuffleQuestions(assignment.settings?.shuffle_questions || false)
+      setTimeLimit(assignment.time_limit?.toString() || '')
+      setMaxAttempts(String(assignment.max_attempts || 1))
+      setShuffleQuestions(assignment.shuffle_questions || false)
+      setShowResultsImmediately(assignment.show_results_immediately ?? true)
+      setStatus(assignment.status || 'published')
     }
   }, [assignment])
 
@@ -76,13 +83,11 @@ export function EditAssignmentModal({
         title,
         description: description || undefined,
         due_date: dueDate ? new Date(dueDate).toISOString() : undefined,
-        duration_minutes: duration ? parseInt(duration) : undefined,
-        passing_score: parseInt(passingScore) || 70,
-        settings: {
-          allow_retakes: allowRetakes,
-          shuffle_questions: shuffleQuestions,
-          show_correct_answers: assignment.settings?.show_correct_answers ?? true
-        }
+        time_limit: timeLimit ? parseInt(timeLimit, 10) : undefined,
+        max_attempts: Math.max(parseInt(maxAttempts, 10) || 1, 1),
+        shuffle_questions: shuffleQuestions,
+        show_results_immediately: showResultsImmediately,
+        status,
       }
 
       const response = await client.put(`/assignments/${assignment._id}`, updateData)
@@ -142,54 +147,73 @@ export function EditAssignmentModal({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-due-date">Due Date *</Label>
+              <Label htmlFor="edit-due-date">Due Date</Label>
               <Input
                 id="edit-due-date"
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                required
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="edit-duration">Duration (minutes)</Label>
+              <Label htmlFor="edit-time-limit">Time Limit (minutes)</Label>
               <Input
-                id="edit-duration"
+                id="edit-time-limit"
                 type="number"
                 min="1"
                 placeholder="60"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
+                value={timeLimit}
+                onChange={(e) => setTimeLimit(e.target.value)}
               />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="edit-passing-score">Passing Score (%) *</Label>
-            <Input
-              id="edit-passing-score"
-              type="number"
-              min="0"
-              max="100"
-              placeholder="70"
-              value={passingScore}
-              onChange={(e) => setPassingScore(e.target.value)}
-              required
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-max-attempts">Max Attempts</Label>
+              <Input
+                id="edit-max-attempts"
+                type="number"
+                min="1"
+                placeholder="1"
+                value={maxAttempts}
+                onChange={(e) => setMaxAttempts(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-status">Status</Label>
+              <Select
+                value={status}
+                onValueChange={(value) => setStatus(value as Assignment['status'])}
+              >
+                <SelectTrigger id="edit-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                  <SelectItem value="published">Published</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="space-y-3">
             <Label>Settings</Label>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label htmlFor="edit-allow-retakes" className="font-normal">
-                  Allow Retakes
+                <Label htmlFor="edit-show-results" className="font-normal">
+                  Show Results Immediately
                 </Label>
                 <Switch
-                  id="edit-allow-retakes"
-                  checked={allowRetakes}
-                  onCheckedChange={setAllowRetakes}
+                  id="edit-show-results"
+                  checked={showResultsImmediately}
+                  onCheckedChange={setShowResultsImmediately}
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -223,5 +247,3 @@ export function EditAssignmentModal({
     </Dialog>
   )
 }
-
-

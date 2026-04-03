@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Path, Query, Body, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
+from pydantic import BaseModel
 
 from app.core.database import get_database
 from app.core.enhanced_auth import (
@@ -13,11 +14,16 @@ from app.core.enhanced_auth import (
     require_authenticated_user,
     ClerkUserContext,
 )
+from app.core.exceptions import ValidationError
 from app.models.student import StudentGroup, StudentGroupCreate, StudentGroupUpdate
 from app.services.student_service import StudentService
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+class BulkGroupDeleteRequest(BaseModel):
+    group_ids: List[str]
 
 
 async def _generate_group_image(group_name: str, description: str = ""):
@@ -73,6 +79,34 @@ async def get_all_groups(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve groups",
+        )
+
+
+@router.post("/bulk-delete", response_model=dict)
+async def bulk_delete_groups(
+    payload: BulkGroupDeleteRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Delete multiple groups with partial-success reporting."""
+    try:
+        student_service = StudentService(database)
+        return await student_service.bulk_delete_groups(
+            payload.group_ids,
+            tutor_id=current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to bulk delete groups", error=str(e), tutor_id=current_user.clerk_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to bulk delete groups",
         )
 
 
@@ -138,6 +172,11 @@ async def create_group(
             group_data, tutor_id=current_user.clerk_id
         )
         return group
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
         logger.error(
             "Failed to create group", error=str(e), tutor_id=current_user.clerk_id
@@ -273,6 +312,11 @@ async def update_group(
                 status_code=404, detail="Group not found or access denied"
             )
         return group
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -303,6 +347,11 @@ async def delete_group(
                 status_code=404, detail="Group not found or access denied"
             )
         return {"message": "Group deleted successfully"}
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except HTTPException:
         raise
     except Exception as e:

@@ -12,18 +12,24 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Users, Calendar, UserPlus, Search, X } from 'lucide-react'
+import { Users, Calendar, UserPlus, Search, X, BookOpen } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useApiClient } from '@/lib/api-client'
 import { toast } from '@/contexts/ToastContext'
 import { LoadingSpinner } from '@/components/ui/loading-state'
-import { getStudentInitials, useGroupMembers } from './group-members-shared'
+import {
+  getGroupMemberIdentifiers,
+  getStudentInitials,
+  GroupMemberStudent,
+  useGroupMembers,
+} from './group-members-shared'
 
 interface Group {
   _id: string
   name: string
   description?: string
   studentIds?: string[]
+  subjects?: string[]
   created_at?: string
   createdDate?: string
   updated_at?: string
@@ -46,7 +52,6 @@ export function ViewGroupDetailsModal({
   const [saving, setSaving] = useState(false)
   const client = useApiClient()
   const {
-    allStudents,
     loadingStudents,
     memberIds,
     setMemberIds,
@@ -67,11 +72,13 @@ export function ViewGroupDetailsModal({
     }
   }, [open, setSearchTerm])
 
-  const handleAddStudent = async (studentId: string) => {
+  const handleAddStudent = async (student: GroupMemberStudent) => {
     if (!group) return
 
     const previousMemberIds = [...memberIds]
-    const newMemberIds = [...memberIds, studentId]
+    const newMemberIds = getGroupMemberIdentifiers(student).some((identifier) => memberIds.includes(identifier))
+      ? memberIds
+      : [...memberIds, student._id]
     setMemberIds(newMemberIds)
 
     // Immediately save to backend
@@ -82,7 +89,6 @@ export function ViewGroupDetailsModal({
       })
       if (response.error) throw new Error(response.error)
 
-      const student = allStudents.find(s => s._id === studentId)
       toast.success(`Added ${student?.name || 'student'} to group`)
       onGroupUpdated?.()
     } catch (error: any) {
@@ -96,11 +102,12 @@ export function ViewGroupDetailsModal({
     }
   }
 
-  const handleRemoveStudent = async (studentId: string) => {
+  const handleRemoveStudent = async (student: GroupMemberStudent) => {
     if (!group) return
 
     const previousMemberIds = [...memberIds]
-    const newMemberIds = memberIds.filter(id => id !== studentId)
+    const identifiersToRemove = new Set(getGroupMemberIdentifiers(student))
+    const newMemberIds = memberIds.filter(id => !identifiersToRemove.has(id))
     setMemberIds(newMemberIds)
 
     // Immediately save to backend
@@ -111,7 +118,6 @@ export function ViewGroupDetailsModal({
       })
       if (response.error) throw new Error(response.error)
 
-      const student = allStudents.find(s => s._id === studentId)
       toast.success(`Removed ${student?.name || 'student'} from group`)
       onGroupUpdated?.()
     } catch (error: any) {
@@ -119,6 +125,39 @@ export function ViewGroupDetailsModal({
       setMemberIds(previousMemberIds)
       toast.error('Failed to remove student', {
         description: error.message
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleAddVisibleStudents = async () => {
+    if (!group || filteredAvailableStudents.length === 0) return
+
+    const previousMemberIds = [...memberIds]
+    const nextMemberIds = Array.from(
+      new Set([
+        ...memberIds,
+        ...filteredAvailableStudents.map((student) => student._id),
+      ])
+    )
+    setMemberIds(nextMemberIds)
+
+    try {
+      setSaving(true)
+      const response = await client.put(`/groups/${group._id}`, {
+        studentIds: nextMemberIds,
+      })
+      if (response.error) throw new Error(response.error)
+
+      toast.success('Students added to group', {
+        description: `${filteredAvailableStudents.length} student${filteredAvailableStudents.length === 1 ? '' : 's'} added.`,
+      })
+      onGroupUpdated?.()
+    } catch (error: any) {
+      setMemberIds(previousMemberIds)
+      toast.error('Failed to add students', {
+        description: error.message,
       })
     } finally {
       setSaving(false)
@@ -150,21 +189,37 @@ export function ViewGroupDetailsModal({
               </div>
             )}
 
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-              {createdAt && (
-                <div className="flex items-center gap-1">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                {createdAt && (
+                  <div className="flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
                   <span>
                     Created {formatDistanceToNow(new Date(createdAt), { addSuffix: true })}
                   </span>
                 </div>
               )}
-              <div className="flex items-center gap-1">
-                <Users className="h-4 w-4" />
-                <span>{memberIds.length} students</span>
+                <div className="flex items-center gap-1">
+                  <Users className="h-4 w-4" />
+                  <span>{memberIds.length} students</span>
+                </div>
+                {group.subjects && group.subjects.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <BookOpen className="h-4 w-4" />
+                    <span>{group.subjects.length} subjects</span>
+                  </div>
+                )}
               </div>
+
+              {group.subjects && group.subjects.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {group.subjects.map((subject) => (
+                    <Badge key={subject} variant="secondary">
+                      {subject}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
 
           {/* Students Section */}
           <div className="flex-1 overflow-hidden flex flex-col">
@@ -190,14 +245,25 @@ export function ViewGroupDetailsModal({
             {/* Add Students Panel */}
             {showAddStudents && (
               <div className="border rounded-lg p-3 bg-muted/30 space-y-2 mb-3">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search students to add..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search students to add..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleAddVisibleStudents()}
+                    disabled={saving || filteredAvailableStudents.length === 0}
+                  >
+                    Add All
+                  </Button>
                 </div>
                 <ScrollArea className="h-[120px]">
                   {loadingStudents ? (
@@ -219,12 +285,12 @@ export function ViewGroupDetailsModal({
                         <div
                           key={student._id}
                           className="flex items-center gap-3 p-2 rounded-md hover:bg-muted cursor-pointer transition-colors"
-                          onClick={() => !saving && handleAddStudent(student._id)}
+                          onClick={() => !saving && handleAddStudent(student)}
                         >
                           <Checkbox
                             checked={false}
                             disabled={saving}
-                            onCheckedChange={() => handleAddStudent(student._id)}
+                            onCheckedChange={() => handleAddStudent(student)}
                           />
                             <Avatar className="h-8 w-8">
                               <AvatarImage src={student.avatar_url} alt={student.name} />
@@ -279,7 +345,7 @@ export function ViewGroupDetailsModal({
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleRemoveStudent(student._id)}
+                        onClick={() => handleRemoveStudent(student)}
                         disabled={saving}
                       >
                         <X className="h-4 w-4" />

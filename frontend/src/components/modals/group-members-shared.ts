@@ -24,6 +24,26 @@ export function getStudentInitials(name: string) {
     .slice(0, 2)
 }
 
+export function getGroupMemberIdentifiers(student: GroupMemberStudent) {
+  return Array.from(
+    new Set(
+      [student._id, student.clerk_id]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+export function isStudentInGroup(
+  student: GroupMemberStudent,
+  memberIds: string[]
+) {
+  const normalizedMemberIds = new Set(
+    memberIds.map((value) => String(value || '').trim()).filter(Boolean)
+  )
+  return getGroupMemberIdentifiers(student).some((identifier) => normalizedMemberIds.has(identifier))
+}
+
 export function useGroupMembers({ open, initialMemberIds }: UseGroupMembersOptions) {
   const [loadingStudents, setLoadingStudents] = useState(false)
   const [allStudents, setAllStudents] = useState<GroupMemberStudent[]>([])
@@ -34,13 +54,24 @@ export function useGroupMembers({ open, initialMemberIds }: UseGroupMembersOptio
   const fetchAllStudents = useCallback(async () => {
     try {
       setLoadingStudents(true)
-      const response = await client.get('/students?per_page=100')
+      const collectedStudents: GroupMemberStudent[] = []
+      let page = 1
+      let hasNext = true
 
-      if (response.error) {
-        throw new Error(response.error)
+      while (hasNext) {
+        const response = await client.get(`/students?page=${page}&per_page=100`)
+
+        if (response.error) {
+          throw new Error(response.error)
+        }
+
+        const pageItems = (response.data?.items || []) as GroupMemberStudent[]
+        collectedStudents.push(...pageItems)
+        hasNext = Boolean(response.data?.meta?.has_next)
+        page += 1
       }
 
-      setAllStudents(response.data?.items || [])
+      setAllStudents(collectedStudents)
     } catch (error) {
       console.error('Failed to fetch students:', error)
       toast.error('Failed to load students')
@@ -62,11 +93,11 @@ export function useGroupMembers({ open, initialMemberIds }: UseGroupMembersOptio
   }, [fetchAllStudents, initialMemberIds, open])
 
   const currentMembers = useMemo(() => {
-    return allStudents.filter((student) => memberIds.includes(student._id))
+    return allStudents.filter((student) => isStudentInGroup(student, memberIds))
   }, [allStudents, memberIds])
 
   const filteredAvailableStudents = useMemo(() => {
-    const availableStudents = allStudents.filter((student) => !memberIds.includes(student._id))
+    const availableStudents = allStudents.filter((student) => !isStudentInGroup(student, memberIds))
 
     if (!searchTerm.trim()) {
       return availableStudents

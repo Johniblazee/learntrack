@@ -22,7 +22,7 @@ class StudentBase(BaseModel):
         None, description="Student's grade level", example="10th"
     )
     subjects: List[str] = Field(
-        default=[],
+        default_factory=list,
         description="List of subjects the student is enrolled in",
         example=["Mathematics", "Science"],
     )
@@ -58,7 +58,7 @@ class StudentBase(BaseModel):
         ..., description="Tutor ID - references the tutor's Clerk user ID"
     )
     parent_ids: List[str] = Field(
-        default=[],
+        default_factory=list,
         description="List of parent Clerk user IDs who can access this student",
     )
 
@@ -159,13 +159,82 @@ class Student(StudentInDB):
 class StudentGroupBase(BaseModel):
     name: str
     description: str = ""
-    studentIds: List[str] = []  # store student _id strings
-    subjects: List[str] = []  # using subject names for MVP simplicity
+    studentIds: List[str] = Field(default_factory=list)
+    subjects: List[str] = Field(default_factory=list)
     color: str = "blue"
     imageUrl: Optional[str] = Field(None, description="URL to the group's cover image")
-    tutor_id: str = Field(
-        ..., description="Tutor ID - references the tutor's Clerk user ID"
-    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_group_name(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Group name is required")
+        return normalized
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_group_description(cls, value: Optional[str]) -> str:
+        return str(value or "").strip()
+
+    @field_validator("studentIds", mode="before")
+    @classmethod
+    def normalize_group_student_ids(cls, value: Optional[List[str]]) -> List[str]:
+        if not value:
+            return []
+
+        normalized_ids: List[str] = []
+        seen: set[str] = set()
+        for item in value:
+            normalized = str(item or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            normalized_ids.append(normalized)
+        return normalized_ids
+
+    @field_validator("subjects", mode="before")
+    @classmethod
+    def normalize_group_subjects(cls, value: Optional[List[str]]) -> List[str]:
+        if not value:
+            return []
+
+        normalized_subjects: List[str] = []
+        seen: set[str] = set()
+        for item in value:
+            normalized = str(item or "").strip()
+            if not normalized:
+                continue
+            lowered = normalized.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized_subjects.append(normalized)
+        return normalized_subjects
+
+    @field_validator("color")
+    @classmethod
+    def validate_group_color(cls, value: str) -> str:
+        normalized = str(value or "blue").strip().lower() or "blue"
+        allowed_colors = {
+            "blue",
+            "green",
+            "purple",
+            "orange",
+            "red",
+            "pink",
+            "yellow",
+            "indigo",
+        }
+        if normalized not in allowed_colors:
+            raise ValueError("Invalid group color")
+        return normalized
+
+    @field_validator("imageUrl", mode="before")
+    @classmethod
+    def normalize_group_image(cls, value: Optional[str]) -> Optional[str]:
+        normalized = str(value or "").strip()
+        return normalized or None
 
 
 class StudentGroupCreate(StudentGroupBase):
@@ -180,9 +249,63 @@ class StudentGroupUpdate(BaseModel):
     color: Optional[str] = None
     imageUrl: Optional[str] = None
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_optional_group_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Group name is required")
+        return normalized
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_optional_group_description(
+        cls, value: Optional[str]
+    ) -> Optional[str]:
+        if value is None:
+            return None
+        return str(value).strip()
+
+    @field_validator("studentIds", mode="before")
+    @classmethod
+    def normalize_optional_group_student_ids(
+        cls, value: Optional[List[str]]
+    ) -> Optional[List[str]]:
+        if value is None:
+            return None
+        return StudentGroupBase.normalize_group_student_ids(value)
+
+    @field_validator("subjects", mode="before")
+    @classmethod
+    def normalize_optional_group_subjects(
+        cls, value: Optional[List[str]]
+    ) -> Optional[List[str]]:
+        if value is None:
+            return None
+        return StudentGroupBase.normalize_group_subjects(value)
+
+    @field_validator("color")
+    @classmethod
+    def validate_optional_group_color(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return StudentGroupBase.validate_group_color(value)
+
+    @field_validator("imageUrl", mode="before")
+    @classmethod
+    def normalize_optional_group_image(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return StudentGroupBase.normalize_group_image(value)
+
 
 class StudentGroupInDB(StudentGroupBase):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    tutor_id: str = Field(
+        ..., description="Tutor ID - references the tutor's Clerk user ID"
+    )
     createdDate: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

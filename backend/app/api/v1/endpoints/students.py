@@ -42,6 +42,9 @@ async def _resolve_student_for_tutor(
     if not student or student.role != UserRole.STUDENT:
         raise HTTPException(status_code=404, detail="Student not found")
 
+    if student.is_active is False:
+        raise HTTPException(status_code=404, detail="Student not found")
+
     if student.tutor_id != current_user.clerk_id:
         raise HTTPException(
             status_code=403,
@@ -115,7 +118,9 @@ async def list_students_for_tutor(
         # Batch-fetch parents for all students with a single $in query (avoids N+1)
         student_identifier_map: Dict[str, set] = {}
         for student in students:
-            identifiers = {s for s in (str(student.clerk_id or ""), str(student.id or "")) if s}
+            identifiers = {
+                s for s in (str(student.clerk_id or ""), str(student.id or "")) if s
+            }
             student_identifier_map[str(student.id)] = identifiers
 
         # Collect all expanded values across all students for a single query
@@ -148,7 +153,8 @@ async def list_students_for_tutor(
                 parent_id = str(parent.get("_id", ""))
                 parent_refs = {
                     str(sid)
-                    for sid in parent.get("student_ids", []) + parent.get("parent_children", [])
+                    for sid in parent.get("student_ids", [])
+                    + parent.get("parent_children", [])
                     if sid
                 }
                 for student in students:
@@ -216,7 +222,11 @@ async def get_student_by_slug(
         user_service = UserService(db)
         student = await user_service.get_user_by_slug(slug)
 
-        if not student or student.role != UserRole.STUDENT:
+        if (
+            not student
+            or student.role != UserRole.STUDENT
+            or student.is_active is False
+        ):
             raise HTTPException(status_code=404, detail="Student not found")
 
         # Security Check: Ensure the student belongs to the requesting tutor

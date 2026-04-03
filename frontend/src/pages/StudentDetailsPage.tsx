@@ -185,6 +185,7 @@ export default function StudentDetailsPage() {
   const [selectedGroupId, setSelectedGroupId] = useState('')
   const [loadingAllGroups, setLoadingAllGroups] = useState(false)
   const [assigningGroup, setAssigningGroup] = useState(false)
+  const [removingGroupId, setRemovingGroupId] = useState<string | null>(null)
   const [viewAsStudentDialogOpen, setViewAsStudentDialogOpen] = useState(false)
 
   const isMountedRef = useRef(false)
@@ -426,7 +427,7 @@ export default function StudentDetailsPage() {
   const fetchAllGroups = async () => {
     try {
       setLoadingAllGroups(true)
-      const response = await client.get('/groups?limit=200')
+      const response = await client.get('/groups?limit=500')
       if (response.error) {
         throw new Error(response.error)
       }
@@ -440,6 +441,58 @@ export default function StudentDetailsPage() {
       })
     } finally {
       setLoadingAllGroups(false)
+    }
+  }
+
+  const handleRemoveFromGroup = async (groupId: string) => {
+    if (!student) {
+      return
+    }
+
+    try {
+      setRemovingGroupId(groupId)
+      const groupResponse = await client.get(`/groups/${groupId}`)
+      if (groupResponse.error) {
+        throw new Error(groupResponse.error)
+      }
+
+      const groupDetails = groupResponse.data as { studentIds?: string[]; name?: string }
+      const updatedStudentIds = toUniqueStrings(groupDetails.studentIds || []).filter(
+        (identifier) => !studentGroupIdentifierCandidates.includes(identifier)
+      )
+
+      const updateResponse = await client.put(`/groups/${groupId}`, {
+        studentIds: updatedStudentIds,
+      })
+
+      if (updateResponse.error) {
+        throw new Error(updateResponse.error)
+      }
+
+      setGroups((previous) => previous.filter((group) => group.id !== groupId))
+      setAllGroups((previous) =>
+        previous.map((group) =>
+          group.id === groupId
+            ? {
+                ...group,
+                studentIds: updatedStudentIds,
+              }
+            : group
+        )
+      )
+
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+
+      toast.success('Student removed from group', {
+        description: `${student.name} is no longer a member of ${groupDetails.name || 'the selected group'}.`,
+      })
+    } catch (error: any) {
+      console.error('Failed to remove group membership:', error)
+      toast.error('Failed to remove from group', {
+        description: error.message || 'Please try again.',
+      })
+    } finally {
+      setRemovingGroupId(null)
     }
   }
 
@@ -1304,7 +1357,21 @@ export default function StudentDetailsPage() {
                           <div className="h-8 w-8 rounded-full bg-purple-500/10 flex items-center justify-center flex-shrink-0">
                             <Users className="h-4 w-4 text-purple-500" />
                           </div>
-                          <p className="text-foreground text-sm font-medium">{group.name}</p>
+                          <p className="text-foreground text-sm font-medium flex-1">{group.name}</p>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => handleRemoveFromGroup(group.id)}
+                            disabled={removingGroupId === group.id}
+                          >
+                            {removingGroupId === group.id ? (
+                              <LoadingSpinner size="sm" className="text-muted-foreground" />
+                            ) : (
+                              <X className="h-4 w-4" />
+                            )}
+                          </Button>
                         </div>
                       ))}
                     </div>

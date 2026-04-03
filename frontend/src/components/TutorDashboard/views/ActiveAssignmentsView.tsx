@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -19,6 +20,7 @@ import { ServerError } from '@/components/ErrorScreen'
 import { useNavigate } from 'react-router-dom'
 import { ViewAssignmentModal } from '@/components/modals/ViewAssignmentModal'
 import { EditAssignmentModal } from '@/components/modals/EditAssignmentModal'
+import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal'
 import { useSubjects } from '@/hooks/useQueries'
 
 interface Assignment {
@@ -34,9 +36,73 @@ interface Assignment {
   averageScore?: number
 }
 
+interface RawAssignment {
+  _id?: string
+  id?: string
+  title?: string
+  description?: string
+  subject_id?: string | { _id?: string; id?: string; name?: string }
+  topic?: string | null
+  due_date?: string | null
+  status?: string
+  student_ids?: string[]
+  assigned_students?: string[]
+  group_ids?: string[]
+  completion_count?: number
+  questions?: Array<{ question_id?: string }>
+  average_score?: number | null
+  time_limit?: number | null
+  max_attempts?: number | null
+  shuffle_questions?: boolean
+  show_results_immediately?: boolean
+  total_points?: number
+  created_at?: string
+  updated_at?: string
+}
+
+type AssignmentStatusValue = 'draft' | 'scheduled' | 'published' | 'active' | 'completed' | 'archived'
+
+interface ModalAssignment extends Omit<RawAssignment, 'status' | 'total_points' | 'questions'> {
+  _id: string
+  title: string
+  total_points: number
+  status: AssignmentStatusValue
+  questions?: Array<{ question_id: string }>
+}
+
+interface BulkAssignmentStatusResponse {
+  requested_count?: number
+  updated_count?: number
+  updated_assignment_ids?: string[]
+  skipped_count?: number
+  skipped_assignment_ids?: string[]
+}
+
+interface BulkAssignmentDeleteResponse {
+  requested_count?: number
+  deleted_count?: number
+  deleted_assignment_ids?: string[]
+  skipped_count?: number
+  skipped_assignment_ids?: string[]
+}
+
 interface SubjectOption {
   id: string
   name: string
+}
+
+const normalizeAssignmentStatus = (status?: string): AssignmentStatusValue => {
+  switch (status) {
+    case 'draft':
+    case 'scheduled':
+    case 'published':
+    case 'active':
+    case 'completed':
+    case 'archived':
+      return status
+    default:
+      return 'published'
+  }
 }
 
 export default function ActiveAssignmentsView() {
@@ -44,7 +110,8 @@ export default function ActiveAssignmentsView() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [subjectFilter, setSubjectFilter] = useState("all")
-  const [rawAssignments, setRawAssignments] = useState<any[]>([]) // Store raw backend data for modals
+  const [rawAssignments, setRawAssignments] = useState<RawAssignment[]>([])
+  const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
@@ -59,7 +126,12 @@ export default function ActiveAssignmentsView() {
   // Modal state
   const [viewModalOpen, setViewModalOpen] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
-  const [selectedAssignment, setSelectedAssignment] = useState<any | null>(null)
+  const [selectedAssignment, setSelectedAssignment] = useState<ModalAssignment | null>(null)
+  const [assignmentToDelete, setAssignmentToDelete] = useState<Assignment | null>(null)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkUpdatingStatus, setBulkUpdatingStatus] = useState(false)
 
   const client = useApiClient()
   const { data: subjectsResponse } = useSubjects()
@@ -82,7 +154,7 @@ export default function ActiveAssignmentsView() {
   }, [subjects])
 
   const assignments: Assignment[] = useMemo(() => {
-    const resolveSubjectName = (subjectValue: any): string => {
+    const resolveSubjectName = (subjectValue: RawAssignment['subject_id']): string => {
       if (subjectValue && typeof subjectValue === 'object') {
         if (subjectValue.name) return subjectValue.name
         const subjectId = String(subjectValue.id || subjectValue._id || '')
@@ -94,7 +166,7 @@ export default function ActiveAssignmentsView() {
       return subjectNameById.get(subjectId) || 'Unknown'
     }
 
-    return rawAssignments.map((assignment: any) => {
+    return rawAssignments.map((assignment) => {
       const studentIds = Array.isArray(assignment.student_ids)
         ? assignment.student_ids
         : Array.isArray(assignment.assigned_students)
@@ -105,7 +177,7 @@ export default function ActiveAssignmentsView() {
 
       return {
         id: String(assignment._id || assignment.id || ''),
-        title: assignment.title,
+        title: assignment.title || 'Untitled Assignment',
         subject: resolveSubjectName(assignment.subject_id),
         topic: assignment.topic || 'General',
         dueDate: assignment.due_date
@@ -135,23 +207,29 @@ export default function ActiveAssignmentsView() {
     )
   }, [assignments])
 
-  const fetchAssignments = async () => {
+    const fetchAssignments = async () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await client.get('/assignments/')
-      
-      if (response.error) {
-        throw new Error(response.error)
-      }
-      
-      // Store raw backend data - API returns paginated response with items array
-      const rawData = (response.data?.items as any[]) || (Array.isArray(response.data) ? response.data : [])
-      setRawAssignments(rawData)
+      const collectedAssignments: RawAssignment[] = []
+      let page = 1
+      let hasNext = true
 
-      if (rawData.length > 0) {
-        toast.success(`Loaded ${rawData.length} assignment${rawData.length > 1 ? 's' : ''}`)
+      while (hasNext) {
+        const response = await client.get(`/assignments/?page=${page}&per_page=100`)
+
+        if (response.error) {
+          throw new Error(response.error)
+        }
+
+        const data = response.data
+        const pageItems = (data?.items as RawAssignment[]) || (Array.isArray(data) ? data as RawAssignment[] : [])
+        collectedAssignments.push(...pageItems)
+        hasNext = Boolean(data?.meta?.has_next)
+        page += 1
       }
+
+      setRawAssignments(collectedAssignments)
     } catch (err: any) {
       console.error('Failed to fetch assignments:', err)
       setError(err)
@@ -166,6 +244,13 @@ export default function ActiveAssignmentsView() {
   useEffect(() => {
     fetchAssignments()
   }, [])
+
+  useEffect(() => {
+    const availableIds = new Set(assignments.map((assignment) => assignment.id))
+    setSelectedAssignmentIds((previous) => {
+      return new Set([...previous].filter((assignmentId) => availableIds.has(assignmentId)))
+    })
+  }, [assignments])
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -264,15 +349,52 @@ export default function ActiveAssignmentsView() {
   const startIndex = (currentPage - 1) * itemsPerPage
   const endIndex = startIndex + itemsPerPage
   const currentAssignments = sortedAssignments.slice(startIndex, endIndex)
+  const allVisibleAssignmentsSelected =
+    currentAssignments.length > 0 && currentAssignments.every((assignment) => selectedAssignmentIds.has(assignment.id))
+  const someVisibleAssignmentsSelected =
+    currentAssignments.some((assignment) => selectedAssignmentIds.has(assignment.id)) && !allVisibleAssignmentsSelected
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1)
   }, [searchTerm, statusFilter, subjectFilter])
 
-  const handleDelete = async (assignmentId: string, title: string) => {
+  const handleToggleSelectAssignment = (assignmentId: string) => {
+    setSelectedAssignmentIds((previous) => {
+      const next = new Set(previous)
+      if (next.has(assignmentId)) {
+        next.delete(assignmentId)
+      } else {
+        next.add(assignmentId)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllVisibleAssignments = () => {
+    const visibleIds = currentAssignments.map((assignment) => assignment.id)
+    setSelectedAssignmentIds((previous) => {
+      const next = new Set(previous)
+      if (visibleIds.every((assignmentId) => next.has(assignmentId))) {
+        visibleIds.forEach((assignmentId) => next.delete(assignmentId))
+      } else {
+        visibleIds.forEach((assignmentId) => next.add(assignmentId))
+      }
+      return next
+    })
+  }
+
+  const handleDeselectAllAssignments = () => {
+    setSelectedAssignmentIds(new Set())
+  }
+
+  const confirmDelete = async () => {
+    if (!assignmentToDelete) {
+      return
+    }
+
     try {
-      const response = await client.delete(`/assignments/${assignmentId}`)
+      const response = await client.delete(`/assignments/${assignmentToDelete.id}`)
 
       if (response.error) {
         throw new Error(response.error)
@@ -280,11 +402,18 @@ export default function ActiveAssignmentsView() {
 
       // Remove from local state
       setRawAssignments((previous) =>
-        previous.filter((assignment) => String(assignment._id || assignment.id || '') !== assignmentId)
+        previous.filter((assignment) => String(assignment._id || assignment.id || '') !== assignmentToDelete.id)
       )
+      setSelectedAssignmentIds((previous) => {
+        const next = new Set(previous)
+        next.delete(assignmentToDelete.id)
+        return next
+      })
+      setDeleteModalOpen(false)
+      setAssignmentToDelete(null)
 
       toast.success('Assignment deleted', {
-        description: `"${title}" has been deleted successfully`
+        description: `"${assignmentToDelete.title}" has been deleted successfully`
       })
     } catch (err: any) {
       console.error('Failed to delete assignment:', err)
@@ -294,12 +423,108 @@ export default function ActiveAssignmentsView() {
     }
   }
 
+  const handleRequestDelete = (assignment: Assignment) => {
+    setAssignmentToDelete(assignment)
+    setDeleteModalOpen(true)
+  }
+
+  const handleBulkStatusUpdate = async (status: 'active' | 'archived') => {
+    if (selectedAssignmentIds.size === 0) {
+      return
+    }
+
+    try {
+      setBulkUpdatingStatus(true)
+      const response = await client.post<BulkAssignmentStatusResponse>('/assignments/bulk-status', {
+        assignment_ids: [...selectedAssignmentIds],
+        status,
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const updatedIds = new Set((response.data?.updated_assignment_ids || []).map(String))
+      setRawAssignments((previous) =>
+        previous.map((assignment) => {
+          const assignmentId = String(assignment._id || assignment.id || '')
+          if (!updatedIds.has(assignmentId)) {
+            return assignment
+          }
+
+          return {
+            ...assignment,
+            status,
+          }
+        })
+      )
+      setSelectedAssignmentIds(new Set())
+
+      toast.success('Assignments updated', {
+        description: `${response.data?.updated_count || 0} updated${response.data?.skipped_count ? `, ${response.data.skipped_count} skipped` : ''}`,
+      })
+    } catch (err: any) {
+      console.error('Failed to bulk update assignments:', err)
+      toast.error('Failed to update selected assignments', {
+        description: err.message || 'Please try again later'
+      })
+    } finally {
+      setBulkUpdatingStatus(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedAssignmentIds.size === 0) {
+      return
+    }
+
+    try {
+      setBulkDeleting(true)
+      const response = await client.post<BulkAssignmentDeleteResponse>('/assignments/bulk-delete', {
+        assignment_ids: [...selectedAssignmentIds],
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const deletedIds = new Set((response.data?.deleted_assignment_ids || []).map(String))
+      setRawAssignments((previous) =>
+        previous.filter((assignment) => !deletedIds.has(String(assignment._id || assignment.id || '')))
+      )
+      setSelectedAssignmentIds(new Set())
+      setBulkDeleteModalOpen(false)
+
+      toast.success('Assignments deleted', {
+        description: `${response.data?.deleted_count || 0} deleted${response.data?.skipped_count ? `, ${response.data.skipped_count} skipped` : ''}`,
+      })
+    } catch (err: any) {
+      console.error('Failed to bulk delete assignments:', err)
+      toast.error('Failed to delete selected assignments', {
+        description: err.message || 'Please try again later'
+      })
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   const handleView = (assignmentId: string) => {
     const rawAssignment = rawAssignments.find(
       (assignment) => String(assignment._id || assignment.id || '') === assignmentId
     )
     if (rawAssignment) {
-      setSelectedAssignment(rawAssignment)
+      setSelectedAssignment({
+        ...rawAssignment,
+        _id: String(rawAssignment._id || rawAssignment.id || assignmentId),
+        title: rawAssignment.title || 'Untitled Assignment',
+        total_points: rawAssignment.total_points || 0,
+        status: normalizeAssignmentStatus(rawAssignment.status),
+        questions: Array.isArray(rawAssignment.questions)
+          ? rawAssignment.questions
+              .map((question) => ({ question_id: String(question.question_id || '') }))
+              .filter((question) => question.question_id)
+          : [],
+      })
       setViewModalOpen(true)
     }
   }
@@ -309,7 +534,18 @@ export default function ActiveAssignmentsView() {
       (assignment) => String(assignment._id || assignment.id || '') === assignmentId
     )
     if (rawAssignment) {
-      setSelectedAssignment(rawAssignment)
+      setSelectedAssignment({
+        ...rawAssignment,
+        _id: String(rawAssignment._id || rawAssignment.id || assignmentId),
+        title: rawAssignment.title || 'Untitled Assignment',
+        total_points: rawAssignment.total_points || 0,
+        status: normalizeAssignmentStatus(rawAssignment.status),
+        questions: Array.isArray(rawAssignment.questions)
+          ? rawAssignment.questions
+              .map((question) => ({ question_id: String(question.question_id || '') }))
+              .filter((question) => question.question_id)
+          : [],
+      })
       setEditModalOpen(true)
     }
   }
@@ -389,11 +625,18 @@ export default function ActiveAssignmentsView() {
 
         {/* Table */}
         <div className="border border-border rounded-lg overflow-hidden bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50 hover:bg-muted/50">
-                <TableHead>Assignment Title</TableHead>
-                <TableHead>Class/Group</TableHead>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={allVisibleAssignmentsSelected ? true : someVisibleAssignmentsSelected ? 'indeterminate' : false}
+                      onCheckedChange={handleSelectAllVisibleAssignments}
+                      aria-label="Select all visible assignments"
+                    />
+                  </TableHead>
+                  <TableHead>Assignment Title</TableHead>
+                  <TableHead>Class/Group</TableHead>
                 <TableHead>
                   <button
                     onClick={() => handleSort('submissions')}
@@ -430,6 +673,9 @@ export default function ActiveAssignmentsView() {
                 Array.from({ length: 5 }).map((_, index) => (
                   <TableRow key={index}>
                     <TableCell>
+                      <div className="h-4 bg-muted rounded w-4 animate-pulse"></div>
+                    </TableCell>
+                    <TableCell>
                       <div className="h-4 bg-muted rounded w-48 animate-pulse"></div>
                     </TableCell>
                     <TableCell>
@@ -451,7 +697,7 @@ export default function ActiveAssignmentsView() {
                 ))
               ) : currentAssignments.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                     {searchTerm || statusFilter !== "all" || subjectFilter !== "all"
                       ? "No assignments found. Try adjusting your filters."
                       : "No assignments yet. Create your first assignment to get started."}
@@ -459,7 +705,17 @@ export default function ActiveAssignmentsView() {
                 </TableRow>
               ) : (
                 currentAssignments.map((assignment) => (
-                  <TableRow key={assignment.id} className="hover:bg-muted/30 transition-colors">
+                  <TableRow
+                    key={assignment.id}
+                    className={selectedAssignmentIds.has(assignment.id) ? 'bg-primary/5 hover:bg-primary/10 transition-colors' : 'hover:bg-muted/30 transition-colors'}
+                  >
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedAssignmentIds.has(assignment.id)}
+                        onCheckedChange={() => handleToggleSelectAssignment(assignment.id)}
+                        aria-label={`Select ${assignment.title}`}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium text-foreground">
                       {assignment.title}
                     </TableCell>
@@ -517,7 +773,7 @@ export default function ActiveAssignmentsView() {
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => handleDelete(assignment.id, assignment.title)}
+                            onClick={() => handleRequestDelete(assignment)}
                             className="text-red-600 dark:text-red-500"
                           >
                             <Trash2 className="w-4 h-4 mr-2" />
@@ -593,6 +849,41 @@ export default function ActiveAssignmentsView() {
             </div>
           </div>
         )}
+
+        {selectedAssignmentIds.size > 0 && (
+          <div className="sticky bottom-0 z-40 pt-2">
+            <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between gap-4">
+              <Badge variant="secondary">
+                {selectedAssignmentIds.size} assignment{selectedAssignmentIds.size === 1 ? '' : 's'} selected
+              </Badge>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={handleDeselectAllAssignments}>
+                  Deselect All
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkStatusUpdate('active')}
+                  disabled={bulkUpdatingStatus}
+                >
+                  Mark Active
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkStatusUpdate('archived')}
+                  disabled={bulkUpdatingStatus}
+                >
+                  Archive
+                </Button>
+                <Button variant="destructive" size="sm" onClick={() => setBulkDeleteModalOpen(true)}>
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modals */}
@@ -608,7 +899,24 @@ export default function ActiveAssignmentsView() {
         assignment={selectedAssignment}
         onAssignmentUpdated={fetchAssignments}
       />
+
+      <ConfirmDeleteModal
+        open={deleteModalOpen}
+        onOpenChange={setDeleteModalOpen}
+        onConfirm={confirmDelete}
+        title="Delete assignment?"
+        description="This assignment will be removed from your active list. This action cannot be undone."
+        itemName={assignmentToDelete?.title}
+      />
+
+      <ConfirmDeleteModal
+        open={bulkDeleteModalOpen}
+        onOpenChange={setBulkDeleteModalOpen}
+        onConfirm={handleBulkDelete}
+        title="Delete selected assignments?"
+        description={`This will permanently delete ${selectedAssignmentIds.size} selected assignment${selectedAssignmentIds.size === 1 ? '' : 's'}. This action cannot be undone.`}
+        loading={bulkDeleting}
+      />
     </div>
   )
 }
-

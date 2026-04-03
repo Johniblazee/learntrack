@@ -71,6 +71,7 @@ frontend/src/tests/*
 !frontend/src/tests/QuestionCanvas.test.tsx
 test_reports/  
 docs/
+docsz/
 scripts/
 notebooks/
 

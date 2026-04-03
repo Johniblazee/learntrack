@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -15,11 +15,24 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Edit, Search, X, Users, UserPlus, RefreshCw } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
 import { useApiClient } from '@/lib/api-client'
 import { LoadingSpinner } from '@/components/ui/loading-state'
-import { getStudentInitials, useGroupMembers } from './group-members-shared'
+import { useSubjects } from '@/hooks/useQueries'
+import {
+  getGroupMemberIdentifiers,
+  getStudentInitials,
+  GroupMemberStudent,
+  useGroupMembers,
+} from './group-members-shared'
 
 interface Group {
   _id: string
@@ -28,7 +41,25 @@ interface Group {
   studentIds?: string[]
   imageUrl?: string
   color?: string
+  subjects?: string[]
 }
+
+interface SubjectOption {
+  _id?: string
+  id?: string
+  name?: string
+}
+
+const GROUP_COLORS = [
+  'blue',
+  'green',
+  'purple',
+  'orange',
+  'red',
+  'pink',
+  'yellow',
+  'indigo',
+] as const
 
 interface EditGroupModalProps {
   open: boolean
@@ -46,10 +77,13 @@ export function EditGroupModal({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [imageUrl, setImageUrl] = useState<string>('')
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([])
+  const [color, setColor] = useState<(typeof GROUP_COLORS)[number]>('blue')
   const [loading, setLoading] = useState(false)
   const [regeneratingImage, setRegeneratingImage] = useState(false)
   const [showAddStudents, setShowAddStudents] = useState(false)
   const client = useApiClient()
+  const { data: subjectsResponse } = useSubjects()
   const {
     loadingStudents,
     memberIds: selectedStudentIds,
@@ -63,12 +97,27 @@ export function EditGroupModal({
     initialMemberIds: group?.studentIds || [],
   })
 
+  const subjects = useMemo(() => {
+    const source = Array.isArray(subjectsResponse)
+      ? subjectsResponse
+      : ((subjectsResponse as { items?: SubjectOption[] } | undefined)?.items || [])
+
+    return source
+      .map((subject) => ({
+        id: String(subject._id || subject.id || '').trim(),
+        name: String(subject.name || '').trim(),
+      }))
+      .filter((subject) => subject.id && subject.name)
+  }, [subjectsResponse])
+
   // Fetch all students when modal opens
   useEffect(() => {
     if (open && group) {
       setName(group.name)
       setDescription(group.description || '')
       setImageUrl(group.imageUrl || '')
+      setSelectedSubjects(group.subjects || [])
+      setColor((group.color as (typeof GROUP_COLORS)[number]) || 'blue')
     }
   }, [open, group])
 
@@ -77,15 +126,45 @@ export function EditGroupModal({
     if (!open) {
       setSearchTerm('')
       setShowAddStudents(false)
+      setSelectedSubjects([])
+      setColor('blue')
     }
   }, [open, setSearchTerm])
 
-  const handleAddStudent = (studentId: string) => {
-    setSelectedStudentIds(prev => [...prev, studentId])
+  const handleAddStudent = (student: GroupMemberStudent) => {
+    setSelectedStudentIds((prev) => {
+      if (getGroupMemberIdentifiers(student).some((identifier) => prev.includes(identifier))) {
+        return prev
+      }
+      return [...prev, student._id]
+    })
   }
 
-  const handleRemoveStudent = (studentId: string) => {
-    setSelectedStudentIds(prev => prev.filter(id => id !== studentId))
+  const handleRemoveStudent = (student: GroupMemberStudent) => {
+    const identifiersToRemove = new Set(getGroupMemberIdentifiers(student))
+    setSelectedStudentIds((prev) => prev.filter((id) => !identifiersToRemove.has(id)))
+  }
+
+  const handleToggleSubject = (subjectName: string) => {
+    setSelectedSubjects((prev) =>
+      prev.includes(subjectName)
+        ? prev.filter((subject) => subject !== subjectName)
+        : [...prev, subjectName]
+    )
+  }
+
+  const handleAddVisibleStudents = () => {
+    setSelectedStudentIds((prev) => {
+      const next = new Set(prev)
+      filteredAvailableStudents.forEach((student) => {
+        next.add(student._id)
+      })
+      return [...next]
+    })
+  }
+
+  const handleClearMembers = () => {
+    setSelectedStudentIds([])
   }
 
   const handleRegenerateImage = async () => {
@@ -122,7 +201,9 @@ export function EditGroupModal({
       const response = await client.put(`/groups/${group._id}`, {
         name,
         description,
-        studentIds: selectedStudentIds
+        studentIds: selectedStudentIds,
+        subjects: selectedSubjects,
+        color,
       })
 
       if (response.error) {
@@ -233,6 +314,49 @@ export function EditGroupModal({
             />
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-group-color">Color</Label>
+              <Select value={color} onValueChange={(value: (typeof GROUP_COLORS)[number]) => setColor(value)}>
+                <SelectTrigger id="edit-group-color">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GROUP_COLORS.map((groupColor) => (
+                    <SelectItem key={groupColor} value={groupColor}>
+                      {groupColor.charAt(0).toUpperCase() + groupColor.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">Subjects</p>
+              <p className="text-xs text-muted-foreground">Tag the group with one or more subjects.</p>
+            </div>
+            {subjects.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Create subjects first to tag this group.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {subjects.map((subject) => (
+                  <label
+                    key={subject.id}
+                    className="flex items-center gap-3 rounded-md border border-border p-2 text-sm cursor-pointer hover:bg-muted/40"
+                  >
+                    <Checkbox
+                      checked={selectedSubjects.includes(subject.name)}
+                      onCheckedChange={() => handleToggleSubject(subject.name)}
+                    />
+                    <span>{subject.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Members Section */}
           <div className="flex-1 overflow-hidden flex flex-col space-y-3">
             <div className="flex items-center justify-between">
@@ -243,29 +367,47 @@ export function EditGroupModal({
                   {selectedStudentIds.length}
                 </Badge>
               </Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowAddStudents(!showAddStudents)}
-                className="gap-1"
-              >
-                <UserPlus className="h-4 w-4" />
-                {showAddStudents ? 'Hide' : 'Add Students'}
-              </Button>
+              <div className="flex items-center gap-2">
+                {selectedStudentIds.length > 0 && (
+                  <Button type="button" variant="ghost" size="sm" onClick={handleClearMembers}>
+                    Clear
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAddStudents(!showAddStudents)}
+                  className="gap-1"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  {showAddStudents ? 'Hide' : 'Add Students'}
+                </Button>
+              </div>
             </div>
 
             {/* Add Students Panel */}
             {showAddStudents && (
               <div className="border rounded-lg p-3 bg-muted/30 space-y-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search students to add..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search students to add..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddVisibleStudents}
+                    disabled={filteredAvailableStudents.length === 0}
+                  >
+                    Add All
+                  </Button>
                 </div>
                 <ScrollArea className="h-[120px]">
                   {loadingStudents ? (
@@ -287,11 +429,11 @@ export function EditGroupModal({
                         <div
                           key={student._id}
                           className="flex items-center gap-3 p-2 rounded-md hover:bg-muted cursor-pointer transition-colors"
-                          onClick={() => handleAddStudent(student._id)}
+                          onClick={() => handleAddStudent(student)}
                         >
                           <Checkbox
                             checked={false}
-                            onCheckedChange={() => handleAddStudent(student._id)}
+                            onCheckedChange={() => handleAddStudent(student)}
                           />
                             <Avatar className="h-8 w-8">
                               <AvatarImage src={student.avatar_url} alt={student.name} />
@@ -353,7 +495,7 @@ export function EditGroupModal({
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleRemoveStudent(student._id)}
+                        onClick={() => handleRemoveStudent(student)}
                       >
                         <X className="h-4 w-4" />
                       </Button>

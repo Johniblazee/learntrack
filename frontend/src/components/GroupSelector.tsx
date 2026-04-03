@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react'
-import { useAuth } from '@clerk/clerk-react'
+import { useEffect } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadingState } from '@/components/ui/loading-state'
 import { Users } from 'lucide-react'
-import { API_BASE_URL } from '@/lib/config'
+import { useGroups } from '@/hooks/useQueries'
 
 interface StudentGroup {
   _id: string
@@ -23,49 +22,22 @@ interface GroupSelectorProps {
 }
 
 export default function GroupSelector({ selectedGroups, onChange, onStudentCountChange }: GroupSelectorProps) {
-  const { getToken } = useAuth()
-  const [groups, setGroups] = useState<StudentGroup[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading } = useGroups(500)
+  const groups: StudentGroup[] = Array.isArray(data) ? (data as StudentGroup[]) : []
 
   useEffect(() => {
-    fetchGroups()
-  }, [])
-
-  useEffect(() => {
-    // Calculate total unique students when selection changes
     const uniqueStudents = new Set<string>()
-    groups.forEach(group => {
+    groups.forEach((group) => {
       if (selectedGroups.includes(group._id)) {
-        group.studentIds.forEach(studentId => uniqueStudents.add(studentId))
+        group.studentIds.forEach((studentId) => uniqueStudents.add(studentId))
       }
     })
     onStudentCountChange?.(uniqueStudents.size)
-  }, [selectedGroups, groups])
-
-  const fetchGroups = async () => {
-    try {
-      setLoading(true)
-      const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/groups/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setGroups(data)
-      }
-    } catch (error) {
-      console.error('Failed to fetch groups:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  }, [groups, onStudentCountChange, selectedGroups])
 
   const toggleGroup = (groupId: string) => {
     if (selectedGroups.includes(groupId)) {
-      onChange(selectedGroups.filter(id => id !== groupId))
+      onChange(selectedGroups.filter((id) => id !== groupId))
     } else {
       onChange([...selectedGroups, groupId])
     }
@@ -79,11 +51,13 @@ export default function GroupSelector({ selectedGroups, onChange, onStudentCount
       red: 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400',
       yellow: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400',
       pink: 'bg-pink-100 text-pink-800 dark:bg-pink-900/20 dark:text-pink-400',
+      orange: 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400',
+      indigo: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-400',
     }
     return colorMap[color] || colorMap.blue
   }
 
-  if (loading) {
+  if (isLoading) {
     return <LoadingState message="Loading groups..." size="lg" className="py-4" />
   }
 
@@ -136,8 +110,8 @@ export default function GroupSelector({ selectedGroups, onChange, onStudentCount
                   )}
                   {group.subjects.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
-                      {group.subjects.slice(0, 3).map((subject, idx) => (
-                        <Badge key={idx} variant="outline" className="text-xs">
+                      {group.subjects.slice(0, 3).map((subject, index) => (
+                        <Badge key={index} variant="outline" className="text-xs">
                           {subject}
                         </Badge>
                       ))}
@@ -164,4 +138,3 @@ export default function GroupSelector({ selectedGroups, onChange, onStudentCount
     </div>
   )
 }
-

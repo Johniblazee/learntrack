@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Search, Plus, Pencil, Trash2, Users, BookOpen, RefreshCw, X } from 'lucide-react'
 import { toast } from '@/contexts/ToastContext'
@@ -25,6 +26,15 @@ interface StudentGroup {
   averageScore?: number
 }
 
+interface BulkDeleteGroupsResponse {
+  deleted_count?: number
+  deleted_group_ids?: string[]
+  blocked_count?: number
+  blocked_group_ids?: string[]
+  skipped_count?: number
+  skipped_group_ids?: string[]
+}
+
 export default function GroupsManagementView() {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -34,9 +44,12 @@ export default function GroupsManagementView() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
   const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null)
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set())
   const [regeneratingImage, setRegeneratingImage] = useState<string | null>(null)
   const [removingImage, setRemovingImage] = useState<string | null>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const groups: StudentGroup[] = Array.isArray(groupsData) ? groupsData : []
 
@@ -51,6 +64,13 @@ export default function GroupsManagementView() {
       return response.data
     },
     onSuccess: () => {
+      if (selectedGroup?._id) {
+        setSelectedGroupIds((previous) => {
+          const next = new Set(previous)
+          next.delete(selectedGroup._id)
+          return next
+        })
+      }
       invalidateGroups()
       toast.success('Group deleted successfully')
       setShowDeleteModal(false)
@@ -131,6 +151,10 @@ export default function GroupsManagementView() {
     return group.name.toLowerCase().includes(searchLower) ||
            group.description.toLowerCase().includes(searchLower)
   })
+  const allVisibleGroupsSelected =
+    filteredGroups.length > 0 && filteredGroups.every((group) => selectedGroupIds.has(group._id))
+  const someVisibleGroupsSelected =
+    filteredGroups.some((group) => selectedGroupIds.has(group._id)) && !allVisibleGroupsSelected
 
   // Get initials for avatar fallback
   const getInitials = (name: string) => {
@@ -150,6 +174,80 @@ export default function GroupsManagementView() {
       'indigo': 'bg-indigo-100 text-indigo-700',
     }
     return colorMap[color] || 'bg-muted text-foreground'
+  }
+
+  const handleToggleSelectGroup = (groupId: string) => {
+    setSelectedGroupIds((previous) => {
+      const next = new Set(previous)
+      if (next.has(groupId)) {
+        next.delete(groupId)
+      } else {
+        next.add(groupId)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllVisibleGroups = () => {
+    const visibleIds = filteredGroups.map((group) => group._id)
+    setSelectedGroupIds((previous) => {
+      const next = new Set(previous)
+      if (visibleIds.every((groupId) => next.has(groupId))) {
+        visibleIds.forEach((groupId) => next.delete(groupId))
+      } else {
+        visibleIds.forEach((groupId) => next.add(groupId))
+      }
+      return next
+    })
+  }
+
+  const handleClearSelection = () => {
+    setSelectedGroupIds(new Set())
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedGroupIds.size === 0) {
+      return
+    }
+
+    try {
+      setBulkDeleting(true)
+      const response = await client.post<BulkDeleteGroupsResponse>('/groups/bulk-delete', {
+        group_ids: [...selectedGroupIds],
+      })
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const deletedCount = response.data?.deleted_count || 0
+      const blockedCount = response.data?.blocked_count || 0
+      const skippedCount = response.data?.skipped_count || 0
+      const summary = [
+        deletedCount > 0 ? `${deletedCount} deleted` : null,
+        blockedCount > 0 ? `${blockedCount} assigned to work` : null,
+        skippedCount > 0 ? `${skippedCount} unavailable` : null,
+      ].filter(Boolean).join(', ')
+
+      invalidateGroups()
+      setSelectedGroupIds(new Set())
+      setShowBulkDeleteModal(false)
+
+      if (deletedCount > 0) {
+        toast.success('Bulk delete completed', {
+          description: summary || 'Selected groups were deleted.',
+        })
+      } else {
+        toast.warning('No groups were deleted', {
+          description: summary || 'Selected groups could not be deleted.',
+        })
+      }
+    } catch (error: any) {
+      toast.error('Failed to delete selected groups', {
+        description: error.message || 'Please try again',
+      })
+    } finally {
+      setBulkDeleting(false)
+    }
   }
 
   return (
@@ -174,14 +272,26 @@ export default function GroupsManagementView() {
       </div>
 
       {/* Search Bar */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-        <Input
-          placeholder="Search groups by name or description..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10 bg-muted/50"
-        />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+          <Input
+            placeholder="Search groups by name or description..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 bg-muted/50"
+          />
+        </div>
+        {filteredGroups.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={allVisibleGroupsSelected ? true : someVisibleGroupsSelected ? 'indeterminate' : false}
+              onCheckedChange={handleSelectAllVisibleGroups}
+              aria-label="Select all visible groups"
+            />
+            <span className="text-sm text-muted-foreground">Select visible</span>
+          </div>
+        )}
       </div>
 
       {/* Groups Grid */}
@@ -233,8 +343,15 @@ export default function GroupsManagementView() {
           {filteredGroups.map((group) => (
             <Card
               key={group._id}
-              className="border shadow-sm bg-card hover:shadow-md transition-shadow overflow-hidden group"
+              className="relative border shadow-sm bg-card hover:shadow-md transition-shadow overflow-hidden group"
             >
+              <div className="absolute top-3 left-3 z-10 rounded-md bg-background/90 backdrop-blur p-1">
+                <Checkbox
+                  checked={selectedGroupIds.has(group._id)}
+                  onCheckedChange={() => handleToggleSelectGroup(group._id)}
+                  aria-label={`Select ${group.name}`}
+                />
+              </div>
               {/* Image Section - Smaller 16:9 aspect ratio */}
               <div className="relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-[#5c4a38]/10 to-[#8b7355]/10">
                 {group.imageUrl ? (
@@ -252,7 +369,10 @@ export default function GroupsManagementView() {
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => handleRegenerateImage(group)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void handleRegenerateImage(group)
+                        }}
                         disabled={regeneratingImage === group._id}
                         className="bg-white/90 hover:bg-white"
                       >
@@ -266,7 +386,10 @@ export default function GroupsManagementView() {
                       <Button
                         variant="destructive"
                         size="sm"
-                        onClick={() => handleRemoveImage(group)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void handleRemoveImage(group)
+                        }}
                         disabled={removingImage === group._id}
                         className="bg-red-600/90 hover:bg-red-600"
                       >
@@ -366,6 +489,25 @@ export default function GroupsManagementView() {
         </div>
       )}
 
+      {selectedGroupIds.size > 0 && (
+        <div className="sticky bottom-0 z-40 pt-2">
+          <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between gap-4">
+            <Badge variant="secondary">
+              {selectedGroupIds.size} group{selectedGroupIds.size === 1 ? '' : 's'} selected
+            </Badge>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleClearSelection}>
+                Clear Selection
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setShowBulkDeleteModal(true)}>
+                <Trash2 className="w-4 h-4 mr-1" />
+                Delete Selected
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modals */}
       <CreateGroupModal
         open={showCreateModal}
@@ -395,6 +537,15 @@ export default function GroupsManagementView() {
         description="Are you sure you want to delete this group? This action cannot be undone."
         itemName={selectedGroup?.name}
         loading={deleteGroupMutation.isPending}
+      />
+
+      <ConfirmDeleteModal
+        open={showBulkDeleteModal}
+        onOpenChange={setShowBulkDeleteModal}
+        onConfirm={handleBulkDelete}
+        title="Delete selected groups?"
+        description={`This will delete ${selectedGroupIds.size} selected group${selectedGroupIds.size === 1 ? '' : 's'}. Groups assigned to existing assignments will be skipped.`}
+        loading={bulkDeleting}
       />
     </div>
   )

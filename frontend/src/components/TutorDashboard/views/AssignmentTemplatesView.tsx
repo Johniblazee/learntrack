@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -83,7 +84,20 @@ interface TemplateEditorState {
   questionIds: string[]
   instructions: string
   tags: string
+  durationMinutes: string
+  passingScore: number
+  allowRetakes: boolean
+  shuffleQuestions: boolean
+  showCorrectAnswers: boolean
   status: "active" | "draft" | "archived"
+}
+
+interface BulkTemplateActionResponse {
+  requested_count?: number
+  updated_count?: number
+  updated_template_ids?: string[]
+  skipped_count?: number
+  skipped_template_ids?: string[]
 }
 
 const DEFAULT_EDITOR_STATE: TemplateEditorState = {
@@ -93,6 +107,11 @@ const DEFAULT_EDITOR_STATE: TemplateEditorState = {
   questionIds: [],
   instructions: "",
   tags: "",
+  durationMinutes: "",
+  passingScore: 70,
+  allowRetakes: false,
+  shuffleQuestions: true,
+  showCorrectAnswers: true,
   status: "active",
 }
 
@@ -120,9 +139,14 @@ export default function AssignmentTemplatesView() {
   const [templates, setTemplates] = useState<AssignmentTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "draft" | "archived">("all")
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set())
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [templateToDelete, setTemplateToDelete] = useState<AssignmentTemplate | null>(null)
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkUpdatingStatus, setBulkUpdatingStatus] = useState(false)
 
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create")
@@ -159,12 +183,28 @@ export default function AssignmentTemplatesView() {
   const loadTemplates = useCallback(async () => {
     try {
       setLoading(true)
-      const response = await client.get("/assignment-templates/")
+      const aggregatedTemplates: AssignmentTemplate[] = []
+      let skip = 0
+      const limit = 100
+      let total = 0
 
-      if (response.error) throw new Error(response.error)
+      do {
+        const response = await client.get(`/assignment-templates/?skip=${skip}&limit=${limit}`)
 
-      const data = response.data
-      setTemplates(data?.templates || [])
+        if (response.error) throw new Error(response.error)
+
+        const data = response.data
+        const pageTemplates = (data?.templates || []) as AssignmentTemplate[]
+        total = Number(data?.total || 0)
+        aggregatedTemplates.push(...pageTemplates)
+        skip += pageTemplates.length
+
+        if (pageTemplates.length === 0) {
+          break
+        }
+      } while (skip < total)
+
+      setTemplates(aggregatedTemplates)
     } catch (error) {
       console.error("Failed to load templates:", error)
       toast.error("Failed to load templates")
@@ -195,6 +235,11 @@ export default function AssignmentTemplatesView() {
       questionIds: template.question_ids || [],
       instructions: template.instructions || "",
       tags: (template.tags || []).join(", "),
+      durationMinutes: template.duration_minutes ? String(template.duration_minutes) : "",
+      passingScore: template.passing_score ?? 70,
+      allowRetakes: template.allow_retakes ?? false,
+      shuffleQuestions: template.shuffle_questions ?? true,
+      showCorrectAnswers: template.show_correct_answers ?? true,
       status: template.status || "active",
     })
     setSelectedQuestionData([])
@@ -218,6 +263,11 @@ export default function AssignmentTemplatesView() {
 
       toast.success("Template deleted successfully")
       setTemplates((prev) => prev.filter((template) => getTemplateId(template) !== templateId))
+      setSelectedTemplateIds((prev) => {
+        const next = new Set(prev)
+        next.delete(templateId)
+        return next
+      })
       setDeleteModalOpen(false)
       setTemplateToDelete(null)
     } catch (error) {
@@ -247,6 +297,11 @@ export default function AssignmentTemplatesView() {
         description: editorState.description.trim() || undefined,
         subject_id: editorState.subjectId,
         question_ids: editorState.questionIds,
+        duration_minutes: editorState.durationMinutes ? Number(editorState.durationMinutes) : undefined,
+        passing_score: editorState.passingScore,
+        allow_retakes: editorState.allowRetakes,
+        shuffle_questions: editorState.shuffleQuestions,
+        show_correct_answers: editorState.showCorrectAnswers,
         instructions: editorState.instructions.trim() || undefined,
         tags: parseTags(editorState.tags),
         status: editorState.status,
@@ -304,11 +359,117 @@ export default function AssignmentTemplatesView() {
 
   const filteredTemplates = templates.filter((template) => {
     const query = searchTerm.toLowerCase()
+    const matchesStatus = statusFilter === "all" || template.status === statusFilter
     return (
-      template.name.toLowerCase().includes(query) ||
-      template.description?.toLowerCase().includes(query)
+      matchesStatus &&
+      (
+        template.name.toLowerCase().includes(query) ||
+        template.description?.toLowerCase().includes(query)
+      )
     )
   })
+
+  const allFilteredTemplatesSelected =
+    filteredTemplates.length > 0 && filteredTemplates.every((template) => selectedTemplateIds.has(getTemplateId(template)))
+  const someFilteredTemplatesSelected =
+    filteredTemplates.some((template) => selectedTemplateIds.has(getTemplateId(template))) && !allFilteredTemplatesSelected
+
+  const handleToggleSelectTemplate = (templateId: string) => {
+    setSelectedTemplateIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(templateId)) {
+        next.delete(templateId)
+      } else {
+        next.add(templateId)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllFilteredTemplates = () => {
+    const filteredIds = filteredTemplates.map((template) => getTemplateId(template))
+    setSelectedTemplateIds((prev) => {
+      const next = new Set(prev)
+      if (filteredIds.every((templateId) => next.has(templateId))) {
+        filteredIds.forEach((templateId) => next.delete(templateId))
+      } else {
+        filteredIds.forEach((templateId) => next.add(templateId))
+      }
+      return next
+    })
+  }
+
+  const handleDeselectAllTemplates = () => {
+    setSelectedTemplateIds(new Set())
+  }
+
+  const handleBulkStatusUpdate = async (status: "active" | "draft" | "archived") => {
+    if (selectedTemplateIds.size === 0) {
+      return
+    }
+
+    try {
+      setBulkUpdatingStatus(true)
+      const response = await client.post<BulkTemplateActionResponse>("/assignment-templates/bulk-status", {
+        template_ids: [...selectedTemplateIds],
+        status,
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const updatedTemplateIds = new Set((response.data?.updated_template_ids || []).map(String))
+      setTemplates((prev) =>
+        prev.map((template) =>
+          updatedTemplateIds.has(getTemplateId(template))
+            ? { ...template, status }
+            : template
+        )
+      )
+      setSelectedTemplateIds(new Set())
+
+      toast.success("Bulk update completed", {
+        description: `${response.data?.updated_count || 0} updated${response.data?.skipped_count ? `, ${response.data.skipped_count} skipped` : ""}`,
+      })
+    } catch (error) {
+      console.error("Failed to bulk update template status:", error)
+      toast.error("Failed to update selected templates")
+    } finally {
+      setBulkUpdatingStatus(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedTemplateIds.size === 0) {
+      return
+    }
+
+    try {
+      setBulkDeleting(true)
+      const response = await client.post<BulkTemplateActionResponse>("/assignment-templates/bulk-delete", {
+        template_ids: [...selectedTemplateIds],
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const deletedIds = new Set((response.data?.updated_template_ids || []).map(String))
+      setTemplates((prev) => prev.filter((template) => !deletedIds.has(getTemplateId(template))))
+      setSelectedTemplateIds(new Set())
+      setBulkDeleteModalOpen(false)
+
+      toast.success("Templates deleted", {
+        description: `${response.data?.updated_count || 0} deleted${response.data?.skipped_count ? `, ${response.data.skipped_count} skipped` : ""}`,
+      })
+    } catch (error) {
+      console.error("Failed to bulk delete templates:", error)
+      toast.error("Failed to delete selected templates")
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -336,14 +497,27 @@ export default function AssignmentTemplatesView() {
         </Button>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-        <Input
-          placeholder="Search templates..."
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-          className="pl-10 bg-muted/50"
-        />
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+          <Input
+            placeholder="Search templates..."
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="pl-10 bg-muted/50"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={(value: "all" | "active" | "draft" | "archived") => setStatusFilter(value)}>
+          <SelectTrigger className="w-full md:w-[180px]">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="archived">Archived</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <Card className="border-0 shadow-sm bg-card">
@@ -352,6 +526,13 @@ export default function AssignmentTemplatesView() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={allFilteredTemplatesSelected ? true : someFilteredTemplatesSelected ? "indeterminate" : false}
+                      onCheckedChange={handleSelectAllFilteredTemplates}
+                      aria-label="Select all visible templates"
+                    />
+                  </TableHead>
                   <TableHead>Template Name</TableHead>
                   <TableHead>Subject</TableHead>
                   <TableHead>Questions</TableHead>
@@ -364,6 +545,9 @@ export default function AssignmentTemplatesView() {
                 {loading ? (
                   Array.from({ length: 5 }).map((_, index) => (
                     <TableRow key={index}>
+                      <TableCell>
+                        <div className="h-4 bg-muted rounded w-4 animate-pulse"></div>
+                      </TableCell>
                       <TableCell>
                         <div className="h-4 bg-muted rounded w-48 animate-pulse"></div>
                       </TableCell>
@@ -386,7 +570,7 @@ export default function AssignmentTemplatesView() {
                   ))
                 ) : filteredTemplates.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                       {searchTerm
                         ? "No templates found matching your search"
                         : "No templates yet. Create your first template to get started."}
@@ -396,7 +580,17 @@ export default function AssignmentTemplatesView() {
                   filteredTemplates.map((template) => {
                     const templateId = getTemplateId(template)
                     return (
-                      <TableRow key={templateId} className="hover:bg-muted/30 transition-colors">
+                      <TableRow
+                        key={templateId}
+                        className={selectedTemplateIds.has(templateId) ? "bg-primary/5 hover:bg-primary/10 transition-colors" : "hover:bg-muted/30 transition-colors"}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedTemplateIds.has(templateId)}
+                            onCheckedChange={() => handleToggleSelectTemplate(templateId)}
+                            aria-label={`Select ${template.name}`}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium text-foreground">
                           <div>
                             <p className="font-semibold">{template.name}</p>
@@ -455,6 +649,41 @@ export default function AssignmentTemplatesView() {
           </div>
         </CardContent>
       </Card>
+
+      {selectedTemplateIds.size > 0 && (
+        <div className="sticky bottom-0 z-40 pt-2">
+          <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between gap-4">
+            <Badge variant="secondary">
+              {selectedTemplateIds.size} template{selectedTemplateIds.size === 1 ? "" : "s"} selected
+            </Badge>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleDeselectAllTemplates}>
+                Deselect All
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleBulkStatusUpdate("active")}
+                disabled={bulkUpdatingStatus}
+              >
+                Activate
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleBulkStatusUpdate("archived")}
+                disabled={bulkUpdatingStatus}
+              >
+                Archive
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setBulkDeleteModalOpen(true)}>
+                <Trash2 className="w-4 h-4 mr-1" />
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -544,6 +773,68 @@ export default function AssignmentTemplatesView() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label htmlFor="template-duration">Duration (minutes)</Label>
+                <Input
+                  id="template-duration"
+                  type="number"
+                  min={1}
+                  value={editorState.durationMinutes}
+                  onChange={(event) =>
+                    setEditorState((prev) => ({ ...prev, durationMinutes: event.target.value }))
+                  }
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="template-passing-score">Passing Score (%)</Label>
+                <Input
+                  id="template-passing-score"
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={editorState.passingScore}
+                  onChange={(event) =>
+                    setEditorState((prev) => ({
+                      ...prev,
+                      passingScore: Math.min(100, Math.max(0, Number(event.target.value) || 0)),
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-lg border p-4">
+              <label className="flex items-center gap-3 text-sm font-medium">
+                <Checkbox
+                  checked={editorState.allowRetakes}
+                  onCheckedChange={(checked) =>
+                    setEditorState((prev) => ({ ...prev, allowRetakes: checked === true }))
+                  }
+                />
+                Allow retakes
+              </label>
+              <label className="flex items-center gap-3 text-sm font-medium">
+                <Checkbox
+                  checked={editorState.shuffleQuestions}
+                  onCheckedChange={(checked) =>
+                    setEditorState((prev) => ({ ...prev, shuffleQuestions: checked === true }))
+                  }
+                />
+                Shuffle questions
+              </label>
+              <label className="flex items-center gap-3 text-sm font-medium">
+                <Checkbox
+                  checked={editorState.showCorrectAnswers}
+                  onCheckedChange={(checked) =>
+                    setEditorState((prev) => ({ ...prev, showCorrectAnswers: checked === true }))
+                  }
+                />
+                Show correct answers
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
                 <Label htmlFor="template-tags">Tags</Label>
                 <Input
                   id="template-tags"
@@ -610,6 +901,26 @@ export default function AssignmentTemplatesView() {
                 <p className="font-medium whitespace-pre-wrap">{activeTemplate.instructions || "No instructions"}</p>
               </div>
               <div>
+                <p className="text-muted-foreground">Duration</p>
+                <p className="font-medium">{activeTemplate.duration_minutes ? `${activeTemplate.duration_minutes} minutes` : "No limit"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Passing score</p>
+                <p className="font-medium">{activeTemplate.passing_score}%</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Retakes</p>
+                <p className="font-medium">{activeTemplate.allow_retakes ? "Allowed" : "Not allowed"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Shuffle questions</p>
+                <p className="font-medium">{activeTemplate.shuffle_questions ? "Enabled" : "Disabled"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Show correct answers</p>
+                <p className="font-medium">{activeTemplate.show_correct_answers ? "Enabled" : "Disabled"}</p>
+              </div>
+              <div>
                 <p className="text-muted-foreground">Tags</p>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {activeTemplate.tags?.length ? (
@@ -646,6 +957,15 @@ export default function AssignmentTemplatesView() {
         description="Are you sure you want to delete this template? This action cannot be undone."
         itemName={templateToDelete?.name}
         loading={deleting}
+      />
+
+      <ConfirmDeleteModal
+        open={bulkDeleteModalOpen}
+        onOpenChange={setBulkDeleteModalOpen}
+        onConfirm={handleBulkDelete}
+        title="Delete selected templates?"
+        description={`This will permanently delete ${selectedTemplateIds.size} selected template${selectedTemplateIds.size === 1 ? "" : "s"}. This action cannot be undone.`}
+        loading={bulkDeleting}
       />
     </div>
   )

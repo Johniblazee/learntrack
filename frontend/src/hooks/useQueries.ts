@@ -678,7 +678,7 @@ export function useMaterials(
 /**
  * Hook to fetch all groups
  */
-export function useGroups(limit: number = 200) {
+export function useGroups(limit: number = 500) {
   const client = useApiClient()
 
   return useQuery({
