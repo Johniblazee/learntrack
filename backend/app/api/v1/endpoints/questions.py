@@ -9,6 +9,7 @@ import structlog
 
 from app.core.database import get_database
 from app.core.dependencies import get_question_service
+from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.enhanced_auth import (
     require_tutor,
     require_authenticated_user,
@@ -203,6 +204,12 @@ async def delete_question(
         if not success:
             raise HTTPException(status_code=404, detail="Question not found")
         return {"message": "Question deleted successfully"}
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:

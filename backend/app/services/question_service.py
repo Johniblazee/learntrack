@@ -434,7 +434,7 @@ class QuestionService:
             logger.info("Question deleted", question_id=question_id)
             return True
 
-        except (NotFoundError, AuthorizationError):
+        except (NotFoundError, AuthorizationError, ValidationError):
             raise
         except Exception as e:
             logger.error(

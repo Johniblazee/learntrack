@@ -33,7 +33,9 @@ export default function DashboardPage() {
     ? impersonatedUser.role
     : null
   const hasRoleMismatch =
-    isBackendLoaded && Boolean(validBackendRole && validClerkRole && validBackendRole !== validClerkRole)
+    !isImpersonating &&
+    isBackendLoaded &&
+    Boolean(validBackendRole && validClerkRole && validBackendRole !== validClerkRole)
 
   const effectiveView = useMemo<DashboardView | null>(() => {
     if (isImpersonating && validImpersonatedRole) {
