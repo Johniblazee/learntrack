@@ -20,6 +20,7 @@ from app.models.invitation import (
     InvitationStats,
 )
 from app.models.user import UserRole, User
+from app.models.user import AccountStatus
 from app.core.exceptions import NotFoundError, ValidationError, DatabaseException
 from app.services.user_service import UserService
 from app.services.email_service import email_service
@@ -157,9 +158,16 @@ class InvitationService:
                 invitation_data.invitee_email
             )
             if existing_user:
-                raise ValidationError(
-                    f"User with email {invitation_data.invitee_email} already exists"
+                allow_provisioned_student_invite = (
+                    invitation_data.role == InvitationRole.STUDENT
+                    and existing_user.role == UserRole.STUDENT
+                    and existing_user.tutor_id == tutor_id
+                    and not existing_user.clerk_id
                 )
+                if not allow_provisioned_student_invite:
+                    raise ValidationError(
+                        f"User with email {invitation_data.invitee_email} already exists"
+                    )
 
             # Check for existing pending invitation
             existing_invitation = await self.collection.find_one(
@@ -206,6 +214,14 @@ class InvitationService:
 
             result = await self.collection.insert_one(invitation_dict)
             invitation_dict["_id"] = result.inserted_id
+
+            if invitation_data.role == InvitationRole.STUDENT:
+                await self.user_service._mark_unclaimed_student_status(
+                    email=invitation_data.invitee_email,
+                    tutor_id=tutor_id,
+                    status=AccountStatus.INVITED,
+                    invited_at=now,
+                )
 
             logger.info(
                 "Invitation created",
@@ -416,6 +432,9 @@ class InvitationService:
                 "status": InvitationStatus.PENDING.value,
                 "expires_at": {"$lt": now},
             }
+            expired_invitations = await self.collection.find(expired_query).to_list(
+                length=None
+            )
 
             # Update them to expired status
             result = await self.collection.update_many(
@@ -428,6 +447,13 @@ class InvitationService:
                     tutor_id=tutor_id,
                     count=result.modified_count,
                 )
+
+                for invitation in expired_invitations:
+                    if invitation.get("role") == InvitationRole.STUDENT.value:
+                        await self.user_service.sync_student_account_status_from_invitations(
+                            email=str(invitation.get("invitee_email") or ""),
+                            tutor_id=tutor_id,
+                        )
 
             return result.modified_count
         except Exception as e:
@@ -514,6 +540,11 @@ class InvitationService:
             logger.info(
                 "Invitation revoked", invitation_id=invitation_id, tutor_id=tutor_id
             )
+            if invitation.get("role") == InvitationRole.STUDENT.value:
+                await self.user_service.sync_student_account_status_from_invitations(
+                    email=str(invitation.get("invitee_email") or ""),
+                    tutor_id=tutor_id,
+                )
             return result.modified_count > 0
 
         except (NotFoundError, ValidationError):
@@ -563,6 +594,14 @@ class InvitationService:
             updated = await self.collection.find_one({"_id": oid})
             if not updated:
                 raise NotFoundError("Invitation", invitation_id)
+
+            if updated.get("role") == InvitationRole.STUDENT.value:
+                await self.user_service._mark_unclaimed_student_status(
+                    email=str(updated.get("invitee_email") or ""),
+                    tutor_id=tutor_id,
+                    status=AccountStatus.INVITED,
+                    invited_at=now,
+                )
 
             try:
                 tutor = await self.user_service.get_user_by_clerk_id(tutor_id)

@@ -8,12 +8,13 @@ from bson import ObjectId
 from app.core.exceptions import ValidationError
 from app.models.invitation import (
     Invitation,
+    InvitationCreate,
     InvitationRole,
     InvitationStatus,
     InvitationVerifyResponse,
 )
+from app.models.user import AccountStatus
 from app.services.invitation_service import InvitationService
-from app.models.invitation import InvitationCreate
 from tests.conftest import FakeCollection
 
 
@@ -57,6 +58,40 @@ async def test_create_parent_invitation_normalizes_student_ids_to_clerk_ids():
     )
 
     assert invitation.student_ids == ["student-clerk-1"]
+
+
+@pytest.mark.asyncio
+async def test_create_student_invitation_reuses_provisioned_student_and_marks_invited():
+    database = _make_database()
+    database.students = FakeCollection(
+        [
+            {
+                "_id": ObjectId("507f1f77bcf86cd799439099"),
+                "email": "student@example.com",
+                "name": "Student One",
+                "role": "student",
+                "tutor_id": "tutor-1",
+                "tenant_id": "tutor-1",
+                "is_active": True,
+                "account_status": AccountStatus.PROVISIONED.value,
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+            }
+        ]
+    )
+    service = InvitationService(database)
+
+    invitation = await service.create_invitation(
+        InvitationCreate(
+            invitee_email="student@example.com",
+            role=InvitationRole.STUDENT,
+        ),
+        "tutor-1",
+    )
+
+    assert invitation.invitee_email == "student@example.com"
+    stored_student = await database.students.find_one({"email": "student@example.com"})
+    assert stored_student["account_status"] == AccountStatus.INVITED.value
 
 
 @pytest.mark.asyncio

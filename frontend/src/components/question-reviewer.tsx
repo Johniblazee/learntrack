@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -69,37 +69,94 @@ interface GenerationStats {
   rejected_questions: number
 }
 
-const mapQuestionFromApi = (q: any): Question => ({
-  id: q.question_id || q.id,
-  question_id: q.question_id,
-  session_id: q.session_id,
-  text: q.question_text || q.text,
-  question_text: q.question_text,
-  type: q.type,
-  difficulty: q.difficulty,
-  blooms_level: q.blooms_level,
-  subject: q.subject || 'Generated',
-  topic: q.session_prompt || q.topic || 'AI Generated',
-  options: q.options,
-  correctAnswer: q.correct_answer || q.correctAnswer,
-  correct_answer: q.correct_answer,
-  explanation: q.explanation || '',
-  points: Number(q.points || 1),
-  tags: q.tags || [],
-  status: q.status?.toLowerCase() || 'pending',
-  createdBy: q.created_by || 'AI Generator',
-  createdAt: q.session_created_at || q.created_at || new Date().toISOString(),
-  session_created_at: q.session_created_at,
-  reviewedBy: q.reviewed_by,
-  reviewedAt: q.reviewed_at,
-  reviewComments: q.review_comments,
-  rejectionReason: q.rejection_reason,
-  publishedQuestionId: q.published_question_id,
-  publishedAt: q.published_at,
-  rating: q.rating,
-  usageCount: Number(q.usage_count || 0),
-  successRate: Number(q.success_rate || 0),
-})
+interface SubjectRecord {
+  _id?: string
+  id?: string
+  name?: string
+}
+
+interface QuestionOptionRecord {
+  text?: string
+  is_correct?: boolean
+}
+
+const stripOptionPrefix = (value: string) => value.replace(/^[A-Za-z][).:-]\s*/, '').trim()
+
+const normalizeOptionsAndAnswer = (
+  options: Array<string | QuestionOptionRecord> | undefined,
+  answer: string | undefined,
+) => {
+  const normalizedOptions = (options || [])
+    .map((option) => {
+      if (typeof option === 'string') {
+        return option.trim()
+      }
+
+      return String(option?.text || '').trim()
+    })
+    .filter(Boolean)
+
+  const explicitAnswer = String(answer || '').trim()
+  const optionRecordMatch = (options || []).find(
+    (option): option is QuestionOptionRecord =>
+      typeof option !== 'string' && option?.is_correct === true && typeof option?.text === 'string',
+  )
+
+  let resolvedAnswer = explicitAnswer || String(optionRecordMatch?.text || '').trim()
+
+  if (resolvedAnswer.length === 1 && /^[A-Za-z]$/.test(resolvedAnswer)) {
+    const index = resolvedAnswer.toUpperCase().charCodeAt(0) - 65
+    if (index >= 0 && index < normalizedOptions.length) {
+      resolvedAnswer = stripOptionPrefix(normalizedOptions[index])
+    }
+  }
+
+  const strippedAnswer = stripOptionPrefix(resolvedAnswer)
+  const displayOptions = normalizedOptions.map((option) => stripOptionPrefix(option))
+  return {
+    options: displayOptions,
+    correctAnswer: strippedAnswer,
+  }
+}
+
+const mapQuestionFromApi = (q: any): Question => {
+  const normalized = normalizeOptionsAndAnswer(
+    q.options,
+    q.correct_answer || q.correctAnswer,
+  )
+
+  return {
+    id: q.question_id || q.id,
+    question_id: q.question_id,
+    session_id: q.session_id,
+    text: q.question_text || q.text,
+    question_text: q.question_text,
+    type: q.type,
+    difficulty: q.difficulty,
+    blooms_level: q.blooms_level,
+    subject: q.subject || 'Generated',
+    topic: q.topic || q.session_prompt || 'AI Generated',
+    options: normalized.options.length > 0 ? normalized.options : undefined,
+    correctAnswer: normalized.correctAnswer,
+    correct_answer: q.correct_answer,
+    explanation: q.explanation || '',
+    points: Number(q.points || 1),
+    tags: q.tags || [],
+    status: q.status?.toLowerCase() || 'pending',
+    createdBy: q.created_by || 'AI Generator',
+    createdAt: q.session_created_at || q.created_at || new Date().toISOString(),
+    session_created_at: q.session_created_at,
+    reviewedBy: q.reviewed_by,
+    reviewedAt: q.reviewed_at,
+    reviewComments: q.review_comments,
+    rejectionReason: q.rejection_reason,
+    publishedQuestionId: q.published_question_id,
+    publishedAt: q.published_at,
+    rating: q.rating,
+    usageCount: Number(q.usage_count || 0),
+    successRate: Number(q.success_rate || 0),
+  }
+}
 
 export default function QuestionReviewer() {
   const { getToken } = useAuth()
@@ -116,9 +173,12 @@ export default function QuestionReviewer() {
   const [approvedLoading, setApprovedLoading] = useState(false)
   const [rejectedLoading, setRejectedLoading] = useState(false)
   const [selectedQuestions, setSelectedQuestions] = useState<Set<string>>(new Set())
+  const [selectedApprovedQuestions, setSelectedApprovedQuestions] = useState<Set<string>>(new Set())
   const [generationStats, setGenerationStats] = useState<GenerationStats | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [bulkRevisionDialogOpen, setBulkRevisionDialogOpen] = useState(false)
+  const [bulkRevisionNotes, setBulkRevisionNotes] = useState('')
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null)
   const [editForm, setEditForm] = useState({
     question_text: '',
@@ -128,7 +188,61 @@ export default function QuestionReviewer() {
   })
 
   const { data: subjectsData } = useSubjects()
-  const subjects = subjectsData || []
+  const subjects = useMemo<SubjectRecord[]>(() => {
+    if (Array.isArray(subjectsData)) {
+      return subjectsData as SubjectRecord[]
+    }
+
+    return ((subjectsData as { items?: SubjectRecord[] } | undefined)?.items || []) as SubjectRecord[]
+  }, [subjectsData])
+
+  const subjectIdByName = useMemo(() => {
+    return new Map(
+      subjects
+        .map((subject) => {
+          const subjectId = String(subject._id || subject.id || '').trim()
+          const subjectName = String(subject.name || '').trim()
+          if (!subjectId || !subjectName) {
+            return null
+          }
+          return [subjectName.toLowerCase(), subjectId] as const
+        })
+        .filter(Boolean) as Array<readonly [string, string]>
+    )
+  }, [subjects])
+
+  const fetchQuestionsCollection = async (
+    token: string,
+    path: string,
+  ): Promise<Question[]> => {
+    const results: Question[] = []
+    let page = 1
+    let total = 0
+    let hasMore = true
+
+    while (hasMore) {
+      const separator = path.includes('?') ? '&' : '?'
+      const response = await fetch(`${API_BASE_URL}${path}${separator}page=${page}&per_page=100`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch questions')
+      }
+
+      const data = await response.json()
+      const items = data?.items || (Array.isArray(data) ? data : [])
+      results.push(...items.map(mapQuestionFromApi))
+      total = Number(data?.total || results.length)
+      hasMore = items.length > 0 && results.length < total
+      page += 1
+    }
+
+    return results
+  }
 
   // Fetch pending questions from backend
   useEffect(() => {
@@ -146,26 +260,23 @@ export default function QuestionReviewer() {
     }
   }, [activeTab])
 
+  useEffect(() => {
+    setSelectedQuestions(new Set())
+    setSelectedApprovedQuestions(new Set())
+  }, [activeTab])
+
   const fetchPendingQuestions = async () => {
     try {
       setLoading(true)
       const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/question-generator/pending-questions`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        const items = data?.items || (Array.isArray(data) ? data : [])
-        const mappedQuestions = items.map(mapQuestionFromApi)
-        setQuestions(mappedQuestions)
-      } else {
-        console.error('Failed to fetch pending questions')
-        toast.error('Failed to load pending questions')
+      if (!token) {
+        throw new Error('Authentication token is unavailable')
       }
+      const mappedQuestions = await fetchQuestionsCollection(
+        token,
+        '/question-generator/pending-questions',
+      )
+      setQuestions(mappedQuestions)
     } catch (error) {
       console.error('Error fetching pending questions:', error)
       toast.error('Error loading questions')
@@ -178,23 +289,12 @@ export default function QuestionReviewer() {
     try {
       setApprovedLoading(true)
       const token = await getToken()
-      const response = await fetch(
-        `${API_BASE_URL}/question-generator/all-questions?status=approved&per_page=100`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        const items = data?.items || (Array.isArray(data) ? data : [])
-        setApprovedQuestions(items.map(mapQuestionFromApi))
-      } else {
-        toast.error('Failed to load approved questions')
+      if (!token) {
+        throw new Error('Authentication token is unavailable')
       }
+      setApprovedQuestions(
+        await fetchQuestionsCollection(token, '/question-generator/all-questions?status=approved'),
+      )
     } catch (error) {
       console.error('Error fetching approved questions:', error)
       toast.error('Error loading approved questions')
@@ -207,23 +307,12 @@ export default function QuestionReviewer() {
     try {
       setRejectedLoading(true)
       const token = await getToken()
-      const response = await fetch(
-        `${API_BASE_URL}/question-generator/all-questions?status=rejected&per_page=100`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        const items = data?.items || (Array.isArray(data) ? data : [])
-        setRejectedQuestions(items.map(mapQuestionFromApi))
-      } else {
-        toast.error('Failed to load rejected questions')
+      if (!token) {
+        throw new Error('Authentication token is unavailable')
       }
+      setRejectedQuestions(
+        await fetchQuestionsCollection(token, '/question-generator/all-questions?status=rejected'),
+      )
     } catch (error) {
       console.error('Error fetching rejected questions:', error)
       toast.error('Error loading rejected questions')
@@ -235,45 +324,44 @@ export default function QuestionReviewer() {
   const fetchAnalyticsData = async () => {
     try {
       const token = await getToken()
+      if (!token) {
+        throw new Error('Authentication token is unavailable')
+      }
 
-      const [statsResponse, questionsResponse] = await Promise.all([
+      const [statsResponse, allQuestions] = await Promise.all([
         fetch(`${API_BASE_URL}/question-generator/stats`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
         }),
-        fetch(`${API_BASE_URL}/question-generator/all-questions?per_page=200`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }),
+        fetchQuestionsCollection(token, '/question-generator/all-questions'),
       ])
 
       if (statsResponse.ok) {
         setGenerationStats(await statsResponse.json())
       }
 
-      if (questionsResponse.ok) {
-        const allQuestionsData = await questionsResponse.json()
-        const allItems = allQuestionsData?.items || (Array.isArray(allQuestionsData) ? allQuestionsData : [])
-        setAnalyticsQuestions(allItems.map(mapQuestionFromApi))
-      }
+      setAnalyticsQuestions(allQuestions)
     } catch (error) {
       console.error('Error fetching analytics data:', error)
     }
   }
 
-  const handleApprove = async (questionId: string) => {
+  const handleApprove = async (
+    questionId: string,
+    options?: { silent?: boolean },
+  ): Promise<boolean> => {
     try {
       // Find the question to get its session_id
       const question = questions.find(q => q.id === questionId || q.question_id === questionId)
       const sessionId = question?.session_id
 
       if (!sessionId) {
-        toast.error('Session ID not found for this question')
-        return
+        if (!options?.silent) {
+          toast.error('Session ID not found for this question')
+        }
+        return false
       }
 
       const token = await getToken()
@@ -289,9 +377,11 @@ export default function QuestionReviewer() {
       )
 
       if (response.ok) {
-        toast.success('Question approved', {
-          description: 'The question is approved and ready to publish to your question bank.'
-        })
+        if (!options?.silent) {
+          toast.success('Question approved', {
+            description: 'The question is approved and ready to publish to your question bank.'
+          })
+        }
 
         if (question) {
           const approvedQuestion = {
@@ -319,31 +409,41 @@ export default function QuestionReviewer() {
             approved_questions: previous.approved_questions + 1,
           }
         })
+        return true
       } else {
-        throw new Error('Failed to approve question')
+        throw new Error(await response.text() || 'Failed to approve question')
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error approving question:', error)
-      toast.error('Failed to approve question', {
-        description: error.message || 'Please try again later'
-      })
+      if (!options?.silent) {
+        toast.error('Failed to approve question', {
+          description: error instanceof Error ? error.message : 'Please try again later'
+        })
+      }
+      return false
     }
   }
 
-  const handleReject = async (questionId: string) => {
+  const handleReject = async (
+    questionId: string,
+    reason?: string,
+    options?: { silent?: boolean },
+  ): Promise<boolean> => {
     try {
       // Find the question to get its session_id
       const question = questions.find(q => q.id === questionId || q.question_id === questionId)
       const sessionId = question?.session_id
 
       if (!sessionId) {
-        toast.error('Session ID not found for this question')
-        return
+        if (!options?.silent) {
+          toast.error('Session ID not found for this question')
+        }
+        return false
       }
 
       const token = await getToken()
       const response = await fetch(
-        `${API_BASE_URL}/question-generator/sessions/${sessionId}/questions/${questionId}/reject`,
+        `${API_BASE_URL}/question-generator/sessions/${sessionId}/questions/${questionId}/reject${reason ? `?reason=${encodeURIComponent(reason)}` : ''}`,
         {
           method: 'POST',
           headers: {
@@ -354,13 +454,17 @@ export default function QuestionReviewer() {
       )
 
       if (response.ok) {
-        toast.success('Question rejected', {
-          description: 'The question has been rejected'
-        })
+        if (!options?.silent) {
+          toast.success('Question rejected', {
+            description: 'The question has been rejected'
+          })
+        }
         if (question) {
           const rejectedQuestion = {
             ...question,
             status: 'rejected' as const,
+            reviewComments: reason,
+            rejectionReason: reason,
           }
           setRejectedQuestions((previous) => [
             rejectedQuestion,
@@ -381,23 +485,33 @@ export default function QuestionReviewer() {
             rejected_questions: previous.rejected_questions + 1,
           }
         })
+        return true
       } else {
-        throw new Error('Failed to reject question')
+        throw new Error(await response.text() || 'Failed to reject question')
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error rejecting question:', error)
-      toast.error('Failed to reject question', {
-        description: error.message || 'Please try again later'
-      })
+      if (!options?.silent) {
+        toast.error('Failed to reject question', {
+          description: error instanceof Error ? error.message : 'Please try again later'
+        })
+      }
+      return false
     }
   }
 
-  const handleRequestRevision = async (questionId: string, notes: string) => {
+  const handleRequestRevision = async (
+    questionId: string,
+    notes: string,
+    options?: { silent?: boolean },
+  ): Promise<boolean> => {
     try {
       const question = questions.find(q => q.id === questionId || q.question_id === questionId)
       if (!question?.session_id) {
-        toast.error('Session ID not found for this question')
-        return
+        if (!options?.silent) {
+          toast.error('Session ID not found for this question')
+        }
+        return false
       }
 
       const token = await getToken()
@@ -424,27 +538,46 @@ export default function QuestionReviewer() {
               : item,
           ),
         )
-        toast.success('Revision requested', {
-          description: 'The draft stays in the review queue with your notes attached.',
-        })
+        if (!options?.silent) {
+          toast.success('Revision requested', {
+            description: 'The draft stays in the review queue with your notes attached.',
+          })
+        }
+        return true
       } else {
-        throw new Error('Failed to request revision')
+        throw new Error(await response.text() || 'Failed to request revision')
       }
     } catch (error) {
       console.error('Error requesting revision:', error)
-      toast.error('Failed to request revision')
+      if (!options?.silent) {
+        toast.error('Failed to request revision')
+      }
+      return false
     }
   }
 
-  const handlePublishApprovedQuestion = async (question: Question) => {
+  const resolveSubjectIdForQuestion = (question: Question) => {
+    const candidate = String(question.subject || '').trim().toLowerCase()
+    return subjectIdByName.get(candidate) || null
+  }
+
+  const handlePublishApprovedQuestion = async (
+    question: Question,
+    options?: { silent?: boolean },
+  ): Promise<boolean> => {
     if (!question.session_id) {
-      toast.error('Session ID not found for this question')
-      return
+      if (!options?.silent) {
+        toast.error('Session ID not found for this question')
+      }
+      return false
     }
 
-    if (question.publishedQuestionId) {
-      toast.success('This draft has already been published to the question bank.')
-      return
+    const subjectId = resolveSubjectIdForQuestion(question)
+    if (!subjectId) {
+      if (!options?.silent) {
+        toast.error('Select or fix the subject before publishing this question.')
+      }
+      return false
     }
 
     try {
@@ -457,12 +590,25 @@ export default function QuestionReviewer() {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ question_ids: [question.id] }),
+          body: JSON.stringify({
+            question_ids: [question.id],
+            subject_id: subjectId,
+            topic: question.topic || undefined,
+          }),
         },
       )
 
       if (!response.ok) {
-        throw new Error('Failed to publish question')
+        let detail = 'Failed to publish question'
+        try {
+          const payload = await response.json()
+          if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+            detail = payload.detail
+          }
+        } catch {
+          // ignore JSON parse failures
+        }
+        throw new Error(detail)
       }
 
       const data = await response.json() as { published_items?: Record<string, string> }
@@ -483,14 +629,22 @@ export default function QuestionReviewer() {
         )
       }
 
-      toast.success('Question published', {
-        description: 'The approved draft is now available in your question bank.',
-      })
-    } catch (error: any) {
+      if (!options?.silent) {
+        toast.success(question.publishedQuestionId ? 'Question bank entry updated' : 'Question published', {
+          description: question.publishedQuestionId
+            ? 'The existing question bank entry has been synced with this approved draft.'
+            : 'The approved draft is now available in your question bank.',
+        })
+      }
+      return true
+    } catch (error: unknown) {
       console.error('Failed to publish approved question:', error)
-      toast.error('Failed to publish question', {
-        description: error.message || 'Please try again later',
-      })
+      if (!options?.silent) {
+        toast.error('Failed to publish question', {
+          description: error instanceof Error ? error.message : 'Please try again later',
+        })
+      }
+      return false
     }
   }
 
@@ -571,8 +725,8 @@ export default function QuestionReviewer() {
         status: 'pending',
         reviewComments: undefined,
         rejectionReason: undefined,
-        publishedQuestionId: undefined,
-        publishedAt: undefined,
+        publishedQuestionId: editingQuestion.publishedQuestionId,
+        publishedAt: editingQuestion.publishedAt,
       }
 
       setQuestions((previous) => {
@@ -613,28 +767,94 @@ export default function QuestionReviewer() {
   const handleBulkApprove = async () => {
     try {
       const questionIds = Array.from(selectedQuestions)
-      let successCount = 0
-
-      // Approve each question individually using the session-based endpoint
-      for (const questionId of questionIds) {
-        const question = questions.find(q => q.id === questionId || q.question_id === questionId)
-        if (question?.session_id) {
-          try {
-            await handleApprove(questionId)
-            successCount++
-          } catch (e) {
-            console.error(`Failed to approve question ${questionId}`, e)
-          }
-        }
-      }
+      const results = await Promise.all(
+        questionIds.map((questionId) => handleApprove(questionId, { silent: true })),
+      )
+      const successCount = results.filter(Boolean).length
+      const failedCount = results.length - successCount
 
       if (successCount > 0) {
-        toast.success(`Approved ${successCount} questions`)
+        toast.success(
+          failedCount > 0
+            ? `Approved ${successCount} questions, ${failedCount} failed`
+            : `Approved ${successCount} questions`,
+        )
         setSelectedQuestions(new Set())
+      } else if (failedCount > 0) {
+        toast.error('Failed to approve selected questions')
       }
     } catch (error) {
       console.error('Error bulk approving questions:', error)
       toast.error('Failed to bulk approve questions')
+    }
+  }
+
+  const handleBulkReject = async () => {
+    const questionIds = Array.from(selectedQuestions)
+    const results = await Promise.all(
+      questionIds.map((questionId) => handleReject(questionId, undefined, { silent: true })),
+    )
+    const successCount = results.filter(Boolean).length
+    const failedCount = results.length - successCount
+
+    if (successCount > 0) {
+      toast.success(
+        failedCount > 0
+          ? `Rejected ${successCount} questions, ${failedCount} failed`
+          : `Rejected ${successCount} questions`,
+      )
+      setSelectedQuestions(new Set())
+    } else if (failedCount > 0) {
+      toast.error('Failed to reject selected questions')
+    }
+  }
+
+  const handleBulkRequestRevision = async () => {
+    const notes = bulkRevisionNotes.trim()
+    if (!notes) {
+      toast.error('Revision notes are required')
+      return
+    }
+
+    const questionIds = Array.from(selectedQuestions)
+    const results = await Promise.all(
+      questionIds.map((questionId) => handleRequestRevision(questionId, notes, { silent: true })),
+    )
+    const successCount = results.filter(Boolean).length
+    const failedCount = results.length - successCount
+
+    if (successCount > 0) {
+      toast.success(
+        failedCount > 0
+          ? `Requested revision for ${successCount} questions, ${failedCount} failed`
+          : `Requested revision for ${successCount} questions`,
+      )
+      setSelectedQuestions(new Set())
+      setBulkRevisionDialogOpen(false)
+      setBulkRevisionNotes('')
+    } else if (failedCount > 0) {
+      toast.error('Failed to request revision for selected questions')
+    }
+  }
+
+  const handleBulkPublishApproved = async () => {
+    const questionIds = Array.from(selectedApprovedQuestions)
+    const approvedSelection = approvedQuestions.filter((question) => questionIds.includes(question.id))
+    const results = await Promise.all(
+      approvedSelection.map((question) => handlePublishApprovedQuestion(question, { silent: true })),
+    )
+    const successCount = results.filter(Boolean).length
+    const failedCount = results.length - successCount
+
+    if (successCount > 0) {
+      toast.success(
+        failedCount > 0
+          ? `Published or synced ${successCount} questions, ${failedCount} failed`
+          : `Published or synced ${successCount} questions`,
+      )
+      setSelectedApprovedQuestions(new Set())
+    } else if (failedCount > 0) {
+      toast.error('Failed to publish selected approved questions')
     }
   }
 
@@ -646,6 +866,16 @@ export default function QuestionReviewer() {
       newSelection.add(questionId)
     }
     setSelectedQuestions(newSelection)
+  }
+
+  const toggleApprovedQuestionSelection = (questionId: string) => {
+    const nextSelection = new Set(selectedApprovedQuestions)
+    if (nextSelection.has(questionId)) {
+      nextSelection.delete(questionId)
+    } else {
+      nextSelection.add(questionId)
+    }
+    setSelectedApprovedQuestions(nextSelection)
   }
 
   // Review statistics
@@ -921,9 +1151,17 @@ export default function QuestionReviewer() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Subjects</SelectItem>
-                      {(Array.isArray(subjects) ? subjects : (subjects as any)?.items || []).map((s: any) => (
-                        <SelectItem key={s._id || s.id} value={s.name}>{s.name}</SelectItem>
-                      ))}
+                      {subjects.map((subject) => {
+                        const subjectId = String(subject._id || subject.id || '').trim()
+                        const subjectName = String(subject.name || '').trim()
+                        if (!subjectId || !subjectName) {
+                          return null
+                        }
+
+                        return (
+                          <SelectItem key={subjectId} value={subjectName}>{subjectName}</SelectItem>
+                        )
+                      })}
                     </SelectContent>
                   </Select>
                   <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
@@ -986,6 +1224,24 @@ export default function QuestionReviewer() {
                         >
                           <ThumbsUp className="w-3.5 h-3.5 mr-1.5" />
                           Approve {selectedQuestions.size}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleBulkReject}
+                          className="h-8 text-red-600 dark:text-red-500"
+                        >
+                          <ThumbsDown className="w-3.5 h-3.5 mr-1.5" />
+                          Reject {selectedQuestions.size}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setBulkRevisionDialogOpen(true)}
+                          className="h-8"
+                        >
+                          <Flag className="w-3.5 h-3.5 mr-1.5" />
+                          Request Revision
                         </Button>
                         <Button
                           size="sm"
@@ -1279,13 +1535,68 @@ export default function QuestionReviewer() {
         <TabsContent value="approved" className="space-y-6">
           <Card className="border-border shadow-sm bg-card">
             <CardHeader className="border-b border-border">
-              <CardTitle className="flex items-center text-foreground">
-                <CheckCircle className="w-5 h-5 mr-2 text-green-600 dark:text-green-500" />
-                Approved Questions ({filteredApprovedQuestions.length})
-              </CardTitle>
-              <CardDescription className="text-muted-foreground">
-                Approved drafts are ready to publish into the reusable question bank.
-              </CardDescription>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center text-foreground">
+                    <CheckCircle className="w-5 h-5 mr-2 text-green-600 dark:text-green-500" />
+                    Approved Questions ({filteredApprovedQuestions.length})
+                  </CardTitle>
+                  <CardDescription className="text-muted-foreground">
+                    Approved drafts are ready to publish into the reusable question bank.
+                  </CardDescription>
+                </div>
+                {filteredApprovedQuestions.length > 0 && (
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <Checkbox
+                        checked={(() => {
+                          const allSelected =
+                            filteredApprovedQuestions.length > 0 &&
+                            filteredApprovedQuestions.every((q) => selectedApprovedQuestions.has(q.id))
+                          const someSelected =
+                            filteredApprovedQuestions.some((q) => selectedApprovedQuestions.has(q.id)) &&
+                            !allSelected
+                          return allSelected ? true : someSelected ? 'indeterminate' : false
+                        })()}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedApprovedQuestions(
+                              new Set(filteredApprovedQuestions.map((question) => question.id)),
+                            )
+                          } else {
+                            setSelectedApprovedQuestions(new Set())
+                          }
+                        }}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {selectedApprovedQuestions.size > 0
+                          ? `${selectedApprovedQuestions.size} selected`
+                          : 'Select approved'}
+                      </span>
+                    </label>
+                    {selectedApprovedQuestions.size > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={handleBulkPublishApproved}
+                          className="h-8"
+                        >
+                          <BookOpen className="w-3.5 h-3.5 mr-1.5" />
+                          Publish or Sync
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setSelectedApprovedQuestions(new Set())}
+                          className="h-8 text-muted-foreground"
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-8">
               {approvedLoading ? (
@@ -1313,6 +1624,12 @@ export default function QuestionReviewer() {
                         {/* Header */}
                         <div className="flex items-center justify-between gap-4 px-6 py-4 bg-muted/30 border-b border-border">
                           <div className="flex items-center gap-3 flex-wrap">
+                            <Checkbox
+                              checked={selectedApprovedQuestions.has(question.id)}
+                              onCheckedChange={() => toggleApprovedQuestionSelection(question.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              className="w-5 h-5"
+                            />
                             <Badge className="bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border-0">
                               <div className="flex items-center gap-1">
                                 <CheckCircle className="w-3.5 h-3.5" />
@@ -1428,19 +1745,15 @@ export default function QuestionReviewer() {
                         )}
 
                         <div className="px-6 py-4 bg-muted/20 border-t border-border flex items-center justify-end gap-3">
-                          {!question.publishedQuestionId ? (
-                            <Button
-                              onClick={() => handlePublishApprovedQuestion(question)}
-                              className="bg-primary hover:bg-primary/90"
-                            >
-                              <BookOpen className="w-4 h-4 mr-2" />
-                              Publish to Question Bank
-                            </Button>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">
-                              This approved draft is already available in the question bank.
-                            </p>
-                          )}
+                          <Button
+                            onClick={() => void handlePublishApprovedQuestion(question)}
+                            className="bg-primary hover:bg-primary/90"
+                          >
+                            <BookOpen className="w-4 h-4 mr-2" />
+                            {question.publishedQuestionId
+                              ? 'Update Question Bank Entry'
+                              : 'Publish to Question Bank'}
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
@@ -1615,6 +1928,37 @@ export default function QuestionReviewer() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={bulkRevisionDialogOpen} onOpenChange={setBulkRevisionDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Request Revision for Selected Questions</DialogTitle>
+            <DialogDescription>
+              Add revision guidance that will be attached to each selected pending draft.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label htmlFor="bulk-revision-notes">Revision Notes</Label>
+            <Textarea
+              id="bulk-revision-notes"
+              rows={5}
+              value={bulkRevisionNotes}
+              onChange={(event) => setBulkRevisionNotes(event.target.value)}
+              placeholder="Explain what should be improved before approval..."
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkRevisionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkRequestRevision} disabled={!bulkRevisionNotes.trim()}>
+              Request Revision
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-3xl">

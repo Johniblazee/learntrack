@@ -15,11 +15,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Search, Users, AlertCircle } from "lucide-react"
 
 interface Student {
-  clerk_id: string
+  _id?: string
+  clerk_id?: string | null
   name: string
   email: string
   avatar?: string
   subject_ids?: string[]
+  account_status?: 'provisioned' | 'invited' | 'claimed' | null
 }
 
 interface StudentSelectorProps {
@@ -39,14 +41,28 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
       try {
         setLoading(true)
         setError(null)
-        const response = await client.get('/students/?per_page=100')
+        const collectedStudents: Student[] = []
+        let page = 1
+        let hasNext = true
 
-        if (response.error) {
-          throw new Error(response.error)
+        while (hasNext) {
+          const response = await client.get(`/students?page=${page}&per_page=100`)
+
+          if (response.error) {
+            throw new Error(response.error)
+          }
+
+          const items = (response.data?.items || response.data || []) as Student[]
+          collectedStudents.push(...items)
+          hasNext = Boolean(response.data?.meta?.has_next)
+          page += 1
         }
 
-        const items = response.data?.items || response.data || []
-        setStudents(items)
+        setStudents(
+          collectedStudents.filter(
+            (student) => student.account_status === 'claimed' && Boolean(student.clerk_id),
+          ),
+        )
       } catch (err: any) {
         console.error('Failed to fetch students:', err)
         setError(err.message || 'Failed to load students')
@@ -63,6 +79,8 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
     student.email?.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
+  const getStudentIdentifier = (student: Student) => String(student.clerk_id || '')
+
   const handleToggleStudent = (studentId: string) => {
     if (selectedStudents.includes(studentId)) {
       onChange(selectedStudents.filter(id => id !== studentId))
@@ -75,7 +93,7 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
     if (selectedStudents.length === filteredStudents.length) {
       onChange([])
     } else {
-      onChange(filteredStudents.map(s => s.clerk_id))
+      onChange(filteredStudents.map(getStudentIdentifier))
     }
   }
 
@@ -113,7 +131,7 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
         <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
         <p className="text-muted-foreground">No students found</p>
         <p className="text-sm text-muted-foreground mt-1">
-          Invite students to get started
+          Invite or create students, then wait for them to claim their account before assigning work.
         </p>
       </div>
     )
@@ -151,21 +169,23 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
       {/* Student list */}
       <ScrollArea className="h-[300px] border border-border rounded-lg">
         <div className="p-2 space-y-1">
-          {filteredStudents.map(student => (
+          {filteredStudents.map(student => {
+            const studentId = getStudentIdentifier(student)
+            return (
             <div
-              key={student.clerk_id}
-              onClick={() => handleToggleStudent(student.clerk_id)}
+              key={studentId}
+              onClick={() => handleToggleStudent(studentId)}
               className={`
                 flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors
-                ${selectedStudents.includes(student.clerk_id)
+                ${selectedStudents.includes(studentId)
                   ? 'bg-primary/10 border border-primary/30'
                   : 'hover:bg-muted border border-transparent'
                 }
               `}
             >
               <Checkbox
-                checked={selectedStudents.includes(student.clerk_id)}
-                onCheckedChange={() => handleToggleStudent(student.clerk_id)}
+                checked={selectedStudents.includes(studentId)}
+                onCheckedChange={() => handleToggleStudent(studentId)}
                 onClick={(e) => e.stopPropagation()}
               />
               <Avatar className="h-10 w-10">
@@ -181,9 +201,10 @@ export default function StudentSelector({ selectedStudents, onChange }: StudentS
                 <p className="text-sm text-muted-foreground truncate">
                   {student.email}
                 </p>
-              </div>
+                </div>
             </div>
-          ))}
+            )
+          })}
           {filteredStudents.length === 0 && (
             <div className="p-4 text-center text-muted-foreground">
               No students match your search

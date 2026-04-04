@@ -15,6 +15,44 @@ import { QuestionCanvas } from './QuestionCanvas'
 import { GeneratedQuestion, StreamEvent } from './types'
 import { useSubjects } from '@/hooks/useQueries'
 
+const stripOptionPrefix = (value: string) => value.replace(/^[A-Za-z][).:-]\s*/, '').trim()
+
+const normalizeOptionsAndAnswer = (
+  options: Array<string | { text?: string; is_correct?: boolean }> | undefined,
+  answer: string | undefined,
+) => {
+  const normalizedOptions = (options || [])
+    .map((option) => {
+      if (typeof option === 'string') {
+        return option.trim()
+      }
+
+      return String(option?.text || '').trim()
+    })
+    .filter(Boolean)
+
+  let resolvedAnswer = String(answer || '').trim()
+  const correctOption = (options || []).find(
+    (option): option is { text?: string; is_correct?: boolean } =>
+      typeof option !== 'string' && option?.is_correct === true && typeof option?.text === 'string',
+  )
+  if (!resolvedAnswer) {
+    resolvedAnswer = String(correctOption?.text || '').trim()
+  }
+
+  if (resolvedAnswer.length === 1 && /^[A-Za-z]$/.test(resolvedAnswer)) {
+    const index = resolvedAnswer.toUpperCase().charCodeAt(0) - 65
+    if (index >= 0 && index < normalizedOptions.length) {
+      resolvedAnswer = normalizedOptions[index]
+    }
+  }
+
+  return {
+    options: normalizedOptions.map((option) => stripOptionPrefix(option)),
+    correctAnswer: stripOptionPrefix(resolvedAnswer),
+  }
+}
+
 // Types
 interface Session {
   session_id: string
@@ -229,6 +267,10 @@ export function OpenCanvasGenerator() {
     (question: Partial<GeneratedQuestion>, sessionId?: string | null): GeneratedQuestion => {
       const normalizedStatus =
         question.status === 'edited' ? 'pending' : (question.status || 'pending')
+      const normalizedQuestion = normalizeOptionsAndAnswer(
+        question.options,
+        question.correct_answer,
+      )
 
       return {
         ...question,
@@ -237,9 +279,9 @@ export function OpenCanvasGenerator() {
         type: String(question.type || 'multiple-choice'),
         difficulty: String(question.difficulty || 'medium'),
         question_text: String(question.question_text || ''),
-        correct_answer: String(question.correct_answer || ''),
+        correct_answer: normalizedQuestion.correctAnswer,
         explanation: question.explanation || '',
-        options: Array.isArray(question.options) ? question.options : undefined,
+        options: normalizedQuestion.options.length > 0 ? normalizedQuestion.options : undefined,
         status: normalizedStatus as GeneratedQuestion['status'],
         versions: question.versions,
         currentVersionIndex: question.currentVersionIndex,
@@ -601,8 +643,8 @@ export function OpenCanvasGenerator() {
                     status: 'pending' as const,
                     review_comments: null,
                     rejection_reason: null,
-                    published_question_id: null,
-                    published_at: null,
+                    published_question_id: previousQuestion.published_question_id,
+                    published_at: previousQuestion.published_at,
                     versions,
                     currentVersionIndex: versions.length,
                   }
@@ -809,7 +851,7 @@ export function OpenCanvasGenerator() {
 
     setQuestions(prev => prev.map(q =>
       q.question_id === questionId
-        ? { ...q, status: 'rejected', published_question_id: null, published_at: null }
+        ? { ...q, status: 'rejected' }
         : q
     ))
 
@@ -847,18 +889,18 @@ export function OpenCanvasGenerator() {
     }
 
     const previousQuestions = questions
-    const nextQuestion = mapSessionQuestion(
-      {
-        ...target,
-        ...updates,
-        status: 'pending',
-        review_comments: null,
-        rejection_reason: null,
-        published_question_id: null,
-        published_at: null,
-      },
-      sessionId,
-    )
+      const nextQuestion = mapSessionQuestion(
+        {
+          ...target,
+          ...updates,
+          status: 'pending',
+          review_comments: null,
+          rejection_reason: null,
+          published_question_id: target.published_question_id,
+          published_at: target.published_at,
+        },
+        sessionId,
+      )
 
     setQuestions((previous) =>
       previous.map((question) =>
@@ -942,11 +984,11 @@ export function OpenCanvasGenerator() {
     }
 
     const publishReadyQuestions = questions.filter(
-      (question) => question.status === 'approved' && !question.published_question_id,
+      (question) => question.status === 'approved',
     )
 
     if (publishReadyQuestions.length === 0) {
-      toast.error('No approved questions are ready to publish')
+      toast.error('No approved questions are ready to publish or sync')
       return
     }
 
@@ -1000,7 +1042,7 @@ export function OpenCanvasGenerator() {
 
       toast.success(
         data.published_count && data.published_count > 0
-          ? `Published ${data.published_count} question(s) to the question bank.`
+          ? `Published or synced ${data.published_count} question(s) to the question bank.`
           : 'Published approved questions to the question bank.',
       )
       await fetchSessions()

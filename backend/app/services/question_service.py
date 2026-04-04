@@ -407,14 +407,17 @@ class QuestionService:
             if question.tutor_id != tutor_id:
                 raise AuthorizationError("Not authorized to delete this question")
 
-            # Check if question is used in any assignments
+            # Check if question is used in any active assignments
             assignment_count = await self.db.assignments.count_documents(
-                {"questions.question_id": question_id}
+                {
+                    "questions.question_id": question_id,
+                    "status": {"$nin": ["archived", "completed"]},
+                }
             )
 
             if assignment_count > 0:
                 raise ValidationError(
-                    "Cannot delete question that is used in assignments"
+                    "Cannot delete question that is used in active assignments"
                 )
 
             oid = to_object_id(question_id)
@@ -495,7 +498,10 @@ class QuestionService:
 
             for question_id in owned_ids:
                 assignment_count = await self.db.assignments.count_documents(
-                    {"questions.question_id": question_id}
+                    {
+                        "questions.question_id": question_id,
+                        "status": {"$nin": ["archived", "completed"]},
+                    }
                 )
                 if assignment_count > 0:
                     blocked_ids.append(question_id)

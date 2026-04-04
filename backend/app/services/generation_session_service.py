@@ -10,6 +10,7 @@ import uuid
 import structlog
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
+from app.core.exceptions import ValidationError
 
 from app.models.generation_session import (
     GenerationSessionModel,
@@ -95,6 +96,27 @@ class GenerationSessionService:
                 return index
         return None
 
+    @staticmethod
+    def _assert_transition_allowed(
+        current_status: QuestionStatus,
+        next_status: QuestionStatus,
+    ) -> None:
+        if (
+            next_status == QuestionStatus.APPROVED
+            and current_status != QuestionStatus.PENDING
+        ):
+            raise ValidationError("Only pending questions can be approved")
+        if (
+            next_status == QuestionStatus.REJECTED
+            and current_status != QuestionStatus.PENDING
+        ):
+            raise ValidationError("Only pending questions can be rejected")
+        if (
+            next_status == QuestionStatus.PENDING
+            and current_status != QuestionStatus.PENDING
+        ):
+            raise ValidationError("Only pending questions can have revision requested")
+
     async def update_session(
         self, session_id: str, user_id: str, **updates
     ) -> Optional[GenerationSessionModel]:
@@ -176,6 +198,7 @@ class GenerationSessionService:
 
         now = datetime.now(timezone.utc)
         question = session.questions[question_index]
+        self._assert_transition_allowed(question.status, status)
         question.status = status
         question.reviewed_by = user_id
         question.reviewed_at = now
@@ -189,10 +212,6 @@ class GenerationSessionService:
             question.rejection_reason = review_comments
         else:
             question.rejection_reason = None
-
-        if status != QuestionStatus.APPROVED:
-            question.published_question_id = None
-            question.published_at = None
 
         session.updated_at = now
         return await self._persist_session(session)
@@ -258,8 +277,6 @@ class GenerationSessionService:
         question.reviewed_by = None
         question.reviewed_at = None
         question.rejection_reason = None
-        question.published_question_id = None
-        question.published_at = None
 
         session.updated_at = now
         return await self._persist_session(session)
@@ -403,6 +420,8 @@ class GenerationSessionService:
                         "_id": 0,
                         "session_id": 1,
                         "session_prompt": "$original_prompt",
+                        "subject": "$config.subject",
+                        "topic": "$config.topic",
                         "session_created_at": "$created_at",
                         "session_status": "$status",
                         "question_id": "$questions.question_id",
@@ -414,6 +433,7 @@ class GenerationSessionService:
                         "correct_answer": "$questions.correct_answer",
                         "explanation": "$questions.explanation",
                         "source_citations": "$questions.source_citations",
+                        "source_ids": "$questions.source_ids",
                         "tags": "$questions.tags",
                         "quality_score": "$questions.quality_score",
                         "status": "$questions.status",

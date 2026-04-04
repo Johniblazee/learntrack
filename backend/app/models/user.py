@@ -18,6 +18,14 @@ class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
 
 
+class AccountStatus(str, Enum):
+    """Lifecycle state for tutor-managed student accounts."""
+
+    PROVISIONED = "provisioned"
+    INVITED = "invited"
+    CLAIMED = "claimed"
+
+
 class AdminPermission(str, Enum):
     """Granular permissions for super admin users"""
 
@@ -96,7 +104,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """User creation model"""
 
-    clerk_id: str  # Clerk ID field - required for new users
+    clerk_id: Optional[str] = None
     tutor_id: Optional[str] = None  # Will be set automatically for tutors
     tenant_id: Optional[str] = None  # Tenant ID for multi-tenancy
 
@@ -123,13 +131,17 @@ class UserInDB(UserBase):
     """User model as stored in database"""
 
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
-    clerk_id: str  # Clerk ID field - required
+    clerk_id: Optional[str] = None
     tutor_id: Optional[str] = (
         None  # Tutor ID - for tutors: their own clerk_id, for others: their tutor's clerk_id
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_login: Optional[datetime] = None
+    account_status: Optional[AccountStatus] = None
+    claimed_at: Optional[datetime] = None
+    last_invited_at: Optional[datetime] = None
+    invitation_sent_count: int = 0
 
     # Super admin fields
     is_super_admin: bool = False  # Flag for super admin users
@@ -158,6 +170,18 @@ class UserInDB(UserBase):
             # For tutors without tutor_id, use their clerk_id
             return info.data.get("clerk_id")
         return v
+
+    @field_validator("account_status", mode="before")
+    @classmethod
+    def derive_account_status(cls, v, info):
+        if v is not None:
+            return v
+
+        role = info.data.get("role")
+        clerk_id = info.data.get("clerk_id")
+        if role == UserRole.STUDENT:
+            return AccountStatus.CLAIMED if clerk_id else AccountStatus.PROVISIONED
+        return AccountStatus.CLAIMED if clerk_id else None
 
     model_config = ConfigDict(
         populate_by_name=True,

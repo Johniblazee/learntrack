@@ -37,6 +37,16 @@ def _serialize_user_for_response(user: Any) -> Dict[str, Any]:
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
         "student_profile": profile,
+        "account_status": user.account_status.value
+        if getattr(user, "account_status", None)
+        else None,
+        "claimed_at": user.claimed_at.isoformat()
+        if getattr(user, "claimed_at", None)
+        else None,
+        "last_invited_at": user.last_invited_at.isoformat()
+        if getattr(user, "last_invited_at", None)
+        else None,
+        "invitation_sent_count": getattr(user, "invitation_sent_count", 0),
         "is_super_admin": user.is_super_admin,
         "admin_permissions": [
             permission.value if hasattr(permission, "value") else permission

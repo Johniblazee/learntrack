@@ -3,6 +3,7 @@ User service for database operations
 """
 
 import asyncio
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -10,7 +11,14 @@ import structlog
 from pymongo import ReturnDocument
 from bson import ObjectId
 
-from app.models.user import User, UserRole, UserCreate, UserUpdate
+from app.models.user import (
+    AccountStatus,
+    StudentProfileData,
+    User,
+    UserRole,
+    UserCreate,
+    UserUpdate,
+)
 from app.core.exceptions import NotFoundError, DatabaseException, ValidationError
 from app.core.utils import to_object_id
 from app.utils.slug import generate_unique_slug
@@ -42,10 +50,184 @@ class UserService:
         else:
             raise ValueError(f"Unknown role: {role}")
 
+    async def _mark_unclaimed_student_status(
+        self,
+        *,
+        email: str,
+        tutor_id: str,
+        status: AccountStatus,
+        invited_at: Optional[datetime] = None,
+        claimed_at: Optional[datetime] = None,
+    ) -> None:
+        update_data: Dict[str, Any] = {
+            "account_status": status.value,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if invited_at is not None:
+            update_data["last_invited_at"] = invited_at
+        if claimed_at is not None:
+            update_data["claimed_at"] = claimed_at
+
+        update_operations: Dict[str, Any] = {"$set": update_data}
+        if invited_at is not None:
+            update_operations["$inc"] = {"invitation_sent_count": 1}
+
+        await self.students_collection.update_one(
+            {
+                "email": email,
+                "tutor_id": tutor_id,
+                "role": UserRole.STUDENT.value,
+                "$or": [
+                    {"clerk_id": None},
+                    {"clerk_id": {"$exists": False}},
+                ],
+            },
+            update_operations,
+        )
+
+    async def sync_student_account_status_from_invitations(
+        self, *, email: str, tutor_id: str
+    ) -> None:
+        student = await self.students_collection.find_one(
+            {
+                "email": email,
+                "tutor_id": tutor_id,
+                "role": UserRole.STUDENT.value,
+                "$or": [
+                    {"clerk_id": None},
+                    {"clerk_id": {"$exists": False}},
+                ],
+            },
+            {"_id": 1},
+        )
+        if not student:
+            return
+
+        pending_invitation = await self.db.invitations.find_one(
+            {
+                "invitee_email": email,
+                "tutor_id": tutor_id,
+                "role": UserRole.STUDENT.value,
+                "status": "pending",
+            },
+            {"created_at": 1},
+        )
+
+        if pending_invitation:
+            await self._mark_unclaimed_student_status(
+                email=email,
+                tutor_id=tutor_id,
+                status=AccountStatus.INVITED,
+                invited_at=pending_invitation.get("created_at")
+                or datetime.now(timezone.utc),
+            )
+            return
+
+        await self.students_collection.update_one(
+            {
+                "email": email,
+                "tutor_id": tutor_id,
+                "role": UserRole.STUDENT.value,
+                "$or": [
+                    {"clerk_id": None},
+                    {"clerk_id": {"$exists": False}},
+                ],
+            },
+            {
+                "$set": {
+                    "account_status": AccountStatus.PROVISIONED.value,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+
+    async def create_provisioned_student(
+        self,
+        *,
+        name: str,
+        email: str,
+        tutor_id: str,
+        grade: Optional[str] = None,
+        phone: Optional[str] = None,
+        parent_name: Optional[str] = None,
+        parent_email: Optional[str] = None,
+        notes: Optional[str] = None,
+        interests: Optional[List[str]] = None,
+    ) -> User:
+        try:
+            existing_user = await self.get_user_by_email(email)
+            if existing_user:
+                if (
+                    existing_user.role == UserRole.STUDENT
+                    and existing_user.tutor_id == tutor_id
+                    and not existing_user.clerk_id
+                ):
+                    raise ValidationError(
+                        f"A provisioned student with email {email} already exists"
+                    )
+
+                raise ValidationError(f"User with email {email} already exists")
+
+            now = datetime.now(timezone.utc)
+            student_document: Dict[str, Any] = {
+                "email": email,
+                "name": name,
+                "role": UserRole.STUDENT.value,
+                "is_active": True,
+                "tutor_id": tutor_id,
+                "tenant_id": tutor_id,
+                "student_tutors": [tutor_id],
+                "account_status": AccountStatus.PROVISIONED.value,
+                "claimed_at": None,
+                "last_invited_at": None,
+                "invitation_sent_count": 0,
+                "student_profile": StudentProfileData(
+                    phone=phone,
+                    grade=grade,
+                    parentName=parent_name,
+                    parentEmail=parent_email,
+                    notes=notes,
+                    interests=interests or [],
+                ).model_dump(exclude_none=True),
+                "created_at": now,
+                "updated_at": now,
+            }
+            if hasattr(self.db, "__getitem__"):
+                student_document["slug"] = await generate_unique_slug(
+                    self.db,
+                    getattr(self.students_collection, "name", "students"),
+                    name,
+                )
+            else:
+                fallback_slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+                student_document["slug"] = fallback_slug or "student"
+
+            result = await self.students_collection.insert_one(student_document)
+            student_document["_id"] = result.inserted_id
+
+            logger.info(
+                "Provisioned student created",
+                student_id=str(result.inserted_id),
+                tutor_id=tutor_id,
+                email=email,
+            )
+            return User(**student_document)
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error("Failed to create provisioned student", error=str(e))
+            raise DatabaseException(f"Failed to create provisioned student: {str(e)}")
+
     async def create_user(self, user_data: UserCreate) -> User:
         """Create a new user with tenant support in role-specific collection"""
         collection = self._get_collection_for_role(user_data.role)
         try:
+            if (
+                user_data.role in {UserRole.TUTOR, UserRole.SUPER_ADMIN}
+                and not user_data.clerk_id
+            ):
+                raise ValidationError("clerk_id is required for tutor accounts")
+
             # Check if user already exists by clerk_id
             if user_data.clerk_id:
                 existing_user = await collection.find_one(
@@ -89,6 +271,18 @@ class UserService:
                 user_dict["tenant_id"] = user_data.tenant_id
                 if user_data.role == UserRole.STUDENT:
                     user_dict["student_tutors"] = []
+                    user_dict.setdefault(
+                        "account_status",
+                        AccountStatus.CLAIMED.value
+                        if user_data.clerk_id
+                        else AccountStatus.PROVISIONED.value,
+                    )
+                    user_dict.setdefault(
+                        "claimed_at",
+                        datetime.now(timezone.utc) if user_data.clerk_id else None,
+                    )
+                    user_dict.setdefault("last_invited_at", None)
+                    user_dict.setdefault("invitation_sent_count", 0)
                 elif user_data.role == UserRole.PARENT:
                     user_dict["parent_children"] = []
                     user_dict["student_ids"] = []
@@ -263,15 +457,24 @@ class UserService:
             # (tutor-created student docs have name+email but no clerk_id field yet)
             if user_context.role == UserRole.STUDENT and user_context.email:
                 unlinked = await self.students_collection.find_one(
-                    {"email": user_context.email, "clerk_id": {"$exists": False}},
+                    {
+                        "email": user_context.email,
+                        "$or": [
+                            {"clerk_id": {"$exists": False}},
+                            {"clerk_id": None},
+                        ],
+                    },
                 )
                 if unlinked:
+                    now = datetime.now(timezone.utc)
                     await self.students_collection.update_one(
                         {"_id": unlinked["_id"]},
                         {
                             "$set": {
                                 "clerk_id": user_context.clerk_id,
-                                "updated_at": datetime.now(timezone.utc),
+                                "account_status": AccountStatus.CLAIMED.value,
+                                "claimed_at": now,
+                                "updated_at": now,
                             }
                         },
                     )
@@ -286,6 +489,8 @@ class UserService:
                             **unlinked,
                             "clerk_id": user_context.clerk_id,
                             "role": user_context.role,
+                            "account_status": AccountStatus.CLAIMED,
+                            "claimed_at": now,
                         }
                     )
 
@@ -791,6 +996,8 @@ class UserService:
 
         if role == UserRole.STUDENT:
             base_updates.setdefault("student_tutors", [tutor_id])
+            base_updates["account_status"] = AccountStatus.CLAIMED.value
+            base_updates["claimed_at"] = now
         elif role == UserRole.PARENT:
             base_updates.setdefault("parent_children", [])
             base_updates.setdefault("student_ids", [])

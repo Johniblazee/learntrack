@@ -141,7 +141,7 @@ export interface StudentMaterialRecord {
 // Student interface
 export interface Student {
   _id: string
-  clerk_id: string
+  clerk_id?: string | null
   name: string
   email: string
   slug?: string
@@ -150,6 +150,17 @@ export interface Student {
   is_active: boolean
   created_at: string
   updated_at: string
+  account_status?: 'provisioned' | 'invited' | 'claimed' | null
+  claimed_at?: string | null
+  last_invited_at?: string | null
+  invitation_sent_count?: number
+  student_profile?: {
+    averageScore?: number
+    grade?: string | null
+    phone?: string | null
+    notes?: string | null
+  } | null
+  parent_name?: string | null
 }
 
 /**

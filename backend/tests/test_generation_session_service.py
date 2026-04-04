@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.generation_session import QuestionStatus
+from app.core.exceptions import ValidationError
 from app.services.generation_session_service import GenerationSessionService
 from tests.conftest import FakeCollection
 
@@ -52,7 +53,7 @@ def _build_session_doc() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_update_question_content_resets_review_state_and_records_history():
+async def test_update_question_content_resets_review_state_and_preserves_published_link():
     collection = FakeCollection([_build_session_doc()])
     service = GenerationSessionService(
         {GenerationSessionService.COLLECTION: collection}  # type: ignore[arg-type]
@@ -70,7 +71,8 @@ async def test_update_question_content_resets_review_state_and_records_history()
     assert updated_question["question_text"] == "Updated question text"
     assert updated_question["status"] == QuestionStatus.PENDING.value
     assert updated_question.get("review_comments") is None
-    assert updated_question.get("published_question_id") is None
+    assert updated_question.get("published_question_id") == "bank-1"
+    assert updated_question.get("published_at") is not None
     assert len(updated_question["edit_history"]) == 1
     assert (
         updated_question["edit_history"][0]["previous"]["question_text"]
@@ -99,3 +101,20 @@ async def test_mark_questions_published_records_bank_question_id():
     updated_question = collection.documents[0]["questions"][0]
     assert updated_question["published_question_id"] == "bank-22"
     assert updated_question["published_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_update_question_status_rejects_invalid_transition():
+    collection = FakeCollection([_build_session_doc()])
+    service = GenerationSessionService(
+        {GenerationSessionService.COLLECTION: collection}  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValidationError, match="Only pending questions can be rejected"):
+        await service.update_question_status(
+            session_id="session-1",
+            user_id="user-1",
+            question_id="q1",
+            status=QuestionStatus.REJECTED,
+            review_comments="Needs work",
+        )

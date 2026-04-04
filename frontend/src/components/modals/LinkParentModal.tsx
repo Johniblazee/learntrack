@@ -24,6 +24,7 @@ interface Student {
   _id?: string
   id?: string
   clerk_id?: string
+  account_status?: 'provisioned' | 'invited' | 'claimed' | null
   name: string
 }
 
@@ -99,16 +100,26 @@ export function LinkParentModal({
     }
   }, [open])
 
+  const claimedStudents = useMemo(
+    () =>
+      availableStudents.filter(
+        (student) =>
+          (student.account_status === 'claimed' || (!student.account_status && Boolean(student.clerk_id))) &&
+          resolveStudentId(student),
+      ),
+    [availableStudents],
+  )
+
   const filteredStudents = useMemo(() => {
     const term = studentSearchTerm.trim().toLowerCase()
     if (!term) {
-      return availableStudents
+      return claimedStudents
     }
 
-    return availableStudents.filter((student) =>
+    return claimedStudents.filter((student) =>
       student.name.toLowerCase().includes(term)
     )
-  }, [availableStudents, studentSearchTerm])
+  }, [claimedStudents, studentSearchTerm])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

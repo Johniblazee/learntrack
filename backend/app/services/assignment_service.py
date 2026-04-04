@@ -210,8 +210,26 @@ class AssignmentService:
                     "One or more selected questions are unavailable or do not belong to you"
                 )
 
-            # Resolve student IDs from groups and subject filters
-            student_ids = set(assignment_data.student_ids or [])
+            # Resolve student IDs from direct selection, groups, and subject filters.
+            normalized_direct_student_ids = await self._resolve_student_clerk_ids(
+                assignment_data.student_ids or []
+            )
+            if normalized_direct_student_ids and len(
+                normalized_direct_student_ids
+            ) != len(
+                list(
+                    dict.fromkeys(
+                        str(student_id).strip()
+                        for student_id in (assignment_data.student_ids or [])
+                        if str(student_id).strip()
+                    )
+                )
+            ):
+                raise ValidationError(
+                    "One or more selected students must claim their account before assignments can be created"
+                )
+
+            student_ids = set(normalized_direct_student_ids)
             group_ids = assignment_data.group_ids or []
 
             # Add students from groups
@@ -226,6 +244,11 @@ class AssignmentService:
                     tutor_id, assignment_data.subject_filter
                 )
                 student_ids.update(subject_students)
+
+            if not student_ids:
+                raise ValidationError(
+                    "At least one claimed student is required before creating an assignment"
+                )
 
             # Create assignment document
             assignment_dict = assignment_data.model_dump(
@@ -750,29 +773,24 @@ class AssignmentService:
             raise DatabaseException(f"Failed to update assignment: {str(e)}")
 
     async def delete_assignment(self, assignment_id: str, tutor_id: str) -> bool:
-        """Delete assignment with ownership validation."""
+        """Soft-delete assignment by archiving it."""
         try:
             # Validate ownership first
             await self.get_assignment_by_id(assignment_id, tutor_id=tutor_id)
 
             oid = to_object_id(assignment_id)
-            delete_result = await self.collection.delete_one(
-                {"_id": oid, "tutor_id": tutor_id}
+            result = await self.collection.update_one(
+                {"_id": oid, "tutor_id": tutor_id},
+                {
+                    "$set": {
+                        "status": AssignmentStatus.ARCHIVED,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
             )
 
-            if getattr(delete_result, "deleted_count", 0) == 0:
-                archive_result = await self.collection.update_one(
-                    {"_id": oid, "tutor_id": tutor_id},
-                    {
-                        "$set": {
-                            "status": AssignmentStatus.ARCHIVED,
-                            "updated_at": datetime.now(timezone.utc),
-                        }
-                    },
-                )
-
-                if archive_result.matched_count == 0:
-                    raise NotFoundError("Assignment", assignment_id)
+            if result.matched_count == 0:
+                raise NotFoundError("Assignment", assignment_id)
 
             logger.info(
                 "Assignment deleted", assignment_id=assignment_id, tutor_id=tutor_id
@@ -846,7 +864,7 @@ class AssignmentService:
         assignment_ids: List[str],
         tutor_id: str,
     ) -> Dict[str, Any]:
-        """Delete multiple tutor-owned assignments."""
+        """Soft-delete multiple tutor-owned assignments by archiving them."""
         try:
             normalized_ids = self._normalize_ids(assignment_ids)
             if not normalized_ids:
@@ -856,10 +874,10 @@ class AssignmentService:
                 normalized_ids,
                 tutor_id,
             )
-            deleted_ids: List[str] = []
+            archived_ids: List[str] = []
 
             if owned_ids:
-                result = await self.collection.delete_many(
+                result = await self.collection.update_many(
                     {
                         "_id": {
                             "$in": [
@@ -868,15 +886,21 @@ class AssignmentService:
                             ]
                         },
                         "tutor_id": tutor_id,
-                    }
+                    },
+                    {
+                        "$set": {
+                            "status": AssignmentStatus.ARCHIVED,
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    },
                 )
-                if result.deleted_count:
-                    deleted_ids = owned_ids
+                if result.modified_count:
+                    archived_ids = owned_ids
 
             return {
                 "requested_count": len(normalized_ids),
-                "deleted_count": len(deleted_ids),
-                "deleted_assignment_ids": deleted_ids,
+                "deleted_count": len(archived_ids),
+                "deleted_assignment_ids": archived_ids,
                 "skipped_count": len(skipped_ids),
                 "skipped_assignment_ids": skipped_ids,
             }

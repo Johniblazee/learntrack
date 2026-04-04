@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Badge } from '@/components/ui/badge'
 import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -37,6 +38,7 @@ import { Input } from "@/components/ui/input"
 import { toast } from "@/contexts/ToastContext"
 import { SendMessageModal } from "@/components/modals/SendMessageModal"
 import InviteUserModal from "@/components/InviteUserModal"
+import { CreateStudentModal } from '@/components/modals/CreateStudentModal'
 import { ConfirmDeleteModal } from "@/components/modals/ConfirmDeleteModal"
 import { useStudents, useDeleteStudent } from "@/hooks/useQueries"
 import { Pagination } from "@/components/Pagination"
@@ -48,6 +50,8 @@ type SortField = 'lastActive' | 'progress' | null
 
 interface Student {
   id: string
+  dbId: string
+  clerkId?: string
   slug: string
   name: string
   email: string
@@ -56,6 +60,19 @@ interface Student {
   lastActive: string
   progress: number
   parentName?: string | null
+  accountStatus: 'provisioned' | 'invited' | 'claimed'
+  lastInvitedAt?: string | null
+}
+
+const getAccountStatusBadge = (status: Student['accountStatus']) => {
+  switch (status) {
+    case 'claimed':
+      return { label: 'Claimed', className: 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400' }
+    case 'invited':
+      return { label: 'Invited', className: 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400' }
+    default:
+      return { label: 'Provisioned', className: 'bg-muted text-muted-foreground' }
+  }
 }
 
 export default function StudentManager() {
@@ -64,6 +81,7 @@ export default function StudentManager() {
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage] = useState(10)
   const [sendMessageModalOpen, setSendMessageModalOpen] = useState(false)
+  const [createStudentModalOpen, setCreateStudentModalOpen] = useState(false)
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
   const [linkParentModalOpen, setLinkParentModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
@@ -73,6 +91,7 @@ export default function StudentManager() {
   const [sortField, setSortField] = useState<SortField>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [invitingStudentId, setInvitingStudentId] = useState<string | null>(null)
 
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -100,16 +119,27 @@ export default function StudentManager() {
 
   // Map API response to Student interface
   const students: Student[] = data?.items?.map((student: any) => ({
-    id: student.clerk_id || student._id,
+    id: student._id,
+    dbId: student._id,
+    clerkId: student.clerk_id || undefined,
     slug: student.slug || student.name.toLowerCase().replace(/\s+/g, '-'),
     name: student.name,
     email: student.email,
     avatar: student.avatar_url || undefined,
     updatedAt: student.updated_at,
-    lastActive: formatLastActive(student.updated_at),
+    lastActive:
+      student.account_status === 'claimed'
+        ? formatLastActive(student.updated_at)
+        : student.account_status === 'invited'
+          ? 'Awaiting claim'
+          : 'Not signed in yet',
     progress: student.student_profile?.averageScore ?? 0,
-    parentName: student.parent_name || null
+    parentName: student.parent_name || null,
+    accountStatus: student.account_status || (student.clerk_id ? 'claimed' : 'provisioned'),
+    lastInvitedAt: student.last_invited_at || null,
   })) || []
+
+  const claimedStudents = students.filter((student) => student.accountStatus === 'claimed' && student.clerkId)
 
   // Show error toast
   useEffect(() => {
@@ -262,6 +292,34 @@ export default function StudentManager() {
     }
   }
 
+  const handleInviteToClaim = async (student: Student) => {
+    try {
+      setInvitingStudentId(student.dbId)
+      const response = await client.post('/invitations/', {
+        invitee_email: student.email,
+        invitee_name: student.name,
+        role: 'student',
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['students'] })
+      queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      toast.success('Invitation sent', {
+        description: `${student.name} can now claim their account from the invitation email.`,
+      })
+    } catch (error) {
+      console.error('Failed to invite student:', error)
+      toast.error('Failed to send invitation', {
+        description: error instanceof Error ? error.message : 'Please try again later',
+      })
+    } finally {
+      setInvitingStudentId(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card className="border-0 shadow-sm bg-card">
@@ -280,6 +338,13 @@ export default function StudentManager() {
                 />
               </div>
                   <Button
+                    variant="outline"
+                    onClick={() => setCreateStudentModalOpen(true)}
+                  >
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Create Student
+                  </Button>
+                  <Button
                     onClick={() => setInviteModalOpen(true)}
                     className="bg-primary text-primary-foreground hover:bg-primary/90"
                   >
@@ -289,6 +354,7 @@ export default function StudentManager() {
                   <Button
                     variant="outline"
                     onClick={() => setLinkParentModalOpen(true)}
+                    disabled={claimedStudents.length === 0}
                   >
                 <Link className="h-4 w-4 mr-2" />
                     Link Parent
@@ -318,6 +384,7 @@ export default function StudentManager() {
                       <TableHead className="w-12"></TableHead>
                       <TableHead>Student Name</TableHead>
                       <TableHead>Email</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Parent</TableHead>
                       <TableHead>
                         <button
@@ -343,7 +410,7 @@ export default function StudentManager() {
                   <TableBody>
                     {isError ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-12">
+                        <TableCell colSpan={8} className="text-center py-12">
                           <div className="text-destructive">
                             <p className="font-semibold mb-2">Failed to load students</p>
                             <p className="text-sm text-muted-foreground">{error?.message || 'Unknown error'}</p>
@@ -360,7 +427,7 @@ export default function StudentManager() {
                       </TableRow>
                     ) : sortedStudents.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                           {searchTerm ? 'No students found matching your search' : 'No students found'}
                         </TableCell>
                       </TableRow>
@@ -392,8 +459,15 @@ export default function StudentManager() {
                           <TableCell className="text-muted-foreground">
                             {student.email}
                           </TableCell>
+                          <TableCell>
+                            <Badge className={getAccountStatusBadge(student.accountStatus).className}>
+                              {getAccountStatusBadge(student.accountStatus).label}
+                            </Badge>
+                          </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {student.parentName || (
+                            {student.accountStatus !== 'claimed' ? (
+                              <span className="italic text-muted-foreground/60">Available after claim</span>
+                            ) : student.parentName || (
                               <span className="italic text-muted-foreground/60">No parent linked</span>
                             )}
                           </TableCell>
@@ -417,6 +491,7 @@ export default function StudentManager() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-48">
                                 <DropdownMenuItem
+                                  disabled={!student.clerkId}
                                   onClick={() => {
                                     setSelectedStudent(student)
                                     setSendMessageModalOpen(true)
@@ -425,6 +500,15 @@ export default function StudentManager() {
                                   <MessageCircle className="h-4 w-4 mr-2" />
                                   Send a message
                                 </DropdownMenuItem>
+                                {!student.clerkId && (
+                                  <DropdownMenuItem
+                                    disabled={invitingStudentId === student.dbId}
+                                    onClick={() => void handleInviteToClaim(student)}
+                                  >
+                                    <UserPlus className="h-4 w-4 mr-2" />
+                                    {student.accountStatus === 'invited' ? 'Resend invite' : 'Invite to claim'}
+                                  </DropdownMenuItem>
+                                )}
                                 <DropdownMenuItem onClick={() => navigate(`/dashboard/students/${student.slug}`)}>
                                   <Edit className="h-4 w-4 mr-2" />
                                   Edit
@@ -466,6 +550,12 @@ export default function StudentManager() {
             </CardContent>
           </Card>
 
+      {claimedStudents.length === 0 && students.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Parent linking is available after a student claims their account.
+        </p>
+      )}
+
       {selectedStudentIds.size > 0 && (
         <div className="sticky bottom-0 z-40 pt-2">
           <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between gap-4">
@@ -489,9 +579,22 @@ export default function StudentManager() {
       <SendMessageModal
         open={sendMessageModalOpen}
         onOpenChange={setSendMessageModalOpen}
-        student={selectedStudent}
+        student={selectedStudent && selectedStudent.clerkId ? {
+          id: selectedStudent.clerkId,
+          name: selectedStudent.name,
+          email: selectedStudent.email,
+          avatar: selectedStudent.avatar,
+        } : null}
         onMessageSent={() => {
           toast.success('Message sent successfully')
+        }}
+      />
+
+      <CreateStudentModal
+        open={createStudentModalOpen}
+        onOpenChange={setCreateStudentModalOpen}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['students'] })
         }}
       />
 
@@ -505,8 +608,9 @@ export default function StudentManager() {
       <LinkParentModal
         open={linkParentModalOpen}
         onOpenChange={setLinkParentModalOpen}
-        students={students.map((student) => ({
-          _id: student.id,
+        students={claimedStudents.map((student) => ({
+          _id: student.dbId,
+          clerk_id: student.clerkId,
           name: student.name,
         }))}
         onParentLinked={() => {

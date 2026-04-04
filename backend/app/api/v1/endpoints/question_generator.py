@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from app.ai.runtime import persist_usage_snapshot
 from app.core.dependencies import get_rag_service, get_database, get_question_service
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
-from app.core.exceptions import AIProviderError
+from app.core.exceptions import AIProviderError, ValidationError
 from app.agents.graph.state import (
     GenerationConfig,
     QuestionType,
@@ -34,6 +34,7 @@ from app.models.generation_session import SessionStatus, QuestionStatus, StoredQ
 from app.models.generation_session import SessionChatMessage
 from app.models.question import (
     QuestionCreate,
+    QuestionUpdate,
     QuestionStatus as BankQuestionStatus,
     QuestionType as BankQuestionType,
     QuestionDifficulty as BankQuestionDifficulty,
@@ -44,6 +45,7 @@ from app.utils.enums import (
     normalize_difficulty,
     normalize_blooms_level,
 )
+from app.core.utils import to_object_id
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -1410,20 +1412,23 @@ async def approve_question(
     session_service: Any = Depends(get_session_service),
 ):
     """Approve a generated draft question for publishing."""
-    success = await session_service.update_question_status(
-        session_id=session_id,
-        user_id=current_user.clerk_id,
-        question_id=question_id,
-        status=QuestionStatus.APPROVED,
-    )
+    try:
+        success = await session_service.update_question_status(
+            session_id=session_id,
+            user_id=current_user.clerk_id,
+            question_id=question_id,
+            status=QuestionStatus.APPROVED,
+        )
 
-    if not success:
-        raise HTTPException(status_code=404, detail="Question not found")
+        if not success:
+            raise HTTPException(status_code=404, detail="Question not found")
 
-    return {
-        "message": "Question approved for publishing",
-        "question_id": question_id,
-    }
+        return {
+            "message": "Question approved for publishing",
+            "question_id": question_id,
+        }
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/sessions/{session_id}/questions/{question_id}/reject")
@@ -1435,18 +1440,21 @@ async def reject_question(
     session_service: Any = Depends(get_session_service),
 ):
     """Reject a generated question"""
-    success = await session_service.update_question_status(
-        session_id=session_id,
-        user_id=current_user.clerk_id,
-        question_id=question_id,
-        status=QuestionStatus.REJECTED,
-        review_comments=reason,
-    )
+    try:
+        success = await session_service.update_question_status(
+            session_id=session_id,
+            user_id=current_user.clerk_id,
+            question_id=question_id,
+            status=QuestionStatus.REJECTED,
+            review_comments=reason,
+        )
 
-    if not success:
-        raise HTTPException(status_code=404, detail="Question not found")
+        if not success:
+            raise HTTPException(status_code=404, detail="Question not found")
 
-    return {"message": "Question rejected", "question_id": question_id}
+        return {"message": "Question rejected", "question_id": question_id}
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/sessions/{session_id}/questions/{question_id}/request-revision")
@@ -1458,21 +1466,24 @@ async def request_question_revision(
     session_service: Any = Depends(get_session_service),
 ):
     """Attach review guidance while keeping the draft in the review queue."""
-    success = await session_service.request_question_revision(
-        session_id=session_id,
-        user_id=current_user.clerk_id,
-        question_id=question_id,
-        notes=notes,
-    )
+    try:
+        success = await session_service.request_question_revision(
+            session_id=session_id,
+            user_id=current_user.clerk_id,
+            question_id=question_id,
+            notes=notes,
+        )
 
-    if not success:
-        raise HTTPException(status_code=404, detail="Question not found")
+        if not success:
+            raise HTTPException(status_code=404, detail="Question not found")
 
-    return {
-        "message": "Revision requested",
-        "question_id": question_id,
-        "review_comments": notes,
-    }
+        return {
+            "message": "Revision requested",
+            "question_id": question_id,
+            "review_comments": notes,
+        }
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 class SaveToQuestionBankRequest(BaseModel):
@@ -1550,7 +1561,6 @@ async def save_session_questions_to_bank(
         question
         for question in session.questions
         if question.status == QuestionStatus.APPROVED
-        and not question.published_question_id
         and (not selected_question_ids or question.question_id in selected_question_ids)
     ]
 
@@ -1607,7 +1617,7 @@ async def save_session_questions_to_bank(
                     question.correct_answer,
                 )
 
-            payload = QuestionCreate(
+            question_update = QuestionUpdate(
                 question_text=question.question_text,
                 question_type=bank_type,
                 subject_id=subject_id,
@@ -1616,30 +1626,82 @@ async def save_session_questions_to_bank(
                 points=1,
                 explanation=question.explanation,
                 tags=question.tags,
-                tutor_id=current_user.clerk_id,
                 options=option_payload,
                 correct_answer=correct_answer,
+                status=BankQuestionStatus.ACTIVE,
             )
 
-            saved_question = await question_service.create_question(
-                question_data=payload,
-                tutor_id=current_user.clerk_id,
-                ai_generated=True,
-                generation_id=session_id,
-                extra_fields={
-                    "status": BankQuestionStatus.ACTIVE.value,
-                    "approved_by": current_user.clerk_id,
-                    "approved_at": question.reviewed_at or datetime.now(timezone.utc),
-                    "ai_generated": True,
-                    "ai_provider": ai_provider,
-                    "ai_confidence": question.quality_score,
-                    "reference_materials": reference_materials,
-                    "source_documents": reference_materials,
-                    "source_chunks": question.source_citations,
-                    "generation_model": generation_model,
-                },
-            )
-            published_map[question.question_id] = str(saved_question.id)
+            if question.published_question_id:
+                try:
+                    await question_service.get_question_by_id(
+                        question.published_question_id,
+                        tutor_id=current_user.clerk_id,
+                    )
+                    metadata_update = question_update.model_dump(exclude_unset=True)
+                    metadata_update.update(
+                        {
+                            "status": BankQuestionStatus.ACTIVE.value,
+                            "approved_by": current_user.clerk_id,
+                            "approved_at": question.reviewed_at
+                            or datetime.now(timezone.utc),
+                            "ai_generated": True,
+                            "ai_provider": ai_provider,
+                            "ai_confidence": question.quality_score,
+                            "reference_materials": reference_materials,
+                            "source_documents": reference_materials,
+                            "source_chunks": question.source_citations,
+                            "generation_model": generation_model,
+                            "generation_id": session_id,
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                    )
+                    await question_service.collection.update_one(
+                        {
+                            "_id": to_object_id(question.published_question_id),
+                            "tutor_id": current_user.clerk_id,
+                        },
+                        {"$set": metadata_update},
+                    )
+                except Exception:
+                    question.published_question_id = None
+
+            if not question.published_question_id:
+                payload = QuestionCreate(
+                    question_text=question.question_text,
+                    question_type=bank_type,
+                    subject_id=subject_id,
+                    topic=topic,
+                    difficulty=bank_difficulty,
+                    points=1,
+                    explanation=question.explanation,
+                    tags=question.tags,
+                    tutor_id=current_user.clerk_id,
+                    options=option_payload,
+                    correct_answer=correct_answer,
+                )
+
+                saved_question = await question_service.create_question(
+                    question_data=payload,
+                    tutor_id=current_user.clerk_id,
+                    ai_generated=True,
+                    generation_id=session_id,
+                    extra_fields={
+                        "status": BankQuestionStatus.ACTIVE.value,
+                        "approved_by": current_user.clerk_id,
+                        "approved_at": question.reviewed_at
+                        or datetime.now(timezone.utc),
+                        "ai_generated": True,
+                        "ai_provider": ai_provider,
+                        "ai_confidence": question.quality_score,
+                        "reference_materials": reference_materials,
+                        "source_documents": reference_materials,
+                        "source_chunks": question.source_citations,
+                        "generation_model": generation_model,
+                    },
+                )
+                question.published_question_id = str(saved_question.id)
+
+            published_map[question.question_id] = str(question.published_question_id)
             saved_count += 1
         except Exception as exc:
             failed_items.append(

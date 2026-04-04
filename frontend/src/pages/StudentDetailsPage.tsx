@@ -30,6 +30,9 @@ interface StudentDetails {
   id: string
   clerkId?: string
   dbId?: string
+  accountStatus: 'provisioned' | 'invited' | 'claimed'
+  claimedAt?: string
+  lastInvitedAt?: string
   name: string
   email: string
   phone?: string
@@ -199,6 +202,7 @@ export default function StudentDetailsPage() {
   const selectableParents = availableParents.filter(
     (parent) => !linkedParents.some((linked) => linked.id === parent.id)
   )
+  const isClaimedStudent = student?.accountStatus === 'claimed' && Boolean(student.clerkId)
 
   const studentGroupIdentifierCandidates = useMemo(() => {
     if (!student) {
@@ -258,6 +262,9 @@ export default function StudentDetailsPage() {
         id: studentApiId,
         clerkId: studentClerkId || undefined,
         dbId: studentDbId || undefined,
+        accountStatus: userData.account_status || (studentClerkId ? 'claimed' : 'provisioned'),
+        claimedAt: userData.claimed_at || undefined,
+        lastInvitedAt: userData.last_invited_at || undefined,
         name: userData.name,
         email: userData.email,
         phone: userData.student_profile?.phone,
@@ -280,10 +287,16 @@ export default function StudentDetailsPage() {
 
       // Fetch additional sections in parallel, without blocking the full page render.
       const [progressResult, assignmentsResult, groupsResult, activityResult, parentsResult] = await Promise.allSettled([
-        client.get(`/progress/student/${progressLookupId}/analytics`),
-        client.get(`/assignments/student/${progressLookupId}?status=pending`),
+        studentClerkId
+          ? client.get(`/progress/student/${progressLookupId}/analytics`)
+          : Promise.resolve({ data: { monthly_scores: [] }, error: null }),
+        studentClerkId
+          ? client.get(`/assignments/student/${progressLookupId}?status=pending`)
+          : Promise.resolve({ data: { items: [] }, error: null }),
         client.get(`/groups/student/${groupLookupId}`),
-        client.get(`/activity/student/${progressLookupId}`),
+        studentClerkId
+          ? client.get(`/activity/student/${progressLookupId}`)
+          : Promise.resolve({ data: { items: [] }, error: null }),
         client.get(`/students/${studentApiId}/parents`)
       ])
 
@@ -720,11 +733,20 @@ export default function StudentDetailsPage() {
   }
 
   const handleSendMessage = () => {
+    if (!isClaimedStudent) {
+      toast.error('Student must claim their account before messaging is available')
+      return
+    }
     setSendMessageModalOpen(true)
   }
 
   const handleOpenViewAsStudentDialog = () => {
     if (!student) {
+      return
+    }
+
+    if (!isClaimedStudent) {
+      toast.error('Student must claim their account before you can view their dashboard')
       return
     }
 
@@ -931,6 +953,21 @@ export default function StudentDetailsPage() {
                           <GraduationCap className="h-3 w-3 mr-1" />
                           {student.grade}
                         </Badge>
+                        <Badge
+                          className={
+                            student.accountStatus === 'claimed'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400'
+                              : student.accountStatus === 'invited'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400'
+                                : 'bg-muted text-muted-foreground'
+                          }
+                        >
+                          {student.accountStatus === 'claimed'
+                            ? 'Claimed'
+                            : student.accountStatus === 'invited'
+                              ? 'Invited'
+                              : 'Provisioned'}
+                        </Badge>
                       </div>
                       <p className="text-muted-foreground mt-1 flex items-center gap-2">
                         <Calendar className="h-4 w-4" />
@@ -949,12 +986,20 @@ export default function StudentDetailsPage() {
                           {student.phone}
                         </p>
                       )}
+                      {!isClaimedStudent && (
+                        <p className="text-muted-foreground text-sm mt-2">
+                          {student.accountStatus === 'invited' && student.lastInvitedAt
+                            ? `Invitation sent ${format(new Date(student.lastInvitedAt), 'MMMM dd, yyyy')}.`
+                            : 'This student has not claimed their account yet. Invite them to finish setup.'}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-3">
                     <Button
                       variant="outline"
                       onClick={handleSendMessage}
+                      disabled={!isClaimedStudent}
                       className="border-[#5c4a38] border-2 text-[#5c4a38] bg-transparent hover:bg-[#5c4a38] hover:text-white dark:border-[#C8A882] dark:text-[#C8A882] dark:hover:bg-[#C8A882] dark:hover:text-white"
                     >
                       <MessageCircle className="h-4 w-4 mr-2" />
@@ -963,7 +1008,7 @@ export default function StudentDetailsPage() {
                     <Button
                       variant="outline"
                       onClick={handleOpenViewAsStudentDialog}
-                      disabled={isImpersonationLoading}
+                      disabled={isImpersonationLoading || !isClaimedStudent}
                       className="border-[#5c4a38] border-2 text-[#5c4a38] bg-transparent hover:bg-[#5c4a38] hover:text-white dark:border-[#C8A882] dark:text-[#C8A882] dark:hover:bg-[#C8A882] dark:hover:text-white"
                     >
                       <User className="h-4 w-4 mr-2" />
@@ -1192,6 +1237,7 @@ export default function StudentDetailsPage() {
                   <Button
                     size="sm"
                     onClick={() => setLinkParentModalOpen(true)}
+                    disabled={!isClaimedStudent}
                     className="bg-[#5c4a38] text-white hover:bg-[#4a3c2e] h-8 border-0 dark:bg-[#C8A882] dark:hover:bg-[#B89872]"
                   >
                     <UserPlus className="h-4 w-4 mr-1" />
@@ -1383,6 +1429,11 @@ export default function StudentDetailsPage() {
                       <p className="text-muted-foreground text-sm">No groups yet</p>
                     </div>
                   )}
+                  {!isClaimedStudent && (
+                    <p className="text-xs text-muted-foreground pt-2">
+                      Parent linking becomes available after the student claims their account.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -1404,6 +1455,11 @@ export default function StudentDetailsPage() {
             <p className="text-sm text-muted-foreground">
               You are about to enter {student?.name}&apos;s account. You will see the app exactly as this student sees it.
             </p>
+            {!isClaimedStudent && (
+              <p className="text-sm text-amber-600 dark:text-amber-400">
+                This student has not claimed their account yet, so impersonation is unavailable.
+              </p>
+            )}
             <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
               <p className="font-medium text-foreground">{student?.name}</p>
               <p className="text-muted-foreground">{student?.email}</p>
@@ -1562,10 +1618,10 @@ export default function StudentDetailsPage() {
       {/* Send Message Modal */}
       {student && (
         <SendMessageModal
-          open={sendMessageModalOpen}
-          onOpenChange={setSendMessageModalOpen}
-          student={{
-            id: student.id,
+              open={sendMessageModalOpen}
+              onOpenChange={setSendMessageModalOpen}
+              student={{
+            id: student.clerkId || student.id,
             name: student.name,
             email: student.email,
             avatar: student.avatar

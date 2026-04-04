@@ -115,7 +115,7 @@ export function QuestionCanvas({
   const approvedCount = questions.filter(q => q.status === 'approved').length
   const publishedCount = questions.filter(q => Boolean(q.published_question_id)).length
   const publishReadyCount = questions.filter(
-    q => q.status === 'approved' && !q.published_question_id,
+    q => q.status === 'approved',
   ).length
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -266,7 +266,7 @@ export function QuestionCanvas({
               {publishReadyCount > 0 && (
                 <Button variant="outline" size="sm" onClick={onPublishApproved}>
                   <BookCheck className="h-4 w-4 mr-2" />
-                  Publish Approved ({publishReadyCount})
+                  Publish or Sync Approved ({publishReadyCount})
                 </Button>
               )}
               {pendingCount > 0 && (

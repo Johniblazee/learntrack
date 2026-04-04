@@ -10,13 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
-from app.models.user import User, UserCreate, UserUpdate, UserRole
+from app.models.user import User, UserUpdate, UserRole, AccountStatus
 from app.services.user_service import UserService
 from app.utils.pagination import PaginationParams, PaginatedResponse, paginate
+from app.core.exceptions import ValidationError
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -24,6 +25,17 @@ router = APIRouter()
 
 class BulkStudentDeleteRequest(BaseModel):
     student_ids: List[str]
+
+
+class StudentProvisionCreate(BaseModel):
+    email: EmailStr
+    name: str
+    grade: str | None = None
+    phone: str | None = None
+    parentName: str | None = None
+    parentEmail: EmailStr | None = None
+    notes: str | None = None
+    interests: List[str] = Field(default_factory=list)
 
 
 async def _resolve_student_for_tutor(
@@ -193,7 +205,7 @@ async def list_students_for_tutor(
 
 @router.post("/", response_model=User, status_code=status.HTTP_201_CREATED)
 async def create_student_for_tutor(
-    payload: UserCreate,
+    payload: StudentProvisionCreate,
     current_user: ClerkUserContext = Depends(require_tutor),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
@@ -203,12 +215,26 @@ async def create_student_for_tutor(
     try:
         user_service = UserService(db)
 
-        # Ensure the role is 'student' and assign tutor_id
-        payload.role = UserRole.STUDENT
-        payload.tutor_id = current_user.clerk_id
-
-        student = await user_service.create_user(payload)
+        student = await user_service.create_provisioned_student(
+            name=payload.name.strip(),
+            email=str(payload.email).strip().lower(),
+            tutor_id=current_user.clerk_id,
+            grade=payload.grade.strip() if isinstance(payload.grade, str) else None,
+            phone=payload.phone.strip() if isinstance(payload.phone, str) else None,
+            parent_name=payload.parentName.strip()
+            if isinstance(payload.parentName, str)
+            else None,
+            parent_email=str(payload.parentEmail).strip().lower()
+            if payload.parentEmail
+            else None,
+            notes=payload.notes.strip() if isinstance(payload.notes, str) else None,
+            interests=[
+                interest.strip() for interest in payload.interests if interest.strip()
+            ],
+        )
         return student
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Failed to create student", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to create student")
@@ -444,9 +470,6 @@ async def get_student_parents(
         raise HTTPException(status_code=500, detail="Failed to retrieve parents")
 
 
-from pydantic import BaseModel, EmailStr
-
-
 class LinkParentRequest(BaseModel):
     parent_email: EmailStr
     parent_name: str
@@ -472,6 +495,12 @@ async def link_parent_to_student(
             user_service,
             db,
         )
+
+        if student.account_status != AccountStatus.CLAIMED or not student.clerk_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Student must claim their account before a parent can be linked",
+            )
 
         # Use a stable student identifier from the student record (fallback to ObjectId string for legacy docs)
         actual_student_id = str(student.clerk_id or student.id)
