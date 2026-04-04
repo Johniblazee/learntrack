@@ -98,6 +98,13 @@ export default function StudentAssignmentWorkspace({
   const currentQuestion = questions[currentQuestionIndex]
 
   useEffect(() => {
+    if (!open) {
+      setSubmitDialogOpen(false)
+      setSubmitDialogMessage("")
+    }
+  }, [open])
+
+  useEffect(() => {
     if (!open || !assignmentId || !activeStudentId) return
 
     const loadWorkspace = async () => {
@@ -274,6 +281,8 @@ export default function StudentAssignmentWorkspace({
         score: typeof score === "number" ? score : null,
         feedback,
       })
+      setSubmitDialogOpen(false)
+      setSubmitDialogMessage("")
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["assignments", "my"] }),
         queryClient.invalidateQueries({ queryKey: ["student-dashboard-stats"] }),
@@ -286,6 +295,14 @@ export default function StudentAssignmentWorkspace({
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleWorkspaceOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setSubmitDialogOpen(false)
+      setSubmitDialogMessage("")
+    }
+    onOpenChange(nextOpen)
   }
 
   const renderQuestionInput = (question: StudentQuestion) => {
@@ -362,7 +379,7 @@ export default function StudentAssignmentWorkspace({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleWorkspaceOpenChange}>
       <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{assignmentTitle}</DialogTitle>
@@ -490,7 +507,7 @@ export default function StudentAssignmentWorkspace({
         )}
       </DialogContent>
 
-      <AlertDialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
+      <AlertDialog open={open && submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Submit Assignment</AlertDialogTitle>

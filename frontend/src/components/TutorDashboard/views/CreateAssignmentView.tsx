@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,6 +52,7 @@ export default function CreateAssignmentView() {
     selectedQuestions: [] as string[],
   })
 
+  const [searchParams] = useSearchParams()
   const client = useApiClient()
   const { data: subjectsData } = useSubjects()
   const subjects = Array.isArray(subjectsData)
@@ -214,6 +215,14 @@ export default function CreateAssignmentView() {
       setAppliedTemplateId('__question_bank__')
     }
   }, [appliedTemplateId, client, location.state])
+
+  // Pre-select subject from URL search param (e.g. ?subjectId=...)
+  useEffect(() => {
+    const urlSubjectId = searchParams.get('subjectId')
+    if (urlSubjectId && !formData.subject) {
+      setFormData((prev) => ({ ...prev, subject: urlSubjectId }))
+    }
+  }, [searchParams, formData.subject])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

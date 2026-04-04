@@ -83,7 +83,8 @@ async def test_delete_question_raises_validation_error_when_used_in_assignments(
     )
 
     with pytest.raises(
-        ValidationError, match="Cannot delete question that is used in assignments"
+        ValidationError,
+        match="Cannot delete question that is used in active assignments",
     ):
         await service.delete_question(str(question_id), "tutor-1")
 

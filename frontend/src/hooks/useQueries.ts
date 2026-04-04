@@ -579,6 +579,105 @@ export function useSubjects() {
   })
 }
 
+export function useSubjectStats(subjectId: string | undefined) {
+  const client = useApiClient()
+
+  return useQuery({
+    queryKey: ['subjects', subjectId, 'stats'],
+    queryFn: async () => {
+      const response = await client.get(`/subjects/${subjectId}/stats`)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    enabled: !!subjectId,
+    staleTime: 60 * 1000,
+  })
+}
+
+export function useCreateSubject() {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (data: { name: string; description?: string }) => {
+      const response = await client.post('/subjects', data)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subjects'] })
+    },
+  })
+}
+
+export function useUpdateSubject() {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ id, ...data }: { id: string; name?: string; description?: string }) => {
+      const response = await client.put(`/subjects/${id}`, data)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subjects'] })
+    },
+  })
+}
+
+export function useDeleteSubject() {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await client.delete(`/subjects/${id}`)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subjects'] })
+    },
+  })
+}
+
+export function useAddTopic() {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ subjectId, topic }: { subjectId: string; topic: string }) => {
+      const response = await client.post(`/subjects/${subjectId}/topics/${encodeURIComponent(topic)}`, {})
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['subjects'] })
+      queryClient.invalidateQueries({ queryKey: ['subjects', variables.subjectId, 'stats'] })
+      queryClient.invalidateQueries({ queryKey: ['topics'] })
+    },
+  })
+}
+
+export function useRemoveTopic() {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ subjectId, topic }: { subjectId: string; topic: string }) => {
+      const response = await client.delete(`/subjects/${subjectId}/topics/${encodeURIComponent(topic)}`)
+      if (response.error) throw new Error(response.error)
+      return response.data
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['subjects'] })
+      queryClient.invalidateQueries({ queryKey: ['subjects', variables.subjectId, 'stats'] })
+      queryClient.invalidateQueries({ queryKey: ['topics'] })
+    },
+  })
+}
+
 /**
  * Hook to fetch all topics
  */

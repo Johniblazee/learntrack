@@ -200,24 +200,54 @@ class ProgressService:
         self.collection = database.progress
         self.performance_collection = database.student_performance
 
+    @staticmethod
+    def _serialize_progress_document(progress: Dict[str, Any]) -> Dict[str, Any]:
+        payload = dict(progress or {})
+        if payload.get("_id") is not None:
+            payload["_id"] = str(payload["_id"])
+        return payload
+
+    async def _backfill_progress_tutor_id(
+        self, progress: Dict[str, Any], tutor_id: Optional[str]
+    ) -> Dict[str, Any]:
+        if not tutor_id or progress.get("tutor_id"):
+            return progress
+
+        progress_id = progress.get("_id")
+        if progress_id is None:
+            return progress
+
+        now = datetime.now(timezone.utc)
+        await self.collection.update_one(
+            {"_id": progress_id},
+            {"$set": {"tutor_id": tutor_id, "updated_at": now}},
+        )
+        progress["tutor_id"] = tutor_id
+        progress["updated_at"] = now
+        return progress
+
     async def create_progress(self, progress_data: ProgressCreate) -> Progress:
         """Create a new progress record"""
         try:
-            # Check if progress already exists for this student/assignment
+            # Progress is uniquely identified by student_id + assignment_id.
+            # Do not include tutor_id in this lookup or we can miss legacy rows and
+            # accidentally try to create a duplicate record.
             existing_query: Dict[str, Any] = {
                 "student_id": progress_data.student_id,
                 "assignment_id": progress_data.assignment_id,
             }
-            if progress_data.tutor_id:
-                existing_query["tutor_id"] = progress_data.tutor_id
 
             existing = await self.collection.find_one(existing_query)
 
             if existing:
-                return Progress(**existing)
+                existing = await self._backfill_progress_tutor_id(
+                    existing, progress_data.tutor_id
+                )
+                return Progress(**self._serialize_progress_document(existing))
 
             # Create new progress record
             progress_dict = progress_data.model_dump()
+            progress_dict.setdefault("_id", ObjectId())
             progress_dict["created_at"] = datetime.now(timezone.utc)
             progress_dict["updated_at"] = datetime.now(timezone.utc)
             progress_dict["started_at"] = datetime.now(timezone.utc)
@@ -226,11 +256,38 @@ class ProgressService:
             progress_dict["points_earned"] = 0.0
             progress_dict["points_possible"] = 0.0
 
-            result = await self.collection.insert_one(progress_dict)
-            progress_dict["_id"] = result.inserted_id
+            try:
+                result = await self.collection.update_one(
+                    existing_query,
+                    {"$setOnInsert": progress_dict},
+                    upsert=True,
+                )
+            except Exception as insert_error:
+                # Concurrent save/submit requests can race on the unique index.
+                if "duplicate key" not in str(insert_error).lower():
+                    raise
+                result = None
 
-            logger.info("Progress created", progress_id=str(result.inserted_id))
-            return Progress(**progress_dict)
+            persisted = await self.collection.find_one(existing_query)
+            if persisted:
+                persisted = await self._backfill_progress_tutor_id(
+                    persisted, progress_data.tutor_id
+                )
+                logger.info(
+                    "Progress created",
+                    progress_id=str(
+                        persisted.get("_id") or getattr(result, "upserted_id", "")
+                    ),
+                )
+                return Progress(**self._serialize_progress_document(persisted))
+
+            logger.info(
+                "Progress created",
+                progress_id=str(
+                    getattr(result, "upserted_id", progress_dict.get("_id"))
+                ),
+            )
+            return Progress(**self._serialize_progress_document(progress_dict))
 
         except Exception as e:
             logger.error("Failed to create progress", error=str(e))
@@ -243,7 +300,7 @@ class ProgressService:
             progress = await self.collection.find_one({"_id": oid})
             if not progress:
                 raise NotFoundError("Progress", progress_id)
-            return Progress(**progress)
+            return Progress(**self._serialize_progress_document(progress))
         except NotFoundError:
             raise
         except Exception as e:
@@ -257,15 +314,19 @@ class ProgressService:
     ) -> Optional[Progress]:
         """Get student's progress on a specific assignment"""
         try:
+            # Progress rows are unique on student_id + assignment_id, so ignore
+            # tutor_id for lookup and only use it to backfill legacy records.
             progress_query: Dict[str, Any] = {
                 "student_id": student_id,
                 "assignment_id": assignment_id,
             }
-            if tutor_id:
-                progress_query["tutor_id"] = tutor_id
 
             progress = await self.collection.find_one(progress_query)
-            return Progress(**progress) if progress else None
+            if not progress:
+                return None
+
+            progress = await self._backfill_progress_tutor_id(progress, tutor_id)
+            return Progress(**self._serialize_progress_document(progress))
         except Exception as e:
             logger.error(
                 "Failed to get student assignment progress",

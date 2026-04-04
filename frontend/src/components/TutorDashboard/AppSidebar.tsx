@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, FileText, BookOpen, ChevronRight, UserPlus, MessageSquare, Mail, Brain, CheckSquare, Library, FolderOpen, Calendar, ClipboardList, GraduationCap, Layers } from "lucide-react"
+import { LayoutDashboard, Users, FileText, BookOpen, BookMarked, ChevronRight, UserPlus, MessageSquare, Mail, Brain, CheckSquare, Library, FolderOpen, Calendar, ClipboardList, GraduationCap, Layers } from "lucide-react"
 
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar"
 import {
@@ -39,6 +39,11 @@ const menuItems = [
         view: "groups",
       },
     ],
+  },
+  {
+    title: "Subjects",
+    icon: BookMarked,
+    view: "subjects",
   },
   {
     title: "Content",
@@ -117,6 +122,7 @@ export function AppSidebar({ activeView, onViewChange }: AppSidebarProps) {
   const getRouteForView = (view: string): string => {
     const viewToRoute: Record<string, string> = {
       'overview': '/dashboard',
+      'subjects': '/dashboard/subjects',
       'all-students': '/dashboard/students',
       'invitations': '/dashboard/invitations',
       'groups': '/dashboard/groups',
