@@ -31,12 +31,51 @@ class AssignmentType(str, Enum):
     HOMEWORK = "homework"
 
 
+class AssignmentQuestionOptionSnapshot(BaseModel):
+    """Immutable option content stored on an assignment."""
+
+    text: str
+
+
+class AssignmentQuestionSnapshot(BaseModel):
+    """Immutable question content stored on an assignment."""
+
+    question_text: str
+    question_type: str
+    topic: str = "general"
+    difficulty: str = "medium"
+    explanation: Optional[str] = None
+    options: List[AssignmentQuestionOptionSnapshot] = Field(default_factory=list)
+    correct_answer: Optional[str] = None
+
+
 class QuestionAssignment(BaseModel):
     """Question within an assignment"""
 
     question_id: str
     points: int = 1
     order: int = 0
+    snapshot: Optional[AssignmentQuestionSnapshot] = None
+
+
+class AssignmentQuestionSnapshotForStudent(BaseModel):
+    """Student-safe immutable question content stored on an assignment."""
+
+    question_text: str
+    question_type: str
+    topic: str = "general"
+    difficulty: str = "medium"
+    explanation: Optional[str] = None
+    options: List[AssignmentQuestionOptionSnapshot] = Field(default_factory=list)
+
+
+class AssignmentQuestionForStudent(BaseModel):
+    """Student-safe question row returned for an assignment detail view."""
+
+    question_id: str
+    points: int = 1
+    order: int = 0
+    snapshot: Optional[AssignmentQuestionSnapshotForStudent] = None
 
 
 class AssignmentBase(BaseModel):
@@ -107,9 +146,10 @@ class AssignmentInDB(AssignmentBase):
     questions: List[QuestionAssignment] = Field(
         default_factory=list
     )  # Made optional with default for backward compatibility
-    status: AssignmentStatus = AssignmentStatus.SCHEDULED
+    status: AssignmentStatus = AssignmentStatus.DRAFT
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    published_at: Optional[datetime] = None
 
     # Group assignment metadata
     group_ids: List[str] = Field(
@@ -184,3 +224,21 @@ class AssignmentForStudent(BaseModel):
     submitted_at: Optional[datetime] = None
     graded_at: Optional[datetime] = None
     review_available: bool = False
+
+
+class AssignmentDetailForStudent(BaseModel):
+    """Assignment detail payload for student workspace."""
+
+    id: str
+    title: str
+    description: Optional[str] = None
+    subject_id: str
+    topic: str = "general"
+    due_date: Optional[datetime] = None
+    time_limit: Optional[int] = None
+    max_attempts: int = 1
+    shuffle_questions: bool = False
+    show_results_immediately: bool = True
+    status: str
+    total_points: int = 0
+    questions: List[AssignmentQuestionForStudent] = Field(default_factory=list)

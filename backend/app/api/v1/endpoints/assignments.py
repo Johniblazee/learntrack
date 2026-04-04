@@ -19,7 +19,11 @@ from app.core.enhanced_auth import (
 from app.models.assignment import (
     Assignment,
     AssignmentCreate,
+    AssignmentDetailForStudent,
     AssignmentForStudent,
+    AssignmentQuestionForStudent,
+    AssignmentQuestionOptionSnapshot,
+    AssignmentQuestionSnapshotForStudent,
     AssignmentStatus,
     AssignmentUpdate,
 )
@@ -29,6 +33,53 @@ from app.utils.pagination import PaginationParams, PaginatedResponse, paginate
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+def _to_student_assignment_detail(assignment: Assignment) -> AssignmentDetailForStudent:
+    question_rows = []
+    for question in assignment.questions or []:
+        student_snapshot = None
+        if question.snapshot:
+            student_snapshot = AssignmentQuestionSnapshotForStudent(
+                question_text=question.snapshot.question_text,
+                question_type=question.snapshot.question_type,
+                topic=question.snapshot.topic,
+                difficulty=question.snapshot.difficulty,
+                explanation=question.snapshot.explanation,
+                options=[
+                    AssignmentQuestionOptionSnapshot(text=option.text)
+                    for option in question.snapshot.options or []
+                ],
+            )
+
+        question_rows.append(
+            AssignmentQuestionForStudent(
+                question_id=question.question_id,
+                points=question.points,
+                order=question.order,
+                snapshot=student_snapshot,
+            )
+        )
+
+    return AssignmentDetailForStudent(
+        id=str(assignment.id),
+        title=assignment.title,
+        description=assignment.description,
+        subject_id=assignment.subject_id,
+        topic=assignment.topic or "general",
+        due_date=assignment.due_date,
+        time_limit=assignment.time_limit,
+        max_attempts=assignment.max_attempts,
+        shuffle_questions=assignment.shuffle_questions,
+        show_results_immediately=assignment.show_results_immediately,
+        status=(
+            assignment.status.value
+            if isinstance(assignment.status, AssignmentStatus)
+            else str(assignment.status)
+        ),
+        total_points=assignment.total_points,
+        questions=question_rows,
+    )
 
 
 class BulkAssignmentActionRequest(BaseModel):
@@ -206,6 +257,76 @@ async def bulk_delete_assignments(
         raise HTTPException(status_code=500, detail="Failed to bulk delete assignments")
 
 
+@router.post("/{assignment_id}/publish", response_model=Assignment)
+async def publish_assignment(
+    assignment_id: str = Path(..., description="Assignment ID"),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    assignment_service: AssignmentService = Depends(get_assignment_service),
+):
+    """Publish a draft assignment and notify assigned students."""
+    try:
+        return await assignment_service.publish_assignment(
+            assignment_id, current_user.clerk_id
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to publish assignment", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to publish assignment")
+
+
+@router.get("/{assignment_id}/student", response_model=AssignmentDetailForStudent)
+async def get_assignment_for_student(
+    assignment_id: str = Path(..., description="Assignment ID"),
+    current_user: ClerkUserContext = Depends(require_authenticated_user),
+    assignment_service: AssignmentService = Depends(get_assignment_service),
+):
+    """Get a student-safe assignment detail payload for the workspace."""
+    try:
+        if current_user.role.value != "student":
+            raise HTTPException(status_code=403, detail="Students only")
+
+        assignment = await assignment_service.get_assignment_by_id(assignment_id)
+        if assignment.tutor_id not in {
+            current_user.tutor_id,
+            current_user.clerk_id,
+        }:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to view this assignment"
+            )
+
+        assignment_status = (
+            assignment.status.value
+            if isinstance(assignment.status, AssignmentStatus)
+            else str(assignment.status or "").strip().lower()
+        )
+        if assignment_status in {
+            AssignmentStatus.DRAFT.value,
+            AssignmentStatus.SCHEDULED.value,
+        }:
+            raise HTTPException(status_code=404, detail="Assignment not found")
+
+        if current_user.clerk_id not in (assignment.student_ids or []):
+            raise HTTPException(
+                status_code=403, detail="Not authorized to view this assignment"
+            )
+
+        return _to_student_assignment_detail(assignment)
+    except HTTPException:
+        raise
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except AuthorizationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to get student assignment", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get assignment")
+
+
 @router.get("/{assignment_id}", response_model=Assignment)
 async def get_assignment(
     assignment_id: str = Path(..., description="Assignment ID"),
@@ -214,11 +335,28 @@ async def get_assignment(
 ):
     """Get assignment by ID"""
     try:
+        if current_user.role == "student":
+            raise HTTPException(
+                status_code=403,
+                detail="Students must use the student assignment endpoint",
+            )
+
         # For tutors, validate ownership. For students, they can view if assigned.
         tutor_id = current_user.clerk_id if current_user.role == "tutor" else None
         assignment = await assignment_service.get_assignment_by_id(
             assignment_id, tutor_id=tutor_id
         )
+
+        assignment_status = (
+            assignment.status.value
+            if isinstance(assignment.status, AssignmentStatus)
+            else str(assignment.status or "").strip().lower()
+        )
+        if current_user.role != "tutor" and assignment_status in {
+            AssignmentStatus.DRAFT.value,
+            AssignmentStatus.SCHEDULED.value,
+        }:
+            raise HTTPException(status_code=404, detail="Assignment not found")
 
         # For students, verify they are assigned to this assignment
         if current_user.role == "student" and current_user.clerk_id not in (

@@ -101,7 +101,7 @@ const normalizeAssignmentStatus = (status?: string): AssignmentStatusValue => {
     case 'archived':
       return status
     default:
-      return 'published'
+      return 'draft'
   }
 }
 
@@ -255,9 +255,11 @@ export default function ActiveAssignmentsView() {
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'active':
+        return 'Active'
       case 'published':
+        return 'Published'
       case 'scheduled':
-        return 'In Progress'
+        return 'Scheduled'
       case 'completed':
         return 'Completed'
       case 'draft':
@@ -428,7 +430,7 @@ export default function ActiveAssignmentsView() {
     setDeleteModalOpen(true)
   }
 
-  const handleBulkStatusUpdate = async (status: 'active' | 'archived') => {
+  const handleBulkStatusUpdate = async (status: 'archived') => {
     if (selectedAssignmentIds.size === 0) {
       return
     }
@@ -467,6 +469,90 @@ export default function ActiveAssignmentsView() {
       console.error('Failed to bulk update assignments:', err)
       toast.error('Failed to update selected assignments', {
         description: err.message || 'Please try again later'
+      })
+    } finally {
+      setBulkUpdatingStatus(false)
+    }
+  }
+
+  const handlePublishAssignment = async (assignmentId: string) => {
+    const targetAssignment = assignments.find((assignment) => assignment.id === assignmentId)
+
+    try {
+      const response = await client.post(`/assignments/${assignmentId}/publish`, {})
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      const updatedAssignment = response.data as RawAssignment | undefined
+      setRawAssignments((previous) =>
+        previous.map((assignment) => {
+          const rawAssignmentId = String(assignment._id || assignment.id || '')
+          if (rawAssignmentId !== assignmentId) {
+            return assignment
+          }
+
+          return {
+            ...assignment,
+            ...(updatedAssignment || {}),
+          }
+        })
+      )
+
+      toast.success('Assignment published', {
+        description: targetAssignment
+          ? `"${targetAssignment.title}" is now visible to students.`
+          : 'The assignment is now visible to students.',
+      })
+    } catch (err: any) {
+      console.error('Failed to publish assignment:', err)
+      toast.error('Failed to publish assignment', {
+        description: err.message || 'Please try again later',
+      })
+    }
+  }
+
+  const handleBulkPublishSelected = async () => {
+    const draftAssignments = assignments.filter(
+      (assignment) => selectedAssignmentIds.has(assignment.id) && assignment.status === 'draft'
+    )
+
+    if (draftAssignments.length === 0) {
+      toast.error('Select at least one draft assignment to publish')
+      return
+    }
+
+    try {
+      setBulkUpdatingStatus(true)
+      const results = await Promise.allSettled(
+        draftAssignments.map((assignment) =>
+          client.post(`/assignments/${assignment.id}/publish`, {})
+        )
+      )
+
+      const successCount = results.filter(
+        (result) => result.status === 'fulfilled' && !result.value.error
+      ).length
+      const failedCount = results.length - successCount
+
+      if (successCount > 0) {
+        await fetchAssignments()
+        setSelectedAssignmentIds(new Set())
+        toast.success('Draft assignments published', {
+          description:
+            failedCount > 0
+              ? `${successCount} published, ${failedCount} failed.`
+              : `${successCount} assignment${successCount === 1 ? '' : 's'} published.`,
+        })
+        return
+      }
+
+      toast.error('Failed to publish selected draft assignments')
+    } catch (err: any) {
+      console.error('Failed to bulk publish assignments:', err)
+      toast.error('Failed to publish selected draft assignments', {
+        description: err.message || 'Please try again later',
       })
     } finally {
       setBulkUpdatingStatus(false)
@@ -764,6 +850,12 @@ export default function ActiveAssignmentsView() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          {assignment.status === 'draft' && (
+                            <DropdownMenuItem onClick={() => handlePublishAssignment(assignment.id)}>
+                              <Plus className="w-4 h-4 mr-2" />
+                              Publish
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem onClick={() => handleView(assignment.id)}>
                             <Eye className="w-4 h-4 mr-2" />
                             View Details
@@ -863,10 +955,10 @@ export default function ActiveAssignmentsView() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleBulkStatusUpdate('active')}
+                  onClick={handleBulkPublishSelected}
                   disabled={bulkUpdatingStatus}
                 >
-                  Mark Active
+                  Publish Drafts
                 </Button>
                 <Button
                   variant="outline"

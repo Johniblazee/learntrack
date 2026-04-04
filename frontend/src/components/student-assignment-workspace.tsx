@@ -106,7 +106,7 @@ export default function StudentAssignmentWorkspace({
         setLoadError(null)
         setCurrentQuestionIndex(0)
 
-        const assignmentResponse = await client.get(`/assignments/${assignmentId}`)
+        const assignmentResponse = await client.get(`/assignments/${assignmentId}/student`)
         if (assignmentResponse.error || !assignmentResponse.data) {
           throw new Error(assignmentResponse.error || "Failed to load assignment")
         }
@@ -127,6 +127,21 @@ export default function StudentAssignmentWorkspace({
           questionRows.map(async (questionRow: any) => {
             const questionId = String(questionRow.question_id || "")
             if (!questionId) return null
+
+            const snapshot = questionRow?.snapshot
+            if (snapshot && typeof snapshot === "object") {
+              return {
+                id: questionId,
+                questionText: String(snapshot.question_text || "Untitled question"),
+                questionType: String(snapshot.question_type || "short-answer"),
+                options: Array.isArray(snapshot.options)
+                  ? snapshot.options
+                      .map((option: any) => ({ text: String(option?.text || "") }))
+                      .filter((option: { text: string }) => option.text)
+                  : [],
+                points: Number(questionRow.points || 1),
+              } as StudentQuestion
+            }
 
             const response = await client.get(`/questions/${questionId}/student`)
             if (response.error || !response.data) return null

@@ -52,6 +52,9 @@ class TestAssignmentService:
         """Test creating a new assignment"""
         # Arrange
         question_id = ObjectId()
+        assignment_service._resolve_student_clerk_ids = AsyncMock(
+            return_value=["student_1", "student_2"]
+        )
         assignment_data = AssignmentCreate(
             title="Test Assignment",
             description="Test Description",
@@ -64,7 +67,21 @@ class TestAssignmentService:
         tutor_id = "tutor_123"
 
         mock_questions_cursor = AsyncMock()
-        mock_questions_cursor.to_list.return_value = [{"_id": question_id, "points": 1}]
+        mock_questions_cursor.to_list.return_value = [
+            {
+                "_id": question_id,
+                "points": 1,
+                "question_text": "What is 2 + 2?",
+                "question_type": "multiple-choice",
+                "topic": "addition",
+                "difficulty": "easy",
+                "options": [
+                    {"text": "3", "is_correct": False},
+                    {"text": "4", "is_correct": True},
+                ],
+                "correct_answer": "4",
+            }
+        ]
         mock_db.questions.find = Mock(return_value=mock_questions_cursor)
 
         mock_db.assignments.insert_one.return_value = Mock(
@@ -78,6 +95,9 @@ class TestAssignmentService:
         assert result is not None
         assert result.title == "Test Assignment"
         assert result.tutor_id == tutor_id
+        assert result.status == AssignmentStatus.DRAFT
+        assert result.questions[0].snapshot is not None
+        assert result.questions[0].snapshot.question_text == "What is 2 + 2?"
         mock_db.assignments.insert_one.assert_called_once()
 
     @pytest.mark.asyncio
@@ -151,7 +171,7 @@ class TestAssignmentService:
 
     @pytest.mark.asyncio
     async def test_delete_assignment(self, assignment_service, mock_db):
-        """Test deleting an assignment"""
+        """Test archiving an assignment"""
         # Arrange
         assignment_id = ObjectId("507f1f77bcf86cd799439011")
         tutor_id = "tutor_123"
@@ -162,7 +182,7 @@ class TestAssignmentService:
             "tutor_id": tutor_id,
         }
 
-        mock_db.assignments.delete_one.return_value = Mock(deleted_count=1)
+        mock_db.assignments.update_one.return_value = Mock(matched_count=1)
 
         # Act
         result = await assignment_service.delete_assignment(
@@ -171,7 +191,7 @@ class TestAssignmentService:
 
         # Assert
         assert result is True
-        mock_db.assignments.delete_one.assert_called_once()
+        mock_db.assignments.update_one.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_get_assignments_for_tutor(self, assignment_service, mock_db):

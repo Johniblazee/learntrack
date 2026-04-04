@@ -504,7 +504,7 @@ class ProgressService:
             max_limit = getattr(settings, "PROGRESS_AGG_LIMIT", 500)
             assignment_query: Dict[str, Any] = {
                 "student_ids": student_id,
-                "status": {"$ne": "draft"},
+                "status": {"$nin": ["draft", "scheduled"]},
             }
             if tutor_id:
                 assignment_query["tutor_id"] = tutor_id
@@ -874,7 +874,7 @@ class ProgressService:
                 upcoming_assignment_query: Dict[str, Any] = {
                     "student_ids": child_id,
                     "due_date": {"$ne": None},
-                    "status": {"$nin": ["archived", "completed"]},
+                    "status": {"$nin": ["draft", "scheduled", "archived", "completed"]},
                 }
                 if child_tutor_id:
                     upcoming_assignment_query["tutor_id"] = child_tutor_id

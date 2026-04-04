@@ -13,6 +13,8 @@ from bson import ObjectId
 from app.models.assignment import (
     Assignment,
     AssignmentCreate,
+    AssignmentQuestionOptionSnapshot,
+    AssignmentQuestionSnapshot,
     AssignmentUpdate,
     AssignmentInDB,
     AssignmentForStudent,
@@ -38,6 +40,13 @@ logger = structlog.get_logger()
 
 # Get frontend URL from environment
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+STUDENT_VISIBLE_ASSIGNMENT_STATUSES = {
+    AssignmentStatus.PUBLISHED.value,
+    AssignmentStatus.ACTIVE.value,
+    AssignmentStatus.COMPLETED.value,
+    AssignmentStatus.ARCHIVED.value,
+}
 
 
 def _convert_doc_to_assignment(doc: dict) -> Assignment:
@@ -108,6 +117,29 @@ def _derive_student_assignment_status(
     return "pending"
 
 
+def _build_assignment_question_snapshot(
+    question_doc: Dict[str, Any],
+) -> AssignmentQuestionSnapshot:
+    options: List[AssignmentQuestionOptionSnapshot] = []
+    for option in question_doc.get("options") or []:
+        if isinstance(option, dict):
+            option_text = str(option.get("text") or "").strip()
+        else:
+            option_text = str(getattr(option, "text", option) or "").strip()
+        if option_text:
+            options.append(AssignmentQuestionOptionSnapshot(text=option_text))
+
+    return AssignmentQuestionSnapshot(
+        question_text=str(question_doc.get("question_text") or "Untitled question"),
+        question_type=str(question_doc.get("question_type") or "short-answer"),
+        topic=str(question_doc.get("topic") or "general"),
+        difficulty=str(question_doc.get("difficulty") or "medium"),
+        explanation=question_doc.get("explanation"),
+        options=options,
+        correct_answer=question_doc.get("correct_answer"),
+    )
+
+
 class AssignmentService:
     """Assignment service for database operations"""
 
@@ -165,6 +197,100 @@ class AssignmentService:
         ]
         return owned_ids, skipped_ids
 
+    async def _send_assignment_publication_notifications(
+        self, assignment: Dict[str, Any]
+    ) -> None:
+        try:
+            tutor_id = str(assignment.get("tutor_id") or "").strip()
+            if not tutor_id:
+                return
+
+            student_ids = self._normalize_ids(assignment.get("student_ids") or [])
+            if not student_ids:
+                return
+
+            assignment_id_str = str(assignment.get("_id") or assignment.get("id") or "")
+            assignment_title = str(assignment.get("title") or "Assignment")
+            assignment_link = f"{FRONTEND_URL}/dashboard/assignments"
+
+            tutor = await self.db.tutors.find_one({"clerk_id": tutor_id})
+            tutor_name = tutor.get("name", "Your Teacher") if tutor else "Your Teacher"
+            notification_service = NotificationService(self.db)
+            activity_service = ActivityService(self.db)
+
+            student_docs_list = await self.db.students.find(
+                {"clerk_id": {"$in": student_ids}}
+            ).to_list(length=None)
+            student_docs_map = {
+                doc["clerk_id"]: doc for doc in student_docs_list if doc.get("clerk_id")
+            }
+
+            notification_due_date = assignment.get("due_date") or datetime.now(
+                timezone.utc
+            )
+            bulk_notifications = []
+
+            for student_id in student_ids:
+                try:
+                    student = student_docs_map.get(student_id)
+                    student_name = (
+                        student.get("name", "") if isinstance(student, dict) else ""
+                    )
+
+                    if student and student.get("email"):
+                        email_service.send_assignment_notification(
+                            to_email=student["email"],
+                            to_name=student_name,
+                            assignment_title=assignment_title,
+                            teacher_name=tutor_name,
+                            due_date=notification_due_date,
+                            assignment_link=assignment_link,
+                        )
+
+                    bulk_notifications.append(
+                        NotificationCreate(
+                            title="New assignment assigned",
+                            message=f"{assignment_title} was assigned by {tutor_name}",
+                            notification_type=NotificationType.SYSTEM,
+                            recipient_id=student_id,
+                            tutor_id=tutor_id,
+                            related_entity_id=assignment_id_str,
+                            related_entity_type="assignment",
+                            action_url="/dashboard/assignments",
+                        )
+                    )
+
+                    await activity_service.create_activity(
+                        activity_data=ActivityCreate(
+                            activity_type=ActivityType.ASSIGNMENT_STARTED,
+                            user_id=student_id,
+                            tutor_id=tutor_id,
+                            description=f"Assigned {assignment_title}",
+                            related_entity_id=assignment_id_str,
+                            related_entity_type="assignment",
+                            metadata={
+                                "assignment_title": assignment_title,
+                                "student_name": student_name,
+                                "assigned_by": tutor_name,
+                            },
+                        ),
+                        user_id=student_id,
+                        tutor_id=tutor_id,
+                    )
+                except Exception as student_error:
+                    logger.warning(
+                        "Failed to prepare assignment publication notification",
+                        student_id=student_id,
+                        error=str(student_error),
+                    )
+
+            if bulk_notifications:
+                await notification_service.bulk_create_notifications(bulk_notifications)
+        except Exception as e:
+            logger.warning(
+                "Failed to send assignment publication notifications", error=str(e)
+            )
+
     async def get_assignment(self, assignment_id: str) -> Assignment:
         """Backward-compatible alias for get_assignment_by_id."""
         return await self.get_assignment_by_id(assignment_id)
@@ -197,15 +323,34 @@ class AssignmentService:
                     "tutor_id": tutor_id,
                     "status": QuestionStatus.ACTIVE.value,
                 },
-                {"_id": 1, "points": 1},
+                {
+                    "_id": 1,
+                    "question_text": 1,
+                    "question_type": 1,
+                    "topic": 1,
+                    "difficulty": 1,
+                    "points": 1,
+                    "explanation": 1,
+                    "options": 1,
+                    "correct_answer": 1,
+                },
             ).to_list(length=None)
             question_points = {
                 str(question_doc.get("_id")): int(question_doc.get("points") or 1)
                 for question_doc in question_docs
                 if question_doc.get("_id") is not None
             }
+            question_snapshots = {
+                str(question_doc.get("_id")): _build_assignment_question_snapshot(
+                    question_doc
+                )
+                for question_doc in question_docs
+                if question_doc.get("_id") is not None
+            }
 
-            if len(question_points) != len(question_ids):
+            if len(question_points) != len(question_ids) or len(
+                question_snapshots
+            ) != len(question_ids):
                 raise ValidationError(
                     "One or more selected questions are unavailable or do not belong to you"
                 )
@@ -259,13 +404,15 @@ class AssignmentService:
                     question_id=qid,
                     order=index,
                     points=question_points.get(qid, 1),
+                    snapshot=question_snapshots.get(qid),
                 )
                 for index, qid in enumerate(question_ids)
             ]
             assignment_dict["tutor_id"] = tutor_id
             assignment_dict["created_at"] = datetime.now(timezone.utc)
             assignment_dict["updated_at"] = datetime.now(timezone.utc)
-            assignment_dict["status"] = AssignmentStatus.PUBLISHED
+            assignment_dict["status"] = AssignmentStatus.DRAFT.value
+            assignment_dict["published_at"] = None
             assignment_dict["questions"] = [q.model_dump() for q in questions]
             assignment_dict["student_ids"] = list(student_ids)
             assignment_dict["group_ids"] = group_ids
@@ -281,112 +428,12 @@ class AssignmentService:
             assignment_dict["_id"] = str(result.inserted_id)
 
             logger.info(
-                "Assignment created",
+                "Assignment draft created",
                 assignment_id=str(result.inserted_id),
                 student_count=len(student_ids),
                 group_count=len(group_ids),
                 is_group_assignment=assignment_dict["is_group_assignment"],
             )
-
-            # Send email notifications to students
-            try:
-                # Get tutor info
-                tutor = await self.db.tutors.find_one({"clerk_id": tutor_id})
-                tutor_name = (
-                    tutor.get("name", "Your Teacher") if tutor else "Your Teacher"
-                )
-                notification_service = NotificationService(self.db)
-                activity_service = ActivityService(self.db)
-
-                assignment_link = (
-                    f"{FRONTEND_URL}/assignments/{str(result.inserted_id)}"
-                )
-                assignment_id_str = str(result.inserted_id)
-
-                # Fetch all student docs in one query for email + activity data
-                student_docs_list = await self.db.students.find(
-                    {"clerk_id": {"$in": list(student_ids)}}
-                ).to_list(length=None)
-                student_docs_map = {
-                    doc["clerk_id"]: doc
-                    for doc in student_docs_list
-                    if doc.get("clerk_id")
-                }
-
-                notification_due_date = (
-                    assignment_data.due_date
-                    if assignment_data.due_date is not None
-                    else datetime.now(timezone.utc)
-                )
-
-                # Build all notifications and send emails in one pass
-                bulk_notifications = []
-                for student_id in student_ids:
-                    try:
-                        student = student_docs_map.get(student_id)
-                        student_name = (
-                            student.get("name", "") if isinstance(student, dict) else ""
-                        )
-
-                        if student and student.get("email"):
-                            email_service.send_assignment_notification(
-                                to_email=student["email"],
-                                to_name=student_name,
-                                assignment_title=assignment_data.title,
-                                teacher_name=tutor_name,
-                                due_date=notification_due_date,
-                                assignment_link=assignment_link,
-                            )
-
-                        bulk_notifications.append(
-                            NotificationCreate(
-                                title="New assignment assigned",
-                                message=f"{assignment_data.title} was assigned by {tutor_name}",
-                                notification_type=NotificationType.SYSTEM,
-                                recipient_id=student_id,
-                                tutor_id=tutor_id,
-                                related_entity_id=assignment_id_str,
-                                related_entity_type="assignment",
-                                action_url="/dashboard/assignments",
-                            )
-                        )
-
-                        await activity_service.create_activity(
-                            activity_data=ActivityCreate(
-                                activity_type=ActivityType.ASSIGNMENT_STARTED,
-                                user_id=student_id,
-                                tutor_id=tutor_id,
-                                description=f"Assigned {assignment_data.title}",
-                                related_entity_id=assignment_id_str,
-                                related_entity_type="assignment",
-                                metadata={
-                                    "assignment_title": assignment_data.title,
-                                    "student_name": student_name,
-                                    "assigned_by": tutor_name,
-                                },
-                            ),
-                            user_id=student_id,
-                            tutor_id=tutor_id,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to prepare assignment notification",
-                            student_id=student_id,
-                            error=str(e),
-                        )
-
-                # Bulk insert all notifications in a single DB round-trip
-                if bulk_notifications:
-                    try:
-                        await notification_service.bulk_create_notifications(
-                            bulk_notifications
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to bulk create notifications", error=str(e)
-                        )
-            except Exception as e:
-                logger.warning("Failed to send assignment notifications", error=str(e))
 
             return Assignment(**assignment_dict)
 
@@ -581,7 +628,7 @@ class AssignmentService:
             query: Dict[str, Any] = {
                 "tutor_id": tutor_id,
                 "student_ids": student_id,
-                "status": {"$ne": AssignmentStatus.DRAFT.value},
+                "status": {"$in": list(STUDENT_VISIBLE_ASSIGNMENT_STATUSES)},
             }
 
             assignment_docs = (
@@ -736,6 +783,65 @@ class AssignmentService:
             raise DatabaseException(
                 f"Failed to get student assignment summaries: {str(e)}"
             )
+
+    async def publish_assignment(self, assignment_id: str, tutor_id: str) -> Assignment:
+        """Publish a draft assignment and notify recipients."""
+        try:
+            assignment = await self.get_assignment_by_id(
+                assignment_id, tutor_id=tutor_id
+            )
+            current_status = (
+                assignment.status.value
+                if isinstance(assignment.status, AssignmentStatus)
+                else str(assignment.status or "").strip().lower()
+            )
+
+            if current_status == AssignmentStatus.PUBLISHED.value:
+                return assignment
+
+            if current_status not in {
+                AssignmentStatus.DRAFT.value,
+            }:
+                raise ValidationError("Only draft assignments can be published")
+
+            now = datetime.now(timezone.utc)
+            oid = to_object_id(assignment_id)
+            result = await self.collection.update_one(
+                {"_id": oid, "tutor_id": tutor_id},
+                {
+                    "$set": {
+                        "status": AssignmentStatus.PUBLISHED.value,
+                        "updated_at": now,
+                        "published_at": assignment.published_at or now,
+                    }
+                },
+            )
+
+            if result.matched_count == 0:
+                raise NotFoundError("Assignment", assignment_id)
+
+            persisted = await self.collection.find_one(
+                {"_id": oid, "tutor_id": tutor_id}
+            )
+            if not persisted:
+                raise NotFoundError("Assignment", assignment_id)
+
+            await self._send_assignment_publication_notifications(persisted)
+            logger.info(
+                "Assignment published", assignment_id=assignment_id, tutor_id=tutor_id
+            )
+            return _convert_doc_to_assignment(persisted)
+
+        except (NotFoundError, AuthorizationError, ValidationError):
+            raise
+        except Exception as e:
+            logger.error(
+                "Failed to publish assignment",
+                assignment_id=assignment_id,
+                tutor_id=tutor_id,
+                error=str(e),
+            )
+            raise DatabaseException(f"Failed to publish assignment: {str(e)}")
 
     async def update_assignment(
         self, assignment_id: str, assignment_update: AssignmentUpdate, tutor_id: str

@@ -54,7 +54,7 @@ export function EditAssignmentModal({
   const [maxAttempts, setMaxAttempts] = useState('1')
   const [shuffleQuestions, setShuffleQuestions] = useState(false)
   const [showResultsImmediately, setShowResultsImmediately] = useState(true)
-  const [status, setStatus] = useState<Assignment['status']>('published')
+  const [status, setStatus] = useState<Assignment['status']>('draft')
   const [loading, setLoading] = useState(false)
   const client = useApiClient()
 
@@ -67,7 +67,7 @@ export function EditAssignmentModal({
       setMaxAttempts(String(assignment.max_attempts || 1))
       setShuffleQuestions(assignment.shuffle_questions || false)
       setShowResultsImmediately(assignment.show_results_immediately ?? true)
-      setStatus(assignment.status || 'published')
+      setStatus(assignment.status || 'draft')
     }
   }, [assignment])
 

@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Users, BookOpen, Plus, X, Save, ArrowLeft } from "lucide-react"
 import { useApiClient } from "@/lib/api-client"
 import { toast } from "@/contexts/ToastContext"
@@ -44,6 +45,10 @@ export default function CreateAssignmentView() {
     title: '',
     description: '',
     dueDate: '',
+    timeLimit: '',
+    maxAttempts: '1',
+    shuffleQuestions: false,
+    showResultsImmediately: true,
     subject: '',
     topic: '',
     selectedStudents: [] as string[],
@@ -84,6 +89,13 @@ export default function CreateAssignmentView() {
         title: prev.title || `${maybeTemplate.name || 'Template'} Assignment`,
         description: maybeTemplate.instructions || maybeTemplate.description || prev.description,
         subject: prev.subject || String(maybeTemplate.subject_id || ''),
+        timeLimit:
+          prev.timeLimit ||
+          (maybeTemplate.duration_minutes ? String(maybeTemplate.duration_minutes) : ''),
+        shuffleQuestions:
+          typeof maybeTemplate.shuffle_questions === 'boolean'
+            ? maybeTemplate.shuffle_questions
+            : prev.shuffleQuestions,
         selectedSubject: String(maybeTemplate.subject_id || ''),
         selectedQuestions: questionIds,
       }))
@@ -259,6 +271,10 @@ export default function CreateAssignmentView() {
         title: formData.title,
         description: formData.description,
         due_date: formData.dueDate,
+        time_limit: formData.timeLimit ? Number(formData.timeLimit) : undefined,
+        max_attempts: Math.max(Number(formData.maxAttempts) || 1, 1),
+        shuffle_questions: formData.shuffleQuestions,
+        show_results_immediately: formData.showResultsImmediately,
         subject_id: resolvedSubject,
         topic: formData.topic,
         question_ids: formData.selectedQuestions,
@@ -273,8 +289,8 @@ export default function CreateAssignmentView() {
         throw new Error(response.error)
       }
 
-      toast.success('Assignment created successfully!', {
-        description: `"${formData.title}" has been assigned to students`
+      toast.success('Assignment draft saved', {
+        description: `Publish "${formData.title}" from Active Assignments when you are ready.`
       })
 
       await Promise.all([
@@ -289,6 +305,10 @@ export default function CreateAssignmentView() {
         title: '',
         description: '',
         dueDate: '',
+        timeLimit: '',
+        maxAttempts: '1',
+        shuffleQuestions: false,
+        showResultsImmediately: true,
         subject: '',
         topic: '',
         selectedStudents: [],
@@ -408,6 +428,69 @@ export default function CreateAssignmentView() {
                   placeholder="e.g., Algebra"
                   value={formData.topic}
                   onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Assignment Rules</CardTitle>
+            <CardDescription>
+              Control attempts, timing, and when students can view results
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="timeLimit">Time Limit (minutes)</Label>
+                <Input
+                  id="timeLimit"
+                  type="number"
+                  min={1}
+                  placeholder="Optional"
+                  value={formData.timeLimit}
+                  onChange={(e) => setFormData({ ...formData, timeLimit: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxAttempts">Max Attempts</Label>
+                <Input
+                  id="maxAttempts"
+                  type="number"
+                  min={1}
+                  value={formData.maxAttempts}
+                  onChange={(e) => setFormData({ ...formData, maxAttempts: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Shuffle Questions</p>
+                  <p className="text-xs text-muted-foreground">Randomize question order for students</p>
+                </div>
+                <Switch
+                  checked={formData.shuffleQuestions}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, shuffleQuestions: checked })
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Release Results Immediately</p>
+                  <p className="text-xs text-muted-foreground">Show scores to students as soon as grading is available</p>
+                </div>
+                <Switch
+                  checked={formData.showResultsImmediately}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, showResultsImmediately: checked })
+                  }
                 />
               </div>
             </div>
@@ -607,7 +690,7 @@ export default function CreateAssignmentView() {
           </Button>
           <Button type="submit" disabled={isSubmitting}>
             <Save className="h-4 w-4 mr-2" />
-            {isSubmitting ? 'Creating...' : 'Create Assignment'}
+            {isSubmitting ? 'Saving Draft...' : 'Save Draft'}
           </Button>
         </div>
       </form>

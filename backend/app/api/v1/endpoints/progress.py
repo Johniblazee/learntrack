@@ -34,6 +34,7 @@ from app.models.progress import (
     StudentPerformanceData,
     WeeklyProgressData,
 )
+from app.models.assignment import AssignmentStatus
 from app.models.user import UserRole
 from app.models.activity import ActivityCreate, ActivityType
 from app.models.notification import NotificationCreate, NotificationType
@@ -124,6 +125,14 @@ def _is_progress_locked(status_value: Any) -> bool:
     return normalized in {
         SubmissionStatus.SUBMITTED.value,
         SubmissionStatus.GRADED.value,
+    }
+
+
+def _is_assignment_available_to_student(assignment: Dict[str, Any]) -> bool:
+    normalized = str(assignment.get("status") or "").strip().lower()
+    return normalized not in {
+        AssignmentStatus.DRAFT.value,
+        AssignmentStatus.SCHEDULED.value,
     }
 
 
@@ -442,6 +451,12 @@ async def get_student_assignment_progress(
                 detail="Access forbidden: Assignment does not belong to your tenant",
             )
 
+        if not _is_assignment_available_to_student(assignment):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assignment not found",
+            )
+
         progress_service = ProgressService(database)
         progress = await progress_service.get_student_assignment_progress(
             student_id,
@@ -504,6 +519,12 @@ async def update_assignment_progress(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You are not assigned to this assignment",
+            )
+
+        if not _is_assignment_available_to_student(assignment):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assignment not found",
             )
 
         if (
@@ -602,6 +623,12 @@ async def submit_answer(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not assigned to this assignment",
+        )
+
+    if not _is_assignment_available_to_student(assignment):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assignment not found",
         )
 
     progress_service = ProgressService(database)
