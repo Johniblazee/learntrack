@@ -13,8 +13,6 @@ import QuestionReviewer from "@/components/question-reviewer"
 import QuestionBankManager from "@/components/question-bank-manager"
 import MaterialManager from "@/components/MaterialManager"
 import { OpenCanvasGenerator } from "@/components/question-generator"
-import SubjectsView from "./views/SubjectsView"
-import SubjectDetailView from "./views/SubjectDetailView"
 import ActiveAssignmentsView from "./views/ActiveAssignmentsView"
 import CreateAssignmentView from "./views/CreateAssignmentView"
 import AssignmentTemplatesView from "./views/AssignmentTemplatesView"
@@ -72,13 +70,11 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
     const path = location.pathname.replace('/dashboard', '').replace(/^\//, '')
     if (!path || path === '') return 'overview'
 
-    // Handle dynamic routes
-    if (path.startsWith('subjects/')) return 'subjects'
+    // Handle dynamic routes (e.g., /students/:slug)
     if (path.startsWith('students/')) return 'all-students'
 
     // Map paths to view names
     const pathToView: Record<string, string> = {
-      'subjects': 'subjects',
       'students': 'all-students',
       'invitations': 'invitations',
       'groups': 'groups',
@@ -107,7 +103,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
     // Map view names to routes
     const viewToRoute: Record<string, string> = {
       'overview': '/dashboard',
-      'subjects': '/dashboard/subjects',
       'all-students': '/dashboard/students',
       'invitations': '/dashboard/invitations',
       'groups': '/dashboard/groups',
@@ -142,14 +137,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
   const getBreadcrumbInfo = () => {
     const path = location.pathname.replace('/dashboard', '').replace(/^\//, '')
 
-    // Check if we're on a subject detail page
-    if (path.startsWith('subjects/') && path !== 'subjects') {
-      return {
-        parent: { title: 'Subjects', path: '/dashboard/subjects' },
-        current: 'Subject Details'
-      }
-    }
-
     // Check if we're on a student detail page
     if (path.startsWith('students/') && path !== 'students') {
       const studentSlug = path.split('/')[1]
@@ -161,7 +148,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
 
     const titles: Record<string, string> = {
       "overview": "Dashboard",
-      "subjects": "Subjects",
       "all-students": "All Students",
       "invitations": "Invitations",
       "groups": "Groups",
@@ -242,10 +228,6 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
           <Routes>
             {/* Default route - Overview */}
             <Route index element={<OverviewView dashboardStats={dashboardStats} loading={loading} onViewChange={handleViewChange} />} />
-
-            {/* Subjects routes */}
-            <Route path="subjects" element={<SubjectsView />} />
-            <Route path="subjects/:subjectId" element={<SubjectDetailView />} />
 
             {/* Students routes */}
             <Route path="students" element={<StudentManager />} />
