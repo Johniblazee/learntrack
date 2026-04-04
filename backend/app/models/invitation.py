@@ -125,6 +125,7 @@ class InvitationVerifyResponse(BaseModel):
 
     valid: bool
     invitation: Optional[Invitation] = None
+    invited_students: list[dict[str, str]] = []
     error: Optional[str] = None
     tutor_name: Optional[str] = None
     tutor_email: Optional[str] = None

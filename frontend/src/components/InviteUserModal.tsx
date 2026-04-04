@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -9,9 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { LoadingSpinner } from '@/components/ui/loading-state'
 import { toast } from '@/contexts/ToastContext'
-import { UserPlus, Mail, MessageSquare, Users } from 'lucide-react'
+import { Search, UserPlus, Mail, MessageSquare, Users } from 'lucide-react'
 import { useApiClient } from '@/lib/api-client'
-import { useStudents } from '@/hooks/useQueries'
 
 interface Invitation {
   id: string
@@ -41,14 +40,69 @@ export default function InviteUserModal({ open, onOpenChange, onSuccess, editMod
     message: '',
     student_ids: [] as string[]
   })
+  const [availableStudents, setAvailableStudents] = useState<Array<{
+    id: string
+    name: string
+    email: string
+  }>>([])
+  const [loadingStudents, setLoadingStudents] = useState(false)
+  const [studentSearchTerm, setStudentSearchTerm] = useState('')
 
-  const { data: studentsData, isLoading: loadingStudents } = useStudents(1, 200)
-  const students = (studentsData?.items || []).map((s: any) => ({
-    id: s._id || s.id,
-    clerk_id: s.clerk_id,
-    name: s.name,
-    email: s.email,
-  }))
+  useEffect(() => {
+    const loadStudents = async () => {
+      if (!open) {
+        return
+      }
+
+      try {
+        setLoadingStudents(true)
+        const collectedStudents: Array<{ id: string; name: string; email: string }> = []
+        let page = 1
+        let hasNext = true
+
+        while (hasNext) {
+          const response = await client.get(`/students?page=${page}&per_page=100`)
+          if (response.error) throw new Error(response.error)
+
+          const pageItems = ((response.data?.items || []) as Array<{
+            clerk_id?: string
+            id?: string
+            _id?: string
+            name?: string
+            email?: string
+          }>).map((student) => ({
+            id: String(student.clerk_id || student.id || student._id || ''),
+            name: String(student.name || 'Student'),
+            email: String(student.email || ''),
+          }))
+
+          collectedStudents.push(...pageItems.filter((student) => student.id))
+          hasNext = Boolean(response.data?.meta?.has_next)
+          page += 1
+        }
+
+        setAvailableStudents(collectedStudents)
+      } catch (error) {
+        console.error('Failed to load students for invitation modal:', error)
+        setAvailableStudents([])
+      } finally {
+        setLoadingStudents(false)
+      }
+    }
+
+    void loadStudents()
+  }, [client, open])
+
+  const students = useMemo(() => {
+    const term = studentSearchTerm.trim().toLowerCase()
+    if (!term) {
+      return availableStudents
+    }
+
+    return availableStudents.filter((student) =>
+      student.name.toLowerCase().includes(term) || student.email.toLowerCase().includes(term)
+    )
+  }, [availableStudents, studentSearchTerm])
 
   // Populate form when editing
   useEffect(() => {
@@ -69,6 +123,7 @@ export default function InviteUserModal({ open, onOpenChange, onSuccess, editMod
         message: '',
         student_ids: []
       })
+      setStudentSearchTerm('')
     }
   }, [editMode, invitation, open])
 
@@ -218,6 +273,15 @@ export default function InviteUserModal({ open, onOpenChange, onSuccess, editMod
                 <p className="text-xs text-muted-foreground mt-1">
                   Select which students this parent should be linked to
                 </p>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search students..."
+                  value={studentSearchTerm}
+                  onChange={(e) => setStudentSearchTerm(e.target.value)}
+                  className="pl-10 bg-background border-border h-11"
+                />
               </div>
               {loadingStudents ? (
                 <div className="flex items-center justify-center py-8 bg-muted/30 rounded-lg border border-border">

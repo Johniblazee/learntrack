@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
@@ -41,6 +42,7 @@ import { useStudents, useDeleteStudent } from "@/hooks/useQueries"
 import { Pagination } from "@/components/Pagination"
 import { StudentTableSkeleton } from "@/components/skeletons"
 import { LinkParentModal } from '@/components/modals/LinkParentModal'
+import { useApiClient } from '@/lib/api-client'
 
 type SortField = 'lastActive' | 'progress' | null
 
@@ -57,6 +59,7 @@ interface Student {
 }
 
 export default function StudentManager() {
+  const client = useApiClient()
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage] = useState(10)
@@ -64,9 +67,12 @@ export default function StudentManager() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
   const [linkParentModalOpen, setLinkParentModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set())
   const [sortField, setSortField] = useState<SortField>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -138,10 +144,20 @@ export default function StudentManager() {
     return sortDirection === 'asc' ? sorted : sorted.reverse()
   }, [filteredStudents, sortField, sortDirection])
 
+  const allVisibleStudentsSelected =
+    sortedStudents.length > 0 && sortedStudents.every((student) => selectedStudentIds.has(student.id))
+  const someVisibleStudentsSelected =
+    sortedStudents.some((student) => selectedStudentIds.has(student.id)) && !allVisibleStudentsSelected
+
   // Reset to page 1 when search term changes
   useEffect(() => {
     setCurrentPage(1)
   }, [searchTerm])
+
+  useEffect(() => {
+    const availableIds = new Set(students.map((student) => student.id))
+    setSelectedStudentIds((previous) => new Set([...previous].filter((studentId) => availableIds.has(studentId))))
+  }, [students])
 
   const handleSort = (field: Exclude<SortField, null>) => {
     if (sortField === field) {
@@ -183,6 +199,69 @@ export default function StudentManager() {
     setDeleteModalOpen(true)
   }
 
+  const handleToggleSelectStudent = (studentId: string) => {
+    setSelectedStudentIds((previous) => {
+      const next = new Set(previous)
+      if (next.has(studentId)) {
+        next.delete(studentId)
+      } else {
+        next.add(studentId)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllVisibleStudents = () => {
+    const visibleIds = sortedStudents.map((student) => student.id)
+    setSelectedStudentIds((previous) => {
+      const next = new Set(previous)
+      if (visibleIds.every((studentId) => next.has(studentId))) {
+        visibleIds.forEach((studentId) => next.delete(studentId))
+      } else {
+        visibleIds.forEach((studentId) => next.add(studentId))
+      }
+      return next
+    })
+  }
+
+  const handleClearSelection = () => {
+    setSelectedStudentIds(new Set())
+  }
+
+  const handleBulkDeleteStudents = async () => {
+    if (selectedStudentIds.size === 0) return
+
+    try {
+      setBulkDeleting(true)
+      const response = await client.post<{
+        deleted_count?: number
+        deleted_student_ids?: string[]
+        skipped_count?: number
+      }>('/students/bulk-delete', {
+        student_ids: [...selectedStudentIds],
+      })
+
+      if (response.error) {
+        throw new Error(response.error)
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['students'] })
+      setSelectedStudentIds(new Set())
+      setBulkDeleteModalOpen(false)
+
+      toast.success('Students deleted successfully', {
+        description: `${response.data?.deleted_count || 0} deleted${response.data?.skipped_count ? `, ${response.data.skipped_count} skipped` : ''}`,
+      })
+    } catch (error: any) {
+      console.error('Failed to delete selected students:', error)
+      toast.error('Failed to delete selected students', {
+        description: error.message || 'Please try again later',
+      })
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card className="border-0 shadow-sm bg-card">
@@ -191,7 +270,7 @@ export default function StudentManager() {
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-foreground mb-4">All Students</h2>
             <div className="flex items-center gap-3">
-              <div className="relative flex-1">
+                  <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                 <Input
                   placeholder="Search students by name or email..."
@@ -200,22 +279,32 @@ export default function StudentManager() {
                   className="pl-10"
                 />
               </div>
-              <Button
-                onClick={() => setInviteModalOpen(true)}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
+                  <Button
+                    onClick={() => setInviteModalOpen(true)}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
                 <UserPlus className="h-4 w-4 mr-2" />
                 Invite Student
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => setLinkParentModalOpen(true)}
-              >
+                  <Button
+                    variant="outline"
+                    onClick={() => setLinkParentModalOpen(true)}
+                  >
                 <Link className="h-4 w-4 mr-2" />
-                Link Parent
-              </Button>
-            </div>
-          </div>
+                    Link Parent
+                  </Button>
+                  {sortedStudents.length > 0 && (
+                    <div className="flex items-center gap-2 pl-2">
+                      <Checkbox
+                        checked={allVisibleStudentsSelected ? true : someVisibleStudentsSelected ? 'indeterminate' : false}
+                        onCheckedChange={handleSelectAllVisibleStudents}
+                        aria-label="Select visible students"
+                      />
+                      <span className="text-sm text-muted-foreground">Select visible</span>
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Table */}
               {isLoading ? (
@@ -226,6 +315,7 @@ export default function StudentManager() {
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableHead className="w-12"></TableHead>
                       <TableHead>Student Name</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Parent</TableHead>
@@ -253,7 +343,7 @@ export default function StudentManager() {
                   <TableBody>
                     {isError ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12">
+                        <TableCell colSpan={7} className="text-center py-12">
                           <div className="text-destructive">
                             <p className="font-semibold mb-2">Failed to load students</p>
                             <p className="text-sm text-muted-foreground">{error?.message || 'Unknown error'}</p>
@@ -270,7 +360,7 @@ export default function StudentManager() {
                       </TableRow>
                     ) : sortedStudents.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                           {searchTerm ? 'No students found matching your search' : 'No students found'}
                         </TableCell>
                       </TableRow>
@@ -281,6 +371,13 @@ export default function StudentManager() {
                           className="hover:bg-muted/30 transition-colors cursor-pointer"
                           onClick={() => navigate(`/dashboard/students/${student.slug}`)}
                         >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={selectedStudentIds.has(student.id)}
+                              onCheckedChange={() => handleToggleSelectStudent(student.id)}
+                              aria-label={`Select ${student.name}`}
+                            />
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <Avatar className="w-10 h-10">
@@ -369,6 +466,25 @@ export default function StudentManager() {
             </CardContent>
           </Card>
 
+      {selectedStudentIds.size > 0 && (
+        <div className="sticky bottom-0 z-40 pt-2">
+          <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between gap-4">
+            <span className="text-sm font-medium text-foreground">
+              {selectedStudentIds.size} student{selectedStudentIds.size === 1 ? '' : 's'} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleClearSelection}>
+                Clear Selection
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setBulkDeleteModalOpen(true)}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Selected
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Send Message Modal */}
       <SendMessageModal
         open={sendMessageModalOpen}
@@ -407,6 +523,15 @@ export default function StudentManager() {
         description="Are you sure you want to delete this student? This action cannot be undone."
         itemName={selectedStudent?.name}
         loading={deleteStudentMutation.isPending}
+      />
+
+      <ConfirmDeleteModal
+        open={bulkDeleteModalOpen}
+        onOpenChange={setBulkDeleteModalOpen}
+        onConfirm={handleBulkDeleteStudents}
+        title="Delete selected students?"
+        description={`This will archive ${selectedStudentIds.size} selected student${selectedStudentIds.size === 1 ? '' : 's'}. This action cannot be undone.`}
+        loading={bulkDeleting}
       />
     </div>
   )

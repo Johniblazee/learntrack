@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { StatsCard } from '@/components/ui/stats-card'
@@ -19,6 +20,7 @@ import { toast } from '@/contexts/ToastContext'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { LoadingSpinner } from '@/components/ui/loading-state'
+import { ConfirmDeleteModal } from '@/components/modals/ConfirmDeleteModal'
 
 interface Invitation {
   id: string
@@ -46,6 +48,7 @@ interface InvitationStats {
 export default function InvitationsView() {
   const client = useApiClient()
   const [showInviteModal, setShowInviteModal] = useState(false)
+  const [showBulkRevokeModal, setShowBulkRevokeModal] = useState(false)
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [stats, setStats] = useState<InvitationStats>({
     total: 0,
@@ -60,6 +63,9 @@ export default function InvitationsView() {
   const [refreshing, setRefreshing] = useState(false)
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [resendingId, setResendingId] = useState<string | null>(null)
+  const [selectedInvitationIds, setSelectedInvitationIds] = useState<Set<string>>(new Set())
+  const [bulkRevoking, setBulkRevoking] = useState(false)
+  const [bulkResending, setBulkResending] = useState(false)
 
   const loadInvitations = useCallback(async () => {
     try {
@@ -141,8 +147,19 @@ export default function InvitationsView() {
   // Filter invitations by search term
   const filteredInvitations = invitations.filter(invitation => {
     const searchLower = searchTerm.toLowerCase()
-    return invitation.invitee_email.toLowerCase().includes(searchLower)
+    return (
+      invitation.invitee_email.toLowerCase().includes(searchLower) ||
+      invitation.invitee_name?.toLowerCase().includes(searchLower) ||
+      invitation.role.toLowerCase().includes(searchLower) ||
+      invitation.status.toLowerCase().includes(searchLower)
+    )
   })
+
+  const pendingInvitations = filteredInvitations.filter((invitation) => invitation.status === 'pending')
+  const allVisiblePendingSelected =
+    pendingInvitations.length > 0 && pendingInvitations.every((invitation) => selectedInvitationIds.has(invitation.id))
+  const someVisiblePendingSelected =
+    pendingInvitations.some((invitation) => selectedInvitationIds.has(invitation.id)) && !allVisiblePendingSelected
 
   const getRelativeTime = (dateString: string) => {
     try {
@@ -208,6 +225,98 @@ export default function InvitationsView() {
           borderColor: 'border-border',
           dotColor: 'bg-muted-foreground'
         }
+    }
+  }
+
+  const handleToggleSelectInvitation = (invitationId: string) => {
+    setSelectedInvitationIds((previous) => {
+      const next = new Set(previous)
+      if (next.has(invitationId)) {
+        next.delete(invitationId)
+      } else {
+        next.add(invitationId)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllVisiblePending = () => {
+    const pendingIds = pendingInvitations.map((invitation) => invitation.id)
+    setSelectedInvitationIds((previous) => {
+      const next = new Set(previous)
+      if (pendingIds.every((invitationId) => next.has(invitationId))) {
+        pendingIds.forEach((invitationId) => next.delete(invitationId))
+      } else {
+        pendingIds.forEach((invitationId) => next.add(invitationId))
+      }
+      return next
+    })
+  }
+
+  const handleClearInvitationSelection = () => {
+    setSelectedInvitationIds(new Set())
+  }
+
+  const handleBulkResend = async () => {
+    if (selectedInvitationIds.size === 0) {
+      return
+    }
+
+    try {
+      setBulkResending(true)
+      const response = await client.post<{
+        updated_count?: number
+        skipped_count?: number
+      }>('/invitations/bulk-resend', {
+        invitation_ids: [...selectedInvitationIds],
+      })
+
+      if (response.error) throw new Error(response.error)
+
+      toast.success('Invitations resent', {
+        description: `${response.data?.updated_count || 0} resent${response.data?.skipped_count ? `, ${response.data.skipped_count} skipped` : ''}`,
+      })
+      setSelectedInvitationIds(new Set())
+      loadInvitations()
+    } catch (error: unknown) {
+      console.error('Failed to resend invitations:', error)
+      toast.error('Failed to resend selected invitations', {
+        description: error instanceof Error ? error.message : 'Please try again later',
+      })
+    } finally {
+      setBulkResending(false)
+    }
+  }
+
+  const handleBulkRevoke = async () => {
+    if (selectedInvitationIds.size === 0) {
+      return
+    }
+
+    try {
+      setBulkRevoking(true)
+      const response = await client.post<{
+        updated_count?: number
+        skipped_count?: number
+      }>('/invitations/bulk-revoke', {
+        invitation_ids: [...selectedInvitationIds],
+      })
+
+      if (response.error) throw new Error(response.error)
+
+      toast.success('Invitations revoked', {
+        description: `${response.data?.updated_count || 0} revoked${response.data?.skipped_count ? `, ${response.data.skipped_count} skipped` : ''}`,
+      })
+      setSelectedInvitationIds(new Set())
+      setShowBulkRevokeModal(false)
+      loadInvitations()
+    } catch (error: unknown) {
+      console.error('Failed to revoke invitations:', error)
+      toast.error('Failed to revoke selected invitations', {
+        description: error instanceof Error ? error.message : 'Please try again later',
+      })
+    } finally {
+      setBulkRevoking(false)
     }
   }
 
@@ -299,6 +408,16 @@ export default function InvitationsView() {
             className="pl-10 bg-background"
           />
         </div>
+        {pendingInvitations.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={allVisiblePendingSelected ? true : someVisiblePendingSelected ? 'indeterminate' : false}
+              onCheckedChange={handleSelectAllVisiblePending}
+              aria-label="Select visible pending invitations"
+            />
+            <span className="text-sm text-muted-foreground">Select pending</span>
+          </div>
+        )}
       </div>
 
       {/* Invitations Table */}
@@ -308,6 +427,7 @@ export default function InvitationsView() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50 border-b">
+                  <TableHead className="w-[5%]"></TableHead>
                   <TableHead className="w-[35%] font-semibold">Email</TableHead>
                   <TableHead className="w-[15%] font-semibold">Role</TableHead>
                   <TableHead className="w-[15%] font-semibold">Status</TableHead>
@@ -338,7 +458,7 @@ export default function InvitationsView() {
                   ))
                 ) : filteredInvitations.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-16">
+                    <TableCell colSpan={6} className="text-center py-16">
                       <div className="flex flex-col items-center gap-3">
                         <div className="p-4 bg-muted rounded-full">
                           <Send className="w-8 h-8 text-muted-foreground" />
@@ -370,8 +490,19 @@ export default function InvitationsView() {
                     return (
                       <TableRow 
                         key={invitation.id} 
-                        className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                        className={cn(
+                          'border-b last:border-0 hover:bg-muted/30 transition-colors',
+                          selectedInvitationIds.has(invitation.id) && 'bg-primary/5'
+                        )}
                       >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedInvitationIds.has(invitation.id)}
+                            disabled={invitation.status !== 'pending'}
+                            onCheckedChange={() => handleToggleSelectInvitation(invitation.id)}
+                            aria-label={`Select invitation for ${invitation.invitee_email}`}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">
                           <div className="flex flex-col">
                             <span className="text-foreground">{invitation.invitee_email}</span>
@@ -461,11 +592,43 @@ export default function InvitationsView() {
         </CardContent>
       </Card>
 
+      {selectedInvitationIds.size > 0 && (
+        <div className="sticky bottom-0 z-40 pt-2">
+          <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between gap-4">
+            <span className="text-sm font-medium text-foreground">
+              {selectedInvitationIds.size} invitation{selectedInvitationIds.size === 1 ? '' : 's'} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleClearInvitationSelection}>
+                Clear Selection
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleBulkResend} disabled={bulkResending || bulkRevoking}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Resend Selected
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setShowBulkRevokeModal(true)}>
+                <XCircle className="w-4 h-4 mr-2" />
+                Revoke Selected
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Invite Modal */}
       <InviteUserModal
         open={showInviteModal}
         onOpenChange={setShowInviteModal}
         onSuccess={handleInviteSuccess}
+      />
+
+      <ConfirmDeleteModal
+        open={showBulkRevokeModal}
+        onOpenChange={setShowBulkRevokeModal}
+        onConfirm={handleBulkRevoke}
+        title="Revoke selected invitations?"
+        description={`This will revoke ${selectedInvitationIds.size} selected pending invitation${selectedInvitationIds.size === 1 ? '' : 's'}. This action cannot be undone.`}
+        loading={bulkRevoking}
       />
     </div>
   )

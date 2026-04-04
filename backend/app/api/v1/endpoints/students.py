@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 import structlog
+from pydantic import BaseModel
 
 from app.core.database import get_database
 from app.core.enhanced_auth import require_tutor, ClerkUserContext
@@ -19,6 +20,10 @@ from app.utils.pagination import PaginationParams, PaginatedResponse, paginate
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+class BulkStudentDeleteRequest(BaseModel):
+    student_ids: List[str]
 
 
 async def _resolve_student_for_tutor(
@@ -207,6 +212,26 @@ async def create_student_for_tutor(
     except Exception as e:
         logger.error("Failed to create student", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to create student")
+
+
+@router.post("/bulk-delete", response_model=dict)
+async def bulk_delete_students(
+    payload: BulkStudentDeleteRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Soft-delete multiple tutor-owned students."""
+    try:
+        user_service = UserService(db)
+        return await user_service.bulk_delete_students(
+            payload.student_ids,
+            current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk delete students", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete students")
 
 
 @router.get("/by-slug/{slug}", response_model=User)

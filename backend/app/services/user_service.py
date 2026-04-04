@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 from pymongo import ReturnDocument
+from bson import ObjectId
 
 from app.models.user import User, UserRole, UserCreate, UserUpdate
 from app.core.exceptions import NotFoundError, DatabaseException, ValidationError
@@ -501,6 +502,116 @@ class UserService:
         except Exception as e:
             logger.error("Failed to delete user", user_id=user_id, error=str(e))
             raise DatabaseException(f"Failed to delete user: {str(e)}")
+
+    async def bulk_delete_students(
+        self, student_identifiers: List[str], tutor_id: str
+    ) -> Dict[str, Any]:
+        """Soft-delete multiple tutor-owned students with partial-success reporting."""
+        try:
+            normalized_ids = list(
+                dict.fromkeys(
+                    str(student_id).strip()
+                    for student_id in student_identifiers
+                    if str(student_id).strip()
+                )
+            )
+            if not normalized_ids:
+                raise ValidationError("Select at least one student")
+
+            object_ids = [
+                to_object_id(student_id)
+                for student_id in normalized_ids
+                if ObjectId.is_valid(student_id)
+            ]
+            clerk_ids = [
+                student_id
+                for student_id in normalized_ids
+                if not ObjectId.is_valid(student_id)
+            ]
+
+            query_filters = []
+            if object_ids:
+                query_filters.append({"_id": {"$in": object_ids}})
+            if clerk_ids:
+                query_filters.append({"clerk_id": {"$in": clerk_ids}})
+
+            students = await self.students_collection.find(
+                {
+                    "tutor_id": tutor_id,
+                    "is_active": True,
+                    "$or": query_filters,
+                },
+                {"_id": 1, "clerk_id": 1},
+            ).to_list(length=None)
+
+            matched_by_identifier: Dict[str, str] = {}
+            deleted_student_object_ids: List[ObjectId] = []
+            deleted_student_clerk_ids: List[str] = []
+
+            for student in students:
+                student_object_id = student.get("_id")
+                if student_object_id is None:
+                    continue
+                student_object_id_str = str(student_object_id)
+                student_clerk_id = str(student.get("clerk_id") or "").strip()
+                matched_by_identifier[student_object_id_str] = student_object_id_str
+                if student_clerk_id:
+                    matched_by_identifier[student_clerk_id] = student_object_id_str
+                    deleted_student_clerk_ids.append(student_clerk_id)
+                deleted_student_object_ids.append(student_object_id)
+
+            deleted_ids = [
+                student_id
+                for student_id in normalized_ids
+                if student_id in matched_by_identifier
+            ]
+            skipped_ids = [
+                student_id
+                for student_id in normalized_ids
+                if student_id not in matched_by_identifier
+            ]
+
+            if deleted_student_object_ids:
+                now = datetime.now(timezone.utc)
+                await self.students_collection.update_many(
+                    {"_id": {"$in": deleted_student_object_ids}, "tutor_id": tutor_id},
+                    {"$set": {"is_active": False, "updated_at": now}},
+                )
+
+                cleanup_identifiers = list(
+                    dict.fromkeys(
+                        [str(student_id) for student_id in deleted_student_object_ids]
+                        + deleted_student_clerk_ids
+                    )
+                )
+                for identifier in cleanup_identifiers:
+                    await self.db.student_groups.update_many(
+                        {"tutor_id": tutor_id, "studentIds": identifier},
+                        {"$pull": {"studentIds": identifier}},
+                    )
+                    await self.parents_collection.update_many(
+                        {"tutor_id": tutor_id, "student_ids": identifier},
+                        {"$pull": {"student_ids": identifier}},
+                    )
+                    await self.parents_collection.update_many(
+                        {"tutor_id": tutor_id, "parent_children": identifier},
+                        {"$pull": {"parent_children": identifier}},
+                    )
+
+            return {
+                "requested_count": len(normalized_ids),
+                "deleted_count": len(deleted_ids),
+                "deleted_student_ids": deleted_ids,
+                "skipped_count": len(skipped_ids),
+                "skipped_student_ids": skipped_ids,
+            }
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                "Failed to bulk delete students", tutor_id=tutor_id, error=str(e)
+            )
+            raise DatabaseException(f"Failed to bulk delete students: {str(e)}")
 
     async def get_users_by_role(self, role: UserRole, limit: int = 100) -> List[User]:
         """Get users by role from role-specific collection"""

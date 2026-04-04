@@ -2,10 +2,11 @@
 Invitation endpoints for user invitation system
 """
 
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Path, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
+from pydantic import BaseModel
 
 from app.core.database import get_database
 from app.core.enhanced_auth import (
@@ -26,6 +27,10 @@ from app.core.exceptions import NotFoundError, ValidationError
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+class BulkInvitationActionRequest(BaseModel):
+    invitation_ids: List[str]
 
 
 @router.post("/", response_model=Invitation, status_code=status.HTTP_201_CREATED)
@@ -116,6 +121,52 @@ async def verify_invitation(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to verify invitation",
+        )
+
+
+@router.post("/bulk-revoke", status_code=status.HTTP_200_OK)
+async def bulk_revoke_invitations(
+    payload: BulkInvitationActionRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Revoke multiple invitations."""
+    try:
+        invitation_service = InvitationService(database)
+        return await invitation_service.bulk_revoke_invitations(
+            payload.invitation_ids,
+            current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk revoke invitations", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to revoke invitations",
+        )
+
+
+@router.post("/bulk-resend", status_code=status.HTTP_200_OK)
+async def bulk_resend_invitations(
+    payload: BulkInvitationActionRequest,
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Resend multiple invitations."""
+    try:
+        invitation_service = InvitationService(database)
+        return await invitation_service.bulk_resend_invitations(
+            payload.invitation_ids,
+            current_user.clerk_id,
+        )
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to bulk resend invitations", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to resend invitations",
         )
 
 

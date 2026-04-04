@@ -4,7 +4,7 @@ Invitation service for managing user invitations
 
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import structlog
 import os
@@ -51,6 +51,102 @@ class InvitationService:
         """Generate a secure random token for invitation"""
         return secrets.token_urlsafe(32)
 
+    async def _normalize_parent_student_ids(
+        self, student_ids: Optional[List[str]], tutor_id: str
+    ) -> List[str]:
+        if not student_ids:
+            return []
+
+        normalized_ids = list(
+            dict.fromkeys(
+                str(student_id).strip()
+                for student_id in student_ids
+                if str(student_id).strip()
+            )
+        )
+        if not normalized_ids:
+            return []
+
+        object_ids = [
+            ObjectId(student_id)
+            for student_id in normalized_ids
+            if ObjectId.is_valid(student_id)
+        ]
+        clerk_ids = [
+            student_id
+            for student_id in normalized_ids
+            if not ObjectId.is_valid(student_id)
+        ]
+
+        query_filters = []
+        if object_ids:
+            query_filters.append({"_id": {"$in": object_ids}})
+        if clerk_ids:
+            query_filters.append({"clerk_id": {"$in": clerk_ids}})
+
+        students = await self.db.students.find(
+            {
+                "tutor_id": tutor_id,
+                "is_active": {"$ne": False},
+                "$or": query_filters,
+            },
+            {"_id": 1, "clerk_id": 1, "role": 1},
+        ).to_list(length=None)
+
+        canonical_ids: Dict[str, str] = {}
+        for student in students:
+            student_clerk_id = str(student.get("clerk_id") or "").strip()
+            if not student_clerk_id:
+                continue
+            canonical_ids[str(student.get("_id"))] = student_clerk_id
+            canonical_ids[student_clerk_id] = student_clerk_id
+
+        invalid_ids = [
+            student_id
+            for student_id in normalized_ids
+            if student_id not in canonical_ids
+        ]
+        if invalid_ids:
+            raise ValidationError(
+                f"Invalid student selection: {', '.join(invalid_ids)}"
+            )
+
+        return list(
+            dict.fromkeys(canonical_ids[student_id] for student_id in normalized_ids)
+        )
+
+    async def _resolve_invited_students(
+        self, student_ids: List[str]
+    ) -> List[Dict[str, str]]:
+        normalized_ids = [
+            str(student_id).strip()
+            for student_id in student_ids
+            if str(student_id).strip()
+        ]
+        if not normalized_ids:
+            return []
+
+        students = await self.db.students.find(
+            {"clerk_id": {"$in": normalized_ids}, "is_active": {"$ne": False}},
+            {"clerk_id": 1, "name": 1, "email": 1},
+        ).to_list(length=None)
+
+        student_map = {
+            str(student.get("clerk_id")): {
+                "id": str(student.get("clerk_id")),
+                "name": str(student.get("name") or "Student"),
+                "email": str(student.get("email") or ""),
+            }
+            for student in students
+            if student.get("clerk_id")
+        }
+
+        return [
+            student_map[student_id]
+            for student_id in normalized_ids
+            if student_id in student_map
+        ]
+
     async def create_invitation(
         self, invitation_data: InvitationCreate, tutor_id: str
     ) -> Invitation:
@@ -79,29 +175,22 @@ class InvitationService:
                     f"Pending invitation already exists for {invitation_data.invitee_email}"
                 )
 
-            # Validate student_ids for parent invitations
-            if (
-                invitation_data.role == InvitationRole.PARENT
-                and invitation_data.student_ids
-            ):
-                for student_id in invitation_data.student_ids:
-                    student = await self.user_service.get_user_by_clerk_id(student_id)
-                    if not student:
-                        raise ValidationError(f"Student with ID {student_id} not found")
-                    if student.role != UserRole.STUDENT:
-                        raise ValidationError(f"User {student_id} is not a student")
-                    # Verify student belongs to this tutor
-                    if student.tutor_id != tutor_id:
-                        raise ValidationError(
-                            f"Student {student_id} does not belong to this tutor"
-                        )
+            invitation_dict = invitation_data.model_dump()
+            if invitation_data.role == InvitationRole.PARENT:
+                invitation_dict[
+                    "student_ids"
+                ] = await self._normalize_parent_student_ids(
+                    invitation_data.student_ids,
+                    tutor_id,
+                )
+            else:
+                invitation_dict["student_ids"] = []
 
             # Create invitation
             token = self._generate_token()
             now = datetime.now(timezone.utc)
             expires_at = now + timedelta(days=14)  # 2 weeks expiration
 
-            invitation_dict = invitation_data.model_dump()
             invitation_dict.update(
                 {
                     "tutor_id": tutor_id,
@@ -200,10 +289,16 @@ class InvitationService:
 
             # Get tutor info
             tutor = await self.user_service.get_user_by_clerk_id(invitation.tutor_id)
+            invited_students = []
+            if invitation.role == InvitationRole.PARENT and invitation.student_ids:
+                invited_students = await self._resolve_invited_students(
+                    invitation.student_ids
+                )
 
             return InvitationVerifyResponse(
                 valid=True,
                 invitation=invitation,
+                invited_students=invited_students,
                 tutor_name=tutor.name if tutor else "Unknown",
                 tutor_email=tutor.email if tutor else None,
             )
@@ -504,6 +599,73 @@ class InvitationService:
         except Exception as e:
             logger.error("Failed to resend invitation", error=str(e))
             raise DatabaseException(f"Failed to resend invitation: {str(e)}")
+
+    async def bulk_revoke_invitations(
+        self, invitation_ids: List[str], tutor_id: str
+    ) -> Dict[str, Any]:
+        """Revoke multiple invitations with partial-success reporting."""
+        normalized_ids = list(
+            dict.fromkeys(
+                str(invitation_id).strip()
+                for invitation_id in invitation_ids
+                if str(invitation_id).strip()
+            )
+        )
+        if not normalized_ids:
+            raise ValidationError("Select at least one invitation")
+
+        revoked_ids: List[str] = []
+        skipped_ids: List[str] = []
+
+        for invitation_id in normalized_ids:
+            try:
+                revoked = await self.revoke_invitation(invitation_id, tutor_id)
+                if revoked:
+                    revoked_ids.append(invitation_id)
+                else:
+                    skipped_ids.append(invitation_id)
+            except (ValidationError, NotFoundError):
+                skipped_ids.append(invitation_id)
+
+        return {
+            "requested_count": len(normalized_ids),
+            "updated_count": len(revoked_ids),
+            "updated_invitation_ids": revoked_ids,
+            "skipped_count": len(skipped_ids),
+            "skipped_invitation_ids": skipped_ids,
+        }
+
+    async def bulk_resend_invitations(
+        self, invitation_ids: List[str], tutor_id: str
+    ) -> Dict[str, Any]:
+        """Resend multiple invitations with partial-success reporting."""
+        normalized_ids = list(
+            dict.fromkeys(
+                str(invitation_id).strip()
+                for invitation_id in invitation_ids
+                if str(invitation_id).strip()
+            )
+        )
+        if not normalized_ids:
+            raise ValidationError("Select at least one invitation")
+
+        resent_ids: List[str] = []
+        skipped_ids: List[str] = []
+
+        for invitation_id in normalized_ids:
+            try:
+                await self.resend_invitation(invitation_id, tutor_id)
+                resent_ids.append(invitation_id)
+            except (ValidationError, NotFoundError):
+                skipped_ids.append(invitation_id)
+
+        return {
+            "requested_count": len(normalized_ids),
+            "updated_count": len(resent_ids),
+            "updated_invitation_ids": resent_ids,
+            "skipped_count": len(skipped_ids),
+            "skipped_invitation_ids": skipped_ids,
+        }
 
     def _to_invitation_model(self, invitation_dict: dict) -> Invitation:
         """Convert database document to Invitation model"""
