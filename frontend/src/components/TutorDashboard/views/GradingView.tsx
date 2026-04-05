@@ -67,6 +67,7 @@ interface Submission {
   status: 'pending' | 'graded'
   submitted_at: string
   graded_at?: string
+  results_released_at?: string | null
   feedback?: string
   pending_manual_review_count?: number
 }
@@ -94,6 +95,7 @@ export default function GradingView() {
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null)
   const [gradeModalOpen, setGradeModalOpen] = useState(false)
   const [grading, setGrading] = useState(false)
+  const [releasing, setReleasing] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [answerReviews, setAnswerReviews] = useState<Record<string, AnswerReviewState>>({})
 
@@ -179,6 +181,26 @@ export default function GradingView() {
     setGradeModalOpen(true)
   }
 
+  const handleReleaseResults = async () => {
+    if (!selectedSubmission) return
+
+    try {
+      setReleasing(true)
+      const response = await client.post(`/progress/submissions/${selectedSubmission._id}/release`, {})
+      if (response.error) throw new Error(response.error)
+
+      toast.success('Results released to the student')
+      setGradeModalOpen(false)
+      setSelectedSubmission(null)
+      loadSubmissions()
+    } catch (error) {
+      console.error('Failed to release results:', error)
+      toast.error('Failed to release results')
+    } finally {
+      setReleasing(false)
+    }
+  }
+
   const getAnswerLabel = (submissionAnswer: Submission['answers'][number]) => {
     return submissionAnswer.answer?.trim() || submissionAnswer.selected_options?.join(', ') || 'No response'
   }
@@ -243,6 +265,7 @@ export default function GradingView() {
     return manualPoints === null
   })
   const derivedScore = getDerivedScore(selectedSubmission)
+  const resultsReleased = Boolean(selectedSubmission?.results_released_at)
 
   return (
     <div className="space-y-6">
@@ -343,7 +366,9 @@ export default function GradingView() {
                     (() => {
                       const statusLabel = submission.status === 'pending' && (submission.pending_manual_review_count || 0) > 0
                         ? 'Needs Review'
-                        : submission.status.charAt(0).toUpperCase() + submission.status.slice(1)
+                        : submission.status === 'graded' && !submission.results_released_at
+                          ? 'Ready to Release'
+                          : submission.status.charAt(0).toUpperCase() + submission.status.slice(1)
 
                       return (
                     <TableRow key={submission._id} className="hover:bg-muted/30 transition-colors">
@@ -386,7 +411,7 @@ export default function GradingView() {
                           size="sm"
                           className="h-8"
                         >
-                          {submission.status === 'pending' ? 'Grade' : 'Review'}
+                          {submission.status === 'pending' ? 'Grade' : submission.results_released_at ? 'View' : 'Review & Release'}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -434,7 +459,13 @@ export default function GradingView() {
                   </div>
                   <div className="rounded-lg border border-border p-4">
                     <p className="text-sm text-muted-foreground">Submission Status</p>
-                    <p className="mt-1 text-2xl font-semibold text-foreground capitalize">{selectedSubmission.status}</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">
+                      {resultsReleased
+                        ? 'Released'
+                        : selectedSubmission.status === 'graded'
+                          ? 'Ready to Release'
+                          : 'Pending Review'}
+                    </p>
                   </div>
                 </div>
 
@@ -555,6 +586,11 @@ export default function GradingView() {
                 >
                   {grading ? 'Saving...' : selectedSubmission.status === 'pending' ? 'Finalize Review' : 'Update Review'}
                 </Button>
+                {selectedSubmission.status === 'graded' && !resultsReleased && (
+                  <Button onClick={handleReleaseResults} disabled={releasing}>
+                    {releasing ? 'Releasing...' : 'Release Results'}
+                  </Button>
+                )}
               </div>
             </div>
           )}

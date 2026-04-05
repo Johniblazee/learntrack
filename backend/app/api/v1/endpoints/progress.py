@@ -136,6 +136,65 @@ def _is_assignment_available_to_student(assignment: Dict[str, Any]) -> bool:
     }
 
 
+def _is_results_released(progress_doc: Dict[str, Any] | Progress | None) -> bool:
+    if progress_doc is None:
+        return False
+
+    if isinstance(progress_doc, Progress):
+        return progress_doc.results_released_at is not None
+
+    return progress_doc.get("results_released_at") is not None
+
+
+def _should_auto_release_results(
+    assignment: Dict[str, Any], *, requires_manual_review: bool
+) -> bool:
+    return (
+        bool(assignment.get("show_results_immediately", False))
+        and not requires_manual_review
+    )
+
+
+def _student_visible_progress_status(
+    progress_doc: Dict[str, Any] | Progress,
+) -> SubmissionStatus:
+    raw_status = (
+        progress_doc.status.value
+        if isinstance(progress_doc, Progress)
+        and isinstance(progress_doc.status, SubmissionStatus)
+        else str(
+            progress_doc.status
+            if isinstance(progress_doc, Progress)
+            else progress_doc.get("status") or ""
+        )
+        .strip()
+        .lower()
+    )
+
+    if raw_status == SubmissionStatus.GRADED.value and not _is_results_released(
+        progress_doc
+    ):
+        return SubmissionStatus.SUBMITTED
+    if raw_status == SubmissionStatus.GRADED.value:
+        return SubmissionStatus.GRADED
+    if raw_status == SubmissionStatus.SUBMITTED.value:
+        return SubmissionStatus.SUBMITTED
+    return SubmissionStatus.IN_PROGRESS
+
+
+def _sanitize_progress_for_student(progress: Progress) -> Progress:
+    visible_status = _student_visible_progress_status(progress)
+    if visible_status == SubmissionStatus.GRADED:
+        return progress
+
+    payload = progress.model_dump()
+    payload["status"] = visible_status
+    payload["score"] = None
+    payload["feedback"] = None
+    payload["graded_at"] = None
+    return Progress(**payload)
+
+
 def _resolve_tenant_tutor_id(current_user: ClerkUserContext) -> str:
     return current_user.tutor_id or current_user.clerk_id
 
@@ -194,6 +253,8 @@ def _build_empty_progress_response(
         feedback=None,
         graded_at=None,
         graded_by=None,
+        results_released_at=None,
+        results_released_by=None,
         created_at=seed_time,
         updated_at=seed_time,
     )
@@ -323,6 +384,11 @@ async def get_student_progress_analytics_by_id(
                     "student_id": student_id,
                     "submitted_at": {"$gte": six_months_ago},
                     "score": {"$ne": None},
+                    **(
+                        {"results_released_at": {"$ne": None}}
+                        if current_user.role != UserRole.TUTOR
+                        else {}
+                    ),
                     **({"tutor_id": student_tutor_id} if student_tutor_id else {}),
                 }
             },
@@ -505,6 +571,8 @@ async def get_student_assignment_progress(
                 tutor_id=student_tutor_id or student_id,
                 seed_time=seed_time,
             )
+        if current_user.role != UserRole.TUTOR:
+            return _sanitize_progress_for_student(progress)
         return progress
     except HTTPException:
         raise
@@ -580,6 +648,8 @@ async def update_assignment_progress(
                 progress_update.feedback,
                 progress_update.graded_at,
                 progress_update.graded_by,
+                progress_update.results_released_at,
+                progress_update.results_released_by,
             ]
         ):
             raise HTTPException(
@@ -851,15 +921,41 @@ async def submit_answer(
         else None
     )
 
+    auto_release_results = (
+        submission.submit_assignment
+        and _should_auto_release_results(
+            assignment,
+            requires_manual_review=requires_manual_review,
+        )
+    )
+    final_status = SubmissionStatus.IN_PROGRESS
+    graded_at = None
+    graded_by = None
+    results_released_at = None
+    results_released_by = None
+
+    if submission.submit_assignment:
+        if requires_manual_review:
+            final_status = SubmissionStatus.SUBMITTED
+        else:
+            final_status = SubmissionStatus.GRADED
+            graded_at = now
+            graded_by = "system"
+            if auto_release_results:
+                results_released_at = now
+                results_released_by = "system"
+
     progress_update = ProgressUpdate(
         answers=scored_answers,
-        status=SubmissionStatus.SUBMITTED
-        if submission.submit_assignment
-        else SubmissionStatus.IN_PROGRESS,
+        status=final_status,
         submitted_at=now if submission.submit_assignment else None,
         score=score,
         points_earned=round(total_points_earned, 2),
         points_possible=round(total_points_possible, 2),
+        graded_at=graded_at,
+        graded_by=graded_by,
+        results_released_at=results_released_at,
+        results_released_by=results_released_by,
         time_spent=sum(answer.time_spent or 0 for answer in scored_answers),
     )
 
@@ -910,7 +1006,7 @@ async def submit_answer(
                 action_url="/dashboard/assignments/grading",
             )
 
-    return updated_progress
+    return _sanitize_progress_for_student(updated_progress)
 
 
 @router.get("/submissions", response_model=List[Dict[str, Any]])
@@ -1068,6 +1164,7 @@ async def list_submissions_for_grading(
                 "graded_at": doc.get("graded_at"),
                 "feedback": doc.get("feedback"),
                 "pending_manual_review_count": pending_manual_review_count,
+                "results_released_at": doc.get("results_released_at"),
             }
         )
 
@@ -1239,17 +1336,79 @@ async def grade_submission(
             },
         )
 
+    return updated_progress
+
+
+@router.post("/submissions/{progress_id}/release", response_model=Progress)
+async def release_submission_results(
+    progress_id: str = Path(..., description="Progress submission ID"),
+    current_user: ClerkUserContext = Depends(require_tutor),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """Release graded results to the student and parent surfaces."""
+    progress_service = ProgressService(database)
+    try:
+        progress_oid = to_object_id(progress_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid submission ID"
+        )
+
+    existing = await database.progress.find_one(
+        {"_id": progress_oid, "tutor_id": current_user.clerk_id}
+    )
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
+
+    existing_status = str(existing.get("status") or "").lower()
+    if existing_status != SubmissionStatus.GRADED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only graded submissions can be released",
+        )
+
+    if existing.get("results_released_at") is not None:
+        return await progress_service.get_progress_by_id(progress_id)
+
+    now = datetime.now(timezone.utc)
+    update = ProgressUpdate(
+        results_released_at=now,
+        results_released_by=current_user.clerk_id,
+    )
+    updated_progress = await progress_service.update_progress(progress_id, update)
+
+    assignment_id = str(existing.get("assignment_id") or "")
+    student_id = str(existing.get("student_id") or "")
+    assignment_title = "Assignment"
+    if assignment_id:
+        try:
+            assignment_doc = await database.assignments.find_one(
+                {"_id": to_object_id(assignment_id)},
+                {"title": 1},
+            )
+            if assignment_doc and assignment_doc.get("title"):
+                assignment_title = str(assignment_doc.get("title"))
+        except Exception as lookup_error:
+            logger.warning(
+                "Failed to load assignment title for release event",
+                assignment_id=assignment_id,
+                error=str(lookup_error),
+            )
+
+    if student_id:
         score_label = (
             f"{updated_progress.score:.0f}%"
             if isinstance(updated_progress.score, (float, int))
-            else "a new score"
+            else "updated"
         )
         await _create_notification_event(
             database,
             recipient_id=student_id,
             tutor_id=current_user.clerk_id,
-            title="Assignment graded",
-            message=f"{assignment_title} was graded with {score_label}",
+            title="Assignment results released",
+            message=f"{assignment_title} results are now available with {score_label}",
             notification_type=NotificationType.ASSIGNMENT_GRADED,
             related_entity_id=assignment_id or None,
             related_entity_type="assignment",

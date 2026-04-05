@@ -223,6 +223,7 @@ class AssignmentForStudent(BaseModel):
     feedback: Optional[str] = None
     submitted_at: Optional[datetime] = None
     graded_at: Optional[datetime] = None
+    results_released_at: Optional[datetime] = None
     review_available: bool = False
 
 

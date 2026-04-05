@@ -78,6 +78,8 @@ class ProgressUpdate(BaseModel):
     feedback: Optional[str] = None
     graded_at: Optional[datetime] = None
     graded_by: Optional[str] = None
+    results_released_at: Optional[datetime] = None
+    results_released_by: Optional[str] = None
     time_spent: Optional[int] = None
 
 
@@ -101,6 +103,8 @@ class ProgressInDB(ProgressBase):
     feedback: Optional[str] = None
     graded_at: Optional[datetime] = None
     graded_by: Optional[str] = None
+    results_released_at: Optional[datetime] = None
+    results_released_by: Optional[str] = None
 
     # Metadata
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -157,6 +161,9 @@ class StudentProgress(BaseModel):
     max_attempts: int
     started_at: Optional[datetime]
     submitted_at: Optional[datetime]
+    graded_at: Optional[datetime] = None
+    results_released_at: Optional[datetime] = None
+    feedback: Optional[str] = None
     due_date: datetime
     is_overdue: bool = False
 
@@ -179,6 +186,9 @@ class ProgressAnalytics(BaseModel):
 
     # Trends
     weekly_progress: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # Awards
+    awards: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ParentProgressView(BaseModel):

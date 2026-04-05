@@ -423,7 +423,7 @@ export default function StudentAssignmentWorkspace({
               <p className="mt-1 text-sm text-muted-foreground">
                 {submissionResult.status === "graded"
                   ? "Review your latest outcome before heading back to the dashboard."
-                  : "Your tutor will review the submission and post feedback here once grading is complete."}
+                  : "Your tutor will review or release the submission results here once they are ready."}
               </p>
             </div>
 

@@ -46,6 +46,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DashboardHeaderActions } from '@/components/dashboard/DashboardHeaderActions'
 import {
+  type AwardRecord,
+  type ParentRecentAssignmentRecord,
   type ParentProgressViewRecord,
   type ParentUpcomingAssignmentRecord,
   useParentDashboardStats,
@@ -63,6 +65,25 @@ interface UpcomingAssignmentRow {
   subject: string
   dueDate: string | null
   isOverdue: boolean
+}
+
+interface ReleasedResultRow {
+  childId: string
+  childName: string
+  title: string
+  subject: string
+  score: number | null
+  feedback: string | null
+  gradedAt: string | null
+  releasedAt: string | null
+}
+
+interface ChildAwardRow {
+  childId: string
+  childName: string
+  title: string
+  description: string
+  earnedAt: string | null
 }
 
 const PARENT_TAB_ROUTES: Record<ParentTab, string> = {
@@ -217,6 +238,57 @@ export default function ParentDashboard() {
     })
   }, [parentProgressViews])
 
+  const releasedResultsFromProgress = useMemo(() => {
+    if (!Array.isArray(parentProgressViews)) return []
+
+    return parentProgressViews.flatMap((view: ParentProgressViewRecord): ReleasedResultRow[] => {
+      const childName = view?.child_name || 'Child'
+      const assignments: ParentRecentAssignmentRecord[] = Array.isArray(view?.recent_assignments)
+        ? view.recent_assignments
+        : []
+
+      return assignments.map((assignment) => ({
+        childId: view?.child_id || '',
+        childName,
+        title: assignment?.assignment_title || 'Released result',
+        subject: assignment?.subject_name || 'General',
+        score: typeof assignment?.score === 'number' ? assignment.score : null,
+        feedback: typeof assignment?.feedback === 'string' ? assignment.feedback : null,
+        gradedAt: assignment?.graded_at || null,
+        releasedAt: assignment?.results_released_at || null,
+      }))
+    })
+      .sort((a, b) => {
+        const aTime = a.releasedAt ? new Date(a.releasedAt).getTime() : 0
+        const bTime = b.releasedAt ? new Date(b.releasedAt).getTime() : 0
+        return bTime - aTime
+      })
+  }, [parentProgressViews])
+
+  const childAwardsFromProgress = useMemo(() => {
+    if (!Array.isArray(parentProgressViews)) return []
+
+    return parentProgressViews.flatMap((view: ParentProgressViewRecord): ChildAwardRow[] => {
+      const childName = view?.child_name || 'Child'
+      const awards: AwardRecord[] = Array.isArray(view?.analytics?.awards)
+        ? view.analytics.awards
+        : []
+
+      return awards.map((award, index) => ({
+        childId: view?.child_id || `${childName}-${index}`,
+        childName,
+        title: String(award?.title || 'Award'),
+        description: String(award?.description || 'Released milestone'),
+        earnedAt: typeof award?.earned_at === 'string' ? award.earned_at : null,
+      }))
+    })
+      .sort((a, b) => {
+        const aTime = a.earnedAt ? new Date(a.earnedAt).getTime() : 0
+        const bTime = b.earnedAt ? new Date(b.earnedAt).getTime() : 0
+        return bTime - aTime
+      })
+  }, [parentProgressViews])
+
   const statsErrorMessage = statsError instanceof Error ? statsError.message : null
   const progressErrorMessage = progressError instanceof Error ? progressError.message : null
 
@@ -270,41 +342,111 @@ export default function ParentDashboard() {
     }
 
     return (
-      <Card className="border-0 bg-card shadow-sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Target className="h-5 w-5 text-primary" />
-            Child Progress Snapshot
-          </CardTitle>
-          <CardDescription>Quick progress and grade overview by child</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {isLoadingStats ? (
-            Array.from({ length: 3 }).map((_, index) => (
-              <Skeleton key={index} className="h-16 w-full" />
-            ))
-          ) : children.length === 0 ? (
-            <div className="py-8 text-center text-muted-foreground">No children linked yet</div>
-          ) : (
-            children.map((child) => (
-              <div key={child.id} className="rounded-lg border p-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-foreground">{child.name}</p>
-                    <p className="text-xs text-muted-foreground">Grade {child.grade || 'N/A'}</p>
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="border-0 bg-card shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-primary" />
+              Child Progress Snapshot
+            </CardTitle>
+            <CardDescription>Quick progress and grade overview by child</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isLoadingStats ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-16 w-full" />
+              ))
+            ) : children.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground">No children linked yet</div>
+            ) : (
+              children.map((child) => (
+                <div key={child.id} className="rounded-lg border p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-foreground">{child.name}</p>
+                      <p className="text-xs text-muted-foreground">Grade {child.grade || 'N/A'}</p>
+                    </div>
+                    <Badge variant="outline">{child.recent_grade || '--'}</Badge>
                   </div>
-                  <Badge variant="outline">{child.recent_grade || '--'}</Badge>
+                  <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Overall Progress</span>
+                    <span>{child.overall_progress || 0}%</span>
+                  </div>
+                  <Progress value={child.overall_progress || 0} className="h-2" />
                 </div>
-                <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Overall Progress</span>
-                  <span>{child.overall_progress || 0}%</span>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 bg-card shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Trophy className="h-5 w-5 text-primary" />
+              Released Results
+            </CardTitle>
+            <CardDescription>Final scores and feedback that are now visible to families</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isLoadingProgress ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-20 w-full" />
+              ))
+            ) : releasedResultsFromProgress.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground">No released results yet</div>
+            ) : (
+              releasedResultsFromProgress.slice(0, 5).map((result, index) => (
+                <div key={`${result.childName}-${result.title}-${index}`} className="rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">{result.title}</p>
+                      <p className="text-sm text-muted-foreground">{result.subject} • {result.childName}</p>
+                    </div>
+                    <Badge variant="outline">
+                      {result.score !== null ? `${Math.round(result.score)}%` : 'Released'}
+                    </Badge>
+                  </div>
+                  {result.feedback && (
+                    <p className="mt-2 text-sm text-muted-foreground">{result.feedback}</p>
+                  )}
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {result.releasedAt ? `Released ${new Date(result.releasedAt).toLocaleDateString()}` : 'Recently released'}
+                  </p>
                 </div>
-                <Progress value={child.overall_progress || 0} className="h-2" />
+              ))
+            )}
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-foreground">Recent Awards</p>
+                <Badge variant="secondary">{childAwardsFromProgress.length}</Badge>
               </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+
+              {isLoadingProgress ? (
+                <Skeleton className="h-16 w-full" />
+              ) : childAwardsFromProgress.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Released achievements will appear here for each child.</p>
+              ) : (
+                childAwardsFromProgress.slice(0, 4).map((award, index) => (
+                  <div key={`${award.childId}-${award.title}-${index}`} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-foreground">{award.title}</p>
+                        <p className="text-sm text-muted-foreground">{award.childName} • {award.description}</p>
+                      </div>
+                      <Badge variant="outline">
+                        {award.earnedAt ? new Date(award.earnedAt).toLocaleDateString() : 'Recent'}
+                      </Badge>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
@@ -353,6 +495,29 @@ export default function ParentDashboard() {
                       {child.overall_progress || 0}%
                     </span>
                   </div>
+                  {releasedResultsFromProgress.find((result) => result.childId === child.id) && (
+                    <div className="mt-4 rounded-md bg-muted/40 p-3">
+                      {(() => {
+                        const latestResult = releasedResultsFromProgress.find((result) => result.childId === child.id)
+                        if (!latestResult) return null
+
+                        return (
+                          <>
+                            <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest released result</p>
+                            <div className="mt-2 flex items-center justify-between gap-3">
+                              <div>
+                                <p className="font-medium text-foreground">{latestResult.title}</p>
+                                <p className="text-xs text-muted-foreground">{latestResult.subject}</p>
+                              </div>
+                              <Badge variant="outline">
+                                {latestResult.score !== null ? `${Math.round(latestResult.score)}%` : 'Released'}
+                              </Badge>
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

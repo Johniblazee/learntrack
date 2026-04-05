@@ -97,8 +97,12 @@ def _derive_student_assignment_status(
         return assignment_status
 
     raw_progress_status = str((progress_doc or {}).get("status") or "").lower()
-    if raw_progress_status == "graded":
+    if raw_progress_status == "graded" and (progress_doc or {}).get(
+        "results_released_at"
+    ):
         return "graded"
+    if raw_progress_status == "graded":
+        return "submitted"
     if raw_progress_status == "submitted":
         return "submitted"
     if raw_progress_status == "in_progress":
@@ -721,7 +725,11 @@ class AssignmentService:
                     question_count=question_count,
                     status=derived_status,
                     attempts_used=1 if progress_doc else 0,
-                    best_score=progress_doc.get("score") if progress_doc else None,
+                    best_score=(
+                        progress_doc.get("score")
+                        if progress_doc and progress_doc.get("results_released_at")
+                        else None
+                    ),
                     last_attempt=(
                         progress_doc.get("submitted_at")
                         or progress_doc.get("updated_at")
@@ -730,17 +738,26 @@ class AssignmentService:
                         else None
                     ),
                     progress_percent=max(0, min(progress_percent, 100)),
-                    feedback=progress_doc.get("feedback") if progress_doc else None,
+                    feedback=(
+                        progress_doc.get("feedback")
+                        if progress_doc and progress_doc.get("results_released_at")
+                        else None
+                    ),
                     submitted_at=progress_doc.get("submitted_at")
                     if progress_doc
                     else None,
-                    graded_at=progress_doc.get("graded_at") if progress_doc else None,
-                    review_available=(
-                        derived_status == "graded"
-                        or (
-                            derived_status == "submitted"
-                            and bool(assignment.get("show_results_immediately", False))
-                        )
+                    graded_at=(
+                        progress_doc.get("graded_at")
+                        if progress_doc and progress_doc.get("results_released_at")
+                        else None
+                    ),
+                    results_released_at=(
+                        progress_doc.get("results_released_at")
+                        if progress_doc
+                        else None
+                    ),
+                    review_available=bool(
+                        progress_doc and progress_doc.get("results_released_at")
                     ),
                 )
                 summaries.append(summary)

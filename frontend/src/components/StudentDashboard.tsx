@@ -60,6 +60,7 @@ import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { toast } from "@/contexts/ToastContext"
 import { useUserContext } from "@/contexts/UserContext"
 import {
+  type AwardRecord,
   type AssignmentSummaryRecord,
   type NotificationItem,
   type StudentActivityRecord,
@@ -155,6 +156,13 @@ interface RecentSubmissionSummary {
   subject: string
   score: number | null
   submittedAt: string | null
+}
+
+interface AwardSummary {
+  id: string
+  title: string
+  description: string
+  earnedAt: string | null
 }
 
 const NAV_LABELS: Record<StudentNavSection, string> = {
@@ -726,6 +734,19 @@ export default function StudentDashboard() {
     }))
   }, [progressAnalytics?.recent_submissions])
 
+  const awards = useMemo<AwardSummary[]>(() => {
+    if (!Array.isArray(progressAnalytics?.awards)) {
+      return []
+    }
+
+    return (progressAnalytics.awards as AwardRecord[]).map((award, index) => ({
+      id: String(award?.id || `award-${index}`),
+      title: String(award?.title || 'Award'),
+      description: String(award?.description || 'Released performance milestone'),
+      earnedAt: typeof award?.earned_at === 'string' ? award.earned_at : null,
+    }))
+  }, [progressAnalytics?.awards])
+
   const activityItems = useMemo<TimelineItem[]>(() => {
     if (Array.isArray(activityFeed) && activityFeed.length > 0) {
       return activityFeed.slice(0, 6).map((item: StudentActivityRecord) => {
@@ -1211,6 +1232,41 @@ export default function StudentDashboard() {
           </div>
 
           <div className="space-y-8">
+            <section>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold">Awards</h2>
+                <Badge variant="outline">{awards.length}</Badge>
+              </div>
+              <Card className="border-0 bg-card shadow-sm">
+                <CardContent className="space-y-4 p-5">
+                  {analyticsLoading ? (
+                    Array.from({ length: 3 }).map((_, index) => (
+                      <Skeleton key={index} className="h-16 w-full" />
+                    ))
+                  ) : awards.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Released results will unlock awards and milestones here.</p>
+                  ) : (
+                    awards.map((award) => (
+                      <div key={award.id} className="rounded-lg border p-4">
+                        <div className="flex items-start gap-3">
+                          <div className="rounded-full bg-primary/10 p-2">
+                            <Trophy className="h-4 w-4 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">{award.title}</p>
+                            <p className="text-sm text-muted-foreground">{award.description}</p>
+                            <p className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+                              {award.earnedAt ? `Earned ${formatTimestamp(award.earnedAt)}` : 'Recently earned'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </section>
+
             <section>
               <h2 className="mb-4 text-xl font-semibold">Recent Activity</h2>
               <Card className="border-0 bg-card shadow-sm">

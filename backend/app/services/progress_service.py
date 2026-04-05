@@ -60,6 +60,16 @@ def _is_completed_status(status_value: Optional[str]) -> bool:
     return (status_value or "").strip().lower() in COMPLETED_PROGRESS_STATUS_VALUES
 
 
+def _is_results_released(progress_record: Dict[str, Any]) -> bool:
+    return progress_record.get("results_released_at") is not None
+
+
+def _has_visible_score(progress_record: Dict[str, Any]) -> bool:
+    return _is_completed_status(progress_record.get("status")) and _is_results_released(
+        progress_record
+    )
+
+
 def _week_label(index: int, total: int) -> str:
     return f"Week {total - index}"
 
@@ -118,7 +128,7 @@ def _build_subject_performance_rows(
             bucket["completed"] += 1
 
         score = progress.get("score")
-        if score is not None:
+        if score is not None and _has_visible_score(progress):
             try:
                 bucket["scores"].append(float(score))
             except (TypeError, ValueError):
@@ -190,6 +200,131 @@ def _build_student_performance_rows(
 
     rows.sort(key=lambda row: row.name.lower())
     return rows
+
+
+def _award_payload(
+    *, award_id: str, title: str, description: str, earned_at: Optional[datetime]
+):
+    return {
+        "id": award_id,
+        "title": title,
+        "description": description,
+        "earned_at": earned_at.isoformat() if isinstance(earned_at, datetime) else None,
+    }
+
+
+def _build_student_awards(
+    progress_records: List[Dict[str, Any]],
+    subject_by_assignment_id: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    released_records = [
+        record
+        for record in progress_records
+        if _is_results_released(record)
+        and _is_completed_status(record.get("status"))
+        and record.get("score") is not None
+    ]
+    if not released_records:
+        return []
+
+    def award_time(record: Dict[str, Any]) -> datetime:
+        return _ensure_utc_datetime(
+            record.get("results_released_at")
+            or record.get("graded_at")
+            or record.get("submitted_at")
+            or record.get("updated_at")
+            or record.get("created_at")
+        )
+
+    released_records.sort(key=award_time)
+    awards: List[Dict[str, Any]] = []
+
+    first_record = released_records[0]
+    awards.append(
+        _award_payload(
+            award_id="first-release",
+            title="First Release",
+            description="Earned your first released assignment result.",
+            earned_at=award_time(first_record),
+        )
+    )
+
+    perfect_record = next(
+        (
+            record
+            for record in released_records
+            if float(record.get("score") or 0) >= 100
+        ),
+        None,
+    )
+    if perfect_record:
+        awards.append(
+            _award_payload(
+                award_id="perfect-score",
+                title="Perfect Score",
+                description="Scored 100% on a released assignment.",
+                earned_at=award_time(perfect_record),
+            )
+        )
+
+    high_score_record = next(
+        (
+            record
+            for record in released_records
+            if float(record.get("score") or 0) >= 90
+        ),
+        None,
+    )
+    if high_score_record:
+        awards.append(
+            _award_payload(
+                award_id="high-scorer",
+                title="High Scorer",
+                description="Reached 90% or higher on a released assignment.",
+                earned_at=award_time(high_score_record),
+            )
+        )
+
+    recent_scored_records = released_records[-3:]
+    if len(recent_scored_records) == 3 and all(
+        float(record.get("score") or 0) >= 85 for record in recent_scored_records
+    ):
+        awards.append(
+            _award_payload(
+                award_id="hot-streak",
+                title="Hot Streak",
+                description="Earned 85% or higher on three released assignments in a row.",
+                earned_at=award_time(recent_scored_records[-1]),
+            )
+        )
+
+    subject_scores: Dict[str, List[float]] = {}
+    subject_earned_at: Dict[str, datetime] = {}
+    for record in released_records:
+        subject_name = subject_by_assignment_id.get(
+            str(record.get("assignment_id") or ""), "General"
+        )
+        subject_scores.setdefault(subject_name, []).append(
+            float(record.get("score") or 0)
+        )
+        subject_earned_at[subject_name] = award_time(record)
+
+    for subject_name, scores in subject_scores.items():
+        if len(scores) >= 2 and (sum(scores) / len(scores)) >= 90:
+            awards.append(
+                _award_payload(
+                    award_id=f"subject-star-{subject_name.lower().replace(' ', '-')}",
+                    title="Subject Star",
+                    description=f"Maintained a 90% average in {subject_name} across released work.",
+                    earned_at=subject_earned_at.get(subject_name),
+                )
+            )
+
+    awards.sort(
+        key=lambda award: award.get("earned_at") or "",
+        reverse=True,
+    )
+    return awards[:5]
 
 
 class ProgressService:
@@ -477,6 +612,19 @@ class ProgressService:
                         max_attempts=max_attempts,
                         started_at=started_at,
                         submitted_at=submitted_at,
+                        graded_at=(
+                            _ensure_utc_datetime(progress_doc.get("graded_at"), now)
+                            if progress_doc and progress_doc.get("graded_at")
+                            else None
+                        ),
+                        results_released_at=(
+                            _ensure_utc_datetime(
+                                progress_doc.get("results_released_at"), now
+                            )
+                            if progress_doc and progress_doc.get("results_released_at")
+                            else None
+                        ),
+                        feedback=progress_doc.get("feedback") if progress_doc else None,
                         due_date=due_date,
                         is_overdue=is_overdue,
                     )
@@ -587,6 +735,9 @@ class ProgressService:
                     "assignment_id": assignment_id,
                     "status": progress_doc.get("status") if progress_doc else "pending",
                     "score": progress_doc.get("score") if progress_doc else None,
+                    "results_released_at": progress_doc.get("results_released_at")
+                    if progress_doc
+                    else None,
                     "time_spent": progress_doc.get("time_spent", 0)
                     if progress_doc
                     else 0,
@@ -641,8 +792,7 @@ class ProgressService:
             scores = [
                 float(record.get("score"))
                 for record in progress_records
-                if record.get("score") is not None
-                and _is_completed_status(record.get("status"))
+                if record.get("score") is not None and _has_visible_score(record)
             ]
             average_score = round(sum(scores) / len(scores), 1) if scores else None
             total_time = sum(
@@ -668,6 +818,7 @@ class ProgressService:
                 record
                 for record in progress_records
                 if _is_completed_status(record.get("status"))
+                and _is_results_released(record)
             ]
             completed_records.sort(
                 key=lambda record: (
@@ -696,6 +847,7 @@ class ProgressService:
                     date_field="created_at",
                 )
             ]
+            awards = _build_student_awards(progress_records, subject_by_assignment_id)
 
             return ProgressAnalytics(
                 total_assignments=total_assignments,
@@ -707,6 +859,7 @@ class ProgressService:
                 subject_performance=subject_performance,
                 recent_submissions=recent_submissions,
                 weekly_progress=weekly_progress,
+                awards=awards,
             )
 
         except Exception as e:
@@ -838,9 +991,14 @@ class ProgressService:
                     if not assignment:
                         continue
 
+                    if not _is_results_released(progress_doc):
+                        continue
+
                     normalized_status = _normalize_submission_status(
                         progress_doc.get("status")
                     )
+                    if normalized_status != SubmissionStatus.GRADED:
+                        continue
                     subject_key = str(assignment.get("subject_id", ""))
                     due_date_raw = assignment.get("due_date")
                     due_date = (
@@ -861,6 +1019,9 @@ class ProgressService:
                             max_attempts=int(assignment.get("max_attempts", 1) or 1),
                             started_at=progress_doc.get("started_at"),
                             submitted_at=progress_doc.get("submitted_at"),
+                            graded_at=progress_doc.get("graded_at"),
+                            results_released_at=progress_doc.get("results_released_at"),
+                            feedback=progress_doc.get("feedback"),
                             due_date=due_date,
                             is_overdue=bool(due_date_raw)
                             and due_date < now

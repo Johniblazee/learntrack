@@ -75,10 +75,31 @@ export interface ParentUpcomingAssignmentRecord {
   is_overdue?: boolean
 }
 
+export interface ParentRecentAssignmentRecord {
+  child_id?: string
+  assignment_title?: string
+  subject_name?: string
+  score?: number | null
+  feedback?: string | null
+  graded_at?: string | null
+  results_released_at?: string | null
+}
+
+export interface AwardRecord {
+  id?: string
+  title?: string
+  description?: string
+  earned_at?: string | null
+}
+
 export interface ParentProgressViewRecord {
   child_id?: string
   child_name?: string
   upcoming_assignments?: ParentUpcomingAssignmentRecord[]
+  recent_assignments?: ParentRecentAssignmentRecord[]
+  analytics?: {
+    awards?: AwardRecord[]
+  }
 }
 
 export interface StudentDashboardStatsResponse {
@@ -121,6 +142,7 @@ export interface StudentProgressAnalyticsResponse {
   subject_performance: StudentSubjectPerformance[]
   recent_submissions: StudentRecentSubmission[]
   weekly_progress: StudentWeeklyProgress[]
+  awards: AwardRecord[]
 }
 
 export interface StudentMaterialRecord {
