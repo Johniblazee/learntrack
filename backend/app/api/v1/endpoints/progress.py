@@ -4,6 +4,7 @@ Progress tracking endpoints
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from fastapi import APIRouter, Depends, Path, Query, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from dateutil.relativedelta import relativedelta
@@ -121,7 +122,11 @@ async def _create_notification_event(
 
 
 def _is_progress_locked(status_value: Any) -> bool:
-    normalized = str(status_value or "").strip().lower()
+    normalized = (
+        str(status_value.value or "").strip().lower()
+        if isinstance(status_value, Enum)
+        else str(status_value or "").strip().lower()
+    )
     return normalized in {
         SubmissionStatus.SUBMITTED.value,
         SubmissionStatus.GRADED.value,
@@ -129,7 +134,12 @@ def _is_progress_locked(status_value: Any) -> bool:
 
 
 def _is_assignment_available_to_student(assignment: Dict[str, Any]) -> bool:
-    normalized = str(assignment.get("status") or "").strip().lower()
+    raw_status = assignment.get("status")
+    normalized = (
+        str(raw_status.value or "").strip().lower()
+        if isinstance(raw_status, Enum)
+        else str(raw_status or "").strip().lower()
+    )
     return normalized not in {
         AssignmentStatus.DRAFT.value,
         AssignmentStatus.SCHEDULED.value,
@@ -1195,7 +1205,12 @@ async def grade_submission(
             status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
         )
 
-    existing_status = str(existing.get("status") or "").lower()
+    raw_existing_status = existing.get("status")
+    existing_status = (
+        str(raw_existing_status.value or "").strip().lower()
+        if isinstance(raw_existing_status, Enum)
+        else str(raw_existing_status or "").strip().lower()
+    )
     if existing_status not in {
         SubmissionStatus.SUBMITTED.value,
         SubmissionStatus.GRADED.value,
@@ -1362,7 +1377,12 @@ async def release_submission_results(
             status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
         )
 
-    existing_status = str(existing.get("status") or "").lower()
+    raw_existing_status = existing.get("status")
+    existing_status = (
+        str(raw_existing_status.value or "").strip().lower()
+        if isinstance(raw_existing_status, Enum)
+        else str(raw_existing_status or "").strip().lower()
+    )
     if existing_status != SubmissionStatus.GRADED.value:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -35,6 +35,7 @@ class AssignmentQuestionOptionSnapshot(BaseModel):
     """Immutable option content stored on an assignment."""
 
     text: str
+    is_correct: bool = False
 
 
 class AssignmentQuestionSnapshot(BaseModel):

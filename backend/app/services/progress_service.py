@@ -2,6 +2,7 @@
 Progress tracking service for database operations
 """
 
+from enum import Enum
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -37,9 +38,22 @@ COMPLETED_PROGRESS_STATUS_VALUES = {
 }
 
 
+def _serialize_enums(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, list):
+        return [_serialize_enums(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _serialize_enums(item) for key, item in value.items()}
+    return value
+
+
 def _normalize_submission_status(status_value: Optional[str]) -> SubmissionStatus:
     """Normalize legacy/raw status values to SubmissionStatus enum."""
-    normalized = (status_value or "").strip().lower()
+    if isinstance(status_value, Enum):
+        normalized = str(status_value.value or "").strip().lower()
+    else:
+        normalized = (status_value or "").strip().lower()
     if normalized in {SubmissionStatus.GRADED.value, "reviewed"}:
         return SubmissionStatus.GRADED
     if normalized in {SubmissionStatus.SUBMITTED.value, "completed"}:
@@ -57,7 +71,11 @@ def _ensure_utc_datetime(value: Any, fallback: Optional[datetime] = None) -> dat
 
 
 def _is_completed_status(status_value: Optional[str]) -> bool:
-    return (status_value or "").strip().lower() in COMPLETED_PROGRESS_STATUS_VALUES
+    if isinstance(status_value, Enum):
+        normalized = str(status_value.value or "").strip().lower()
+    else:
+        normalized = (status_value or "").strip().lower()
+    return normalized in COMPLETED_PROGRESS_STATUS_VALUES
 
 
 def _is_results_released(progress_record: Dict[str, Any]) -> bool:
@@ -381,7 +399,7 @@ class ProgressService:
                 return Progress(**self._serialize_progress_document(existing))
 
             # Create new progress record
-            progress_dict = progress_data.model_dump()
+            progress_dict = _serialize_enums(progress_data.model_dump())
             progress_dict.setdefault("_id", ObjectId())
             progress_dict["created_at"] = datetime.now(timezone.utc)
             progress_dict["updated_at"] = datetime.now(timezone.utc)
@@ -477,7 +495,9 @@ class ProgressService:
     ) -> Progress:
         """Update progress"""
         try:
-            update_data = progress_update.model_dump(exclude_unset=True)
+            update_data = _serialize_enums(
+                progress_update.model_dump(exclude_unset=True)
+            )
             if not update_data:
                 return await self.get_progress_by_id(progress_id)
 

@@ -128,10 +128,17 @@ def _build_assignment_question_snapshot(
     for option in question_doc.get("options") or []:
         if isinstance(option, dict):
             option_text = str(option.get("text") or "").strip()
+            is_correct = bool(option.get("is_correct", False))
         else:
             option_text = str(getattr(option, "text", option) or "").strip()
+            is_correct = bool(getattr(option, "is_correct", False))
         if option_text:
-            options.append(AssignmentQuestionOptionSnapshot(text=option_text))
+            options.append(
+                AssignmentQuestionOptionSnapshot(
+                    text=option_text,
+                    is_correct=is_correct,
+                )
+            )
 
     return AssignmentQuestionSnapshot(
         question_text=str(question_doc.get("question_text") or "Untitled question"),
