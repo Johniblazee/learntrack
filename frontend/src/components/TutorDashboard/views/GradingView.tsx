@@ -49,17 +49,40 @@ interface Submission {
   }
   answers: Array<{
     question_id: string
+    question_text?: string
+    question_type?: string
     answer?: string
     selected_options?: string[]
     answer_type?: 'correct' | 'incorrect' | 'partial' | 'unanswered'
     points_earned?: number
     points_possible?: number
+    auto_points_earned?: number
+    manual_points_earned?: number | null
+    final_points_earned?: number
+    requires_manual_review?: boolean
+    review_comment?: string | null
+    reviewed_at?: string | null
   }>
   score?: number
   status: 'pending' | 'graded'
   submitted_at: string
   graded_at?: string
   feedback?: string
+  pending_manual_review_count?: number
+}
+
+interface AnswerReviewState {
+  manualPoints: string
+  reviewComment: string
+}
+
+const parseManualPoints = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 export default function GradingView() {
@@ -72,7 +95,7 @@ export default function GradingView() {
   const [gradeModalOpen, setGradeModalOpen] = useState(false)
   const [grading, setGrading] = useState(false)
   const [feedback, setFeedback] = useState('')
-  const [score, setScore] = useState('')
+  const [answerReviews, setAnswerReviews] = useState<Record<string, AnswerReviewState>>({})
 
   const loadSubmissions = async () => {
     try {
@@ -100,10 +123,22 @@ export default function GradingView() {
 
     try {
       setGrading(true)
-      const numericScore = Number(score)
+      const answerReviewsPayload = selectedSubmission.answers
+        .filter((answer) => answer.requires_manual_review)
+        .map((answer) => {
+          const reviewState = answerReviews[answer.question_id]
+          const manualPoints = parseManualPoints(reviewState?.manualPoints ?? answer.manual_points_earned)
+
+          return {
+            question_id: answer.question_id,
+            manual_points_earned: manualPoints ?? 0,
+            review_comment: reviewState?.reviewComment?.trim() || undefined,
+          }
+        })
+
       const response = await client.put(`/progress/submissions/${selectedSubmission._id}/grade`, {
-        score: numericScore,
         feedback: feedback.trim() || undefined,
+        answer_reviews: answerReviewsPayload,
       })
 
       if (response.error) throw new Error(response.error)
@@ -112,7 +147,7 @@ export default function GradingView() {
       setGradeModalOpen(false)
       setSelectedSubmission(null)
       setFeedback('')
-      setScore('')
+      setAnswerReviews({})
       loadSubmissions()
     } catch (error) {
       console.error('Failed to grade submission:', error)
@@ -125,8 +160,54 @@ export default function GradingView() {
   const openGradeModal = (submission: Submission) => {
     setSelectedSubmission(submission)
     setFeedback(submission.feedback || '')
-    setScore(submission.score?.toString() || '')
+    setAnswerReviews(
+      submission.answers.reduce<Record<string, AnswerReviewState>>((accumulator, answer) => {
+        if (!answer.requires_manual_review) {
+          return accumulator
+        }
+
+        accumulator[answer.question_id] = {
+          manualPoints:
+            answer.manual_points_earned !== undefined && answer.manual_points_earned !== null
+              ? String(answer.manual_points_earned)
+              : '',
+          reviewComment: answer.review_comment || '',
+        }
+        return accumulator
+      }, {}),
+    )
     setGradeModalOpen(true)
+  }
+
+  const getAnswerLabel = (submissionAnswer: Submission['answers'][number]) => {
+    return submissionAnswer.answer?.trim() || submissionAnswer.selected_options?.join(', ') || 'No response'
+  }
+
+  const getDerivedScore = (submission: Submission | null) => {
+    if (!submission) {
+      return null
+    }
+
+    const totalPointsPossible = submission.answers.reduce(
+      (sum, answer) => sum + Number(answer.points_possible ?? 0),
+      0,
+    )
+
+    if (totalPointsPossible <= 0) {
+      return submission.score ?? null
+    }
+
+    const earnedPoints = submission.answers.reduce((sum, answer) => {
+      if (answer.requires_manual_review) {
+        const reviewState = answerReviews[answer.question_id]
+        const manualPoints = parseManualPoints(reviewState?.manualPoints ?? answer.manual_points_earned ?? answer.final_points_earned)
+        return sum + (manualPoints ?? 0)
+      }
+
+      return sum + Number(answer.final_points_earned ?? answer.points_earned ?? 0)
+    }, 0)
+
+    return Math.round((earnedPoints / totalPointsPossible) * 10000) / 100
   }
 
   const filteredSubmissions = submissions.filter(submission => {
@@ -154,6 +235,14 @@ export default function GradingView() {
       default: return <AlertCircle className="h-4 w-4" />
     }
   }
+
+  const requiredManualReviewAnswers = selectedSubmission?.answers.filter((answer) => answer.requires_manual_review) || []
+  const missingManualReviews = requiredManualReviewAnswers.filter((answer) => {
+    const reviewState = answerReviews[answer.question_id]
+    const manualPoints = parseManualPoints(reviewState?.manualPoints ?? answer.manual_points_earned)
+    return manualPoints === null
+  })
+  const derivedScore = getDerivedScore(selectedSubmission)
 
   return (
     <div className="space-y-6">
@@ -251,6 +340,12 @@ export default function GradingView() {
                   </TableRow>
                 ) : (
                   filteredSubmissions.map((submission) => (
+                    (() => {
+                      const statusLabel = submission.status === 'pending' && (submission.pending_manual_review_count || 0) > 0
+                        ? 'Needs Review'
+                        : submission.status.charAt(0).toUpperCase() + submission.status.slice(1)
+
+                      return (
                     <TableRow key={submission._id} className="hover:bg-muted/30 transition-colors">
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -274,13 +369,13 @@ export default function GradingView() {
                         {formatDistanceToNow(new Date(submission.submitted_at), { addSuffix: true })}
                       </TableCell>
                       <TableCell className="text-foreground font-semibold">
-                        {submission.score !== undefined ? `${submission.score}%` : '-'}
+                        {submission.score !== undefined ? `${submission.score}%` : submission.pending_manual_review_count ? 'Pending review' : '-'}
                       </TableCell>
                       <TableCell>
                         <Badge className={getStatusColor(submission.status)}>
                           <span className="flex items-center gap-1">
                             {getStatusIcon(submission.status)}
-                            {submission.status.charAt(0).toUpperCase() + submission.status.slice(1)}
+                            {statusLabel}
                           </span>
                         </Badge>
                       </TableCell>
@@ -295,6 +390,8 @@ export default function GradingView() {
                         </Button>
                       </TableCell>
                     </TableRow>
+                      )
+                    })()
                   ))
                 )}
               </TableBody>
@@ -311,16 +408,35 @@ export default function GradingView() {
           </DialogHeader>
           {selectedSubmission && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Student</p>
-                  <p className="font-medium">{selectedSubmission.student_id.name}</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Student</p>
+                    <p className="font-medium">{selectedSubmission.student_id.name}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Assignment</p>
                   <p className="font-medium">{selectedSubmission.assignment_id.title}</p>
+                  </div>
                 </div>
-              </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-sm text-muted-foreground">Manual Review</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">
+                      {requiredManualReviewAnswers.length - missingManualReviews.length}/{requiredManualReviewAnswers.length}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-sm text-muted-foreground">Derived Score</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">
+                      {derivedScore !== null ? `${Math.round(derivedScore)}%` : 'Pending'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-sm text-muted-foreground">Submission Status</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground capitalize">{selectedSubmission.status}</p>
+                  </div>
+                </div>
 
               <div className="rounded-lg border border-border p-4">
                 <p className="text-sm font-medium text-foreground">Answer Review</p>
@@ -329,7 +445,7 @@ export default function GradingView() {
                     <p className="text-sm text-muted-foreground">No answers were submitted.</p>
                   ) : (
                     selectedSubmission.answers.map((answer, index) => {
-                      const answerLabel = answer.answer?.trim() || answer.selected_options?.join(', ') || 'No response'
+                      const answerLabel = getAnswerLabel(answer)
                       const answerType = answer.answer_type || 'unanswered'
                       const answerTone =
                         answerType === 'correct'
@@ -340,36 +456,79 @@ export default function GradingView() {
                               ? 'text-amber-600 dark:text-amber-400'
                               : 'text-muted-foreground'
 
-                      return (
-                        <div key={`${answer.question_id}-${index}`} className="rounded-md bg-muted/40 p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-medium text-foreground">Question {index + 1}</p>
-                            <Badge variant="outline" className={answerTone}>
-                              {answerType.replace('_', ' ')}
-                            </Badge>
+                        return (
+                          <div key={`${answer.question_id}-${index}`} className="rounded-md bg-muted/40 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-medium text-foreground">Question {index + 1}</p>
+                                {answer.question_type && (
+                                  <p className="text-xs text-muted-foreground capitalize">{answer.question_type.replace(/-/g, ' ')}</p>
+                                )}
+                              </div>
+                              <Badge variant="outline" className={answerTone}>
+                                {answerType.replace('_', ' ')}
+                              </Badge>
+                            </div>
+                            {answer.question_text && (
+                              <p className="mt-2 text-sm font-medium text-foreground">{answer.question_text}</p>
+                            )}
+                            <p className="mt-2 text-sm text-foreground">{answerLabel}</p>
+                            <div className="mt-2 space-y-2">
+                              <p className="text-xs text-muted-foreground">
+                                Auto score: {Number(answer.auto_points_earned ?? answer.final_points_earned ?? answer.points_earned ?? 0)} / {Number(answer.points_possible ?? 0)} points
+                              </p>
+
+                              {answer.requires_manual_review ? (
+                                <div className="grid gap-3 rounded-md border border-border bg-card p-3 md:grid-cols-[140px_1fr]">
+                                  <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Manual score</label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      max={String(answer.points_possible ?? 0)}
+                                      step="0.1"
+                                      value={answerReviews[answer.question_id]?.manualPoints ?? ''}
+                                      onChange={(event) =>
+                                        setAnswerReviews((previous) => ({
+                                          ...previous,
+                                          [answer.question_id]: {
+                                            manualPoints: event.target.value,
+                                            reviewComment: previous[answer.question_id]?.reviewComment || '',
+                                          },
+                                        }))
+                                      }
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs font-medium text-muted-foreground">Review note</label>
+                                    <Textarea
+                                      value={answerReviews[answer.question_id]?.reviewComment ?? ''}
+                                      onChange={(event) =>
+                                        setAnswerReviews((previous) => ({
+                                          ...previous,
+                                          [answer.question_id]: {
+                                            manualPoints: previous[answer.question_id]?.manualPoints || '',
+                                            reviewComment: event.target.value,
+                                          },
+                                        }))
+                                      }
+                                      placeholder="Explain the scoring for this response..."
+                                      className="mt-1 min-h-[90px]"
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  Final score: {Number(answer.final_points_earned ?? answer.points_earned ?? 0)} / {Number(answer.points_possible ?? 0)} points
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          <p className="mt-2 text-sm text-foreground">{answerLabel}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {Number(answer.points_earned ?? 0)} / {Number(answer.points_possible ?? 0)} points
-                          </p>
-                        </div>
-                      )
-                    })
+                        )
+                      })
                   )}
                 </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">Score (%)</label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={score}
-                  onChange={(e) => setScore(e.target.value)}
-                  placeholder="Enter score"
-                  className="mt-1"
-                />
               </div>
 
               <div>
@@ -392,9 +551,9 @@ export default function GradingView() {
                 </Button>
                 <Button
                   onClick={handleGrade}
-                  disabled={grading || !score}
+                  disabled={grading || missingManualReviews.length > 0}
                 >
-                  {grading ? 'Saving...' : selectedSubmission.status === 'pending' ? 'Save Grade' : 'Update Grade'}
+                  {grading ? 'Saving...' : selectedSubmission.status === 'pending' ? 'Finalize Review' : 'Update Review'}
                 </Button>
               </div>
             </div>

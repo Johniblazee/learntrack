@@ -140,6 +140,40 @@ def _resolve_tenant_tutor_id(current_user: ClerkUserContext) -> str:
     return current_user.tutor_id or current_user.clerk_id
 
 
+def _normalize_text_answer(value: Optional[str]) -> str:
+    return (value or "").strip().lower()
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _derive_answer_points(answer: Dict[str, Any]) -> float:
+    if answer.get("final_points_earned") is not None:
+        return _coerce_float(answer.get("final_points_earned"), 0.0)
+    if answer.get("points_earned") is not None:
+        return _coerce_float(answer.get("points_earned"), 0.0)
+    return _coerce_float(answer.get("auto_points_earned"), 0.0)
+
+
+def _derive_submission_totals(
+    answers: List[Dict[str, Any]],
+) -> tuple[float, float, Optional[float]]:
+    total_points_possible = sum(
+        _coerce_float(answer.get("points_possible"), 0.0) for answer in answers
+    )
+    total_points_earned = sum(_derive_answer_points(answer) for answer in answers)
+    score = (
+        round((total_points_earned / total_points_possible) * 100, 2)
+        if total_points_possible > 0
+        else None
+    )
+    return round(total_points_earned, 2), round(total_points_possible, 2), score
+
+
 def _build_empty_progress_response(
     *, assignment_id: str, student_id: str, tutor_id: str, seed_time: datetime
 ) -> Progress:
@@ -665,6 +699,11 @@ async def submit_answer(
         for question in assignment_questions
         if question.get("question_id")
     }
+    assignment_question_meta = {
+        str(question.get("question_id")): question
+        for question in assignment_questions
+        if question.get("question_id")
+    }
 
     question_id_set = {
         str(answer.question_id) for answer in incoming_answers if answer.question_id
@@ -684,17 +723,17 @@ async def submit_answer(
         for doc in docs:
             question_docs[str(doc.get("_id"))] = doc
 
-    def normalize_text(value: Optional[str]) -> str:
-        return (value or "").strip().lower()
-
     scored_answers: List[QuestionAnswer] = []
     total_points_earned = 0.0
     total_points_possible = 0.0
     now = datetime.now(timezone.utc)
+    requires_manual_review = False
 
     for answer in incoming_answers:
         question_id = str(answer.question_id)
         question_doc = question_docs.get(question_id)
+        assignment_question = assignment_question_meta.get(question_id, {})
+        question_snapshot = assignment_question.get("snapshot") or {}
 
         points_possible = float(
             points_by_question.get(
@@ -702,23 +741,32 @@ async def submit_answer(
             )
         )
         answer_type = AnswerType.UNANSWERED
-        points_earned = 0.0
+        auto_points_earned = 0.0
+        final_points_earned = 0.0
+        answer_requires_manual_review = False
 
         selected_options = answer.selected_options or []
         answer_text = (answer.answer or "").strip()
         has_response = bool(answer_text or selected_options)
+        question_source = question_snapshot or question_doc or {}
+        question_text = str(question_source.get("question_text") or "").strip() or None
+        question_type = str(question_source.get("question_type") or "").strip() or None
 
-        if question_doc:
-            question_type = str(question_doc.get("question_type", "")).lower()
-            correct_answer = question_doc.get("correct_answer")
+        if question_source:
+            normalized_question_type = str(
+                question_source.get("question_type", "")
+            ).lower()
+            correct_answer = question_source.get("correct_answer")
 
-            if question_type == "multiple-choice":
+            if normalized_question_type == "multiple-choice":
                 correct_options = [
-                    normalize_text(option.get("text"))
-                    for option in question_doc.get("options", [])
+                    _normalize_text_answer(option.get("text"))
+                    for option in question_source.get("options", [])
                     if option.get("is_correct")
                 ]
-                submitted_options = [normalize_text(opt) for opt in selected_options]
+                submitted_options = [
+                    _normalize_text_answer(opt) for opt in selected_options
+                ]
 
                 if (
                     submitted_options
@@ -726,34 +774,37 @@ async def submit_answer(
                     and set(submitted_options) == set(correct_options)
                 ):
                     answer_type = AnswerType.CORRECT
-                    points_earned = points_possible
+                    auto_points_earned = points_possible
                 elif submitted_options:
                     answer_type = AnswerType.INCORRECT
                 else:
                     answer_type = AnswerType.UNANSWERED
 
-            elif question_type == "true-false":
+            elif normalized_question_type == "true-false":
                 submitted_value = answer_text or (
                     selected_options[0] if selected_options else ""
                 )
                 if not submitted_value:
                     answer_type = AnswerType.UNANSWERED
-                elif normalize_text(submitted_value) == normalize_text(
+                elif _normalize_text_answer(submitted_value) == _normalize_text_answer(
                     str(correct_answer or "")
                 ):
                     answer_type = AnswerType.CORRECT
-                    points_earned = points_possible
+                    auto_points_earned = points_possible
                 else:
                     answer_type = AnswerType.INCORRECT
 
-            elif question_type == "short-answer":
+            elif (
+                normalized_question_type == "short-answer"
+                and str(correct_answer or "").strip()
+            ):
                 if not answer_text:
                     answer_type = AnswerType.UNANSWERED
-                elif normalize_text(answer_text) == normalize_text(
+                elif _normalize_text_answer(answer_text) == _normalize_text_answer(
                     str(correct_answer or "")
                 ):
                     answer_type = AnswerType.CORRECT
-                    points_earned = points_possible
+                    auto_points_earned = points_possible
                 else:
                     answer_type = AnswerType.INCORRECT
 
@@ -761,20 +812,32 @@ async def submit_answer(
                 answer_type = (
                     AnswerType.PARTIAL if has_response else AnswerType.UNANSWERED
                 )
+                answer_requires_manual_review = has_response
         else:
             answer_type = AnswerType.PARTIAL if has_response else AnswerType.UNANSWERED
+            answer_requires_manual_review = has_response
 
+        final_points_earned = (
+            0.0 if answer_requires_manual_review else auto_points_earned
+        )
         total_points_possible += points_possible
-        total_points_earned += points_earned
+        total_points_earned += final_points_earned
+        requires_manual_review = requires_manual_review or answer_requires_manual_review
 
         scored_answers.append(
             QuestionAnswer(
                 question_id=question_id,
+                question_text=question_text,
+                question_type=question_type,
                 answer=answer.answer,
                 selected_options=selected_options,
                 answer_type=answer_type,
-                points_earned=round(points_earned, 2),
+                points_earned=round(final_points_earned, 2),
                 points_possible=round(points_possible, 2),
+                auto_points_earned=round(auto_points_earned, 2),
+                manual_points_earned=None,
+                final_points_earned=round(final_points_earned, 2),
+                requires_manual_review=answer_requires_manual_review,
                 time_spent=answer.time_spent,
                 answered_at=answer.answered_at or (now if has_response else None),
             )
@@ -782,7 +845,9 @@ async def submit_answer(
 
     score = (
         round((total_points_earned / total_points_possible) * 100, 2)
-        if total_points_possible > 0 and submission.submit_assignment
+        if total_points_possible > 0
+        and submission.submit_assignment
+        and not requires_manual_review
         else None
     )
 
@@ -940,6 +1005,42 @@ async def list_submissions_for_grading(
         subject_key = str(subject_raw) if subject_raw is not None else ""
         subject = subjects_by_id.get(subject_key, {})
         student = students_by_id.get(doc.get("student_id"), {})
+        assignment_question_lookup = {
+            str(question.get("question_id")): question
+            for question in assignment.get("questions", []) or []
+            if question.get("question_id")
+        }
+        answers = []
+        pending_manual_review_count = 0
+
+        for raw_answer in doc.get("answers", []) or []:
+            question_id = str(raw_answer.get("question_id") or "")
+            assignment_question = assignment_question_lookup.get(question_id, {})
+            question_snapshot = assignment_question.get("snapshot") or {}
+            requires_manual_review = bool(raw_answer.get("requires_manual_review"))
+            if requires_manual_review and raw_answer.get("reviewed_at") is None:
+                pending_manual_review_count += 1
+
+            answers.append(
+                {
+                    **raw_answer,
+                    "question_id": question_id,
+                    "question_text": raw_answer.get("question_text")
+                    or question_snapshot.get("question_text"),
+                    "question_type": raw_answer.get("question_type")
+                    or question_snapshot.get("question_type"),
+                    "points_possible": raw_answer.get("points_possible")
+                    if raw_answer.get("points_possible") is not None
+                    else assignment_question.get("points", 1),
+                    "auto_points_earned": raw_answer.get("auto_points_earned")
+                    if raw_answer.get("auto_points_earned") is not None
+                    else raw_answer.get("points_earned"),
+                    "final_points_earned": raw_answer.get("final_points_earned")
+                    if raw_answer.get("final_points_earned") is not None
+                    else raw_answer.get("points_earned"),
+                    "requires_manual_review": requires_manual_review,
+                }
+            )
 
         response_items.append(
             {
@@ -950,6 +1051,7 @@ async def list_submissions_for_grading(
                     "subject_id": {
                         "name": subject.get("name", "General"),
                     },
+                    "questions": assignment.get("questions", []),
                 },
                 "student_id": {
                     "_id": student.get("clerk_id", doc.get("student_id")),
@@ -957,7 +1059,7 @@ async def list_submissions_for_grading(
                     "name": student.get("name", "Unknown Student"),
                     "email": student.get("email", ""),
                 },
-                "answers": doc.get("answers", []),
+                "answers": answers,
                 "score": doc.get("score"),
                 "status": "pending"
                 if doc.get("status") == SubmissionStatus.SUBMITTED.value
@@ -965,6 +1067,7 @@ async def list_submissions_for_grading(
                 "submitted_at": doc.get("submitted_at") or doc.get("updated_at"),
                 "graded_at": doc.get("graded_at"),
                 "feedback": doc.get("feedback"),
+                "pending_manual_review_count": pending_manual_review_count,
             }
         )
 
@@ -1005,11 +1108,99 @@ async def grade_submission(
             detail="Only submitted work can be graded",
         )
 
+    existing_answers = list(existing.get("answers") or [])
+    review_map = {
+        str(review.question_id): review
+        for review in (grade_data.answer_reviews or [])
+        if str(review.question_id).strip()
+    }
+    now = datetime.now(timezone.utc)
+    updated_answers: List[Dict[str, Any]] = []
+    missing_manual_reviews: List[str] = []
+
+    for raw_answer in existing_answers:
+        answer = dict(raw_answer)
+        question_id = str(answer.get("question_id") or "")
+        points_possible = _coerce_float(answer.get("points_possible"), 0.0)
+        requires_manual_review = bool(answer.get("requires_manual_review"))
+        auto_points_earned = _coerce_float(
+            answer.get("auto_points_earned", answer.get("points_earned")),
+            0.0,
+        )
+        final_points_earned = _coerce_float(
+            answer.get("final_points_earned", answer.get("points_earned")),
+            auto_points_earned,
+        )
+        manual_points_earned = answer.get("manual_points_earned")
+
+        if requires_manual_review:
+            review = review_map.get(question_id)
+            if review is None:
+                if answer.get("reviewed_at") is None:
+                    missing_manual_reviews.append(question_id)
+                updated_answers.append(answer)
+                continue
+
+            clamped_manual_points = min(
+                max(float(review.manual_points_earned), 0.0),
+                points_possible,
+            )
+            manual_points_earned = round(clamped_manual_points, 2)
+            final_points_earned = manual_points_earned
+
+            if final_points_earned >= points_possible and points_possible > 0:
+                answer_type = AnswerType.CORRECT.value
+            elif final_points_earned <= 0:
+                answer_type = AnswerType.INCORRECT.value
+            else:
+                answer_type = AnswerType.PARTIAL.value
+
+            answer.update(
+                {
+                    "answer_type": answer_type,
+                    "manual_points_earned": manual_points_earned,
+                    "final_points_earned": round(final_points_earned, 2),
+                    "points_earned": round(final_points_earned, 2),
+                    "review_comment": (review.review_comment or "").strip() or None,
+                    "reviewed_at": now,
+                    "reviewed_by": current_user.clerk_id,
+                }
+            )
+        else:
+            answer.update(
+                {
+                    "auto_points_earned": round(auto_points_earned, 2),
+                    "final_points_earned": round(final_points_earned, 2),
+                    "points_earned": round(final_points_earned, 2),
+                }
+            )
+
+        updated_answers.append(answer)
+
+    if missing_manual_reviews:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="All manually reviewed answers must be scored before grading is finalized",
+        )
+
+    total_points_earned, total_points_possible, derived_score = (
+        _derive_submission_totals(updated_answers)
+    )
+
+    if derived_score is None and grade_data.score is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to determine a final score for this submission",
+        )
+
     update = ProgressUpdate(
+        answers=updated_answers,
         status=SubmissionStatus.GRADED,
-        score=grade_data.score,
+        score=derived_score if derived_score is not None else grade_data.score,
+        points_earned=total_points_earned,
+        points_possible=total_points_possible,
         feedback=grade_data.feedback,
-        graded_at=datetime.now(timezone.utc),
+        graded_at=now,
         graded_by=current_user.clerk_id,
     )
     updated_progress = await progress_service.update_progress(progress_id, update)
@@ -1043,14 +1234,14 @@ async def grade_submission(
             related_entity_type="assignment",
             metadata={
                 "assignment_title": assignment_title,
-                "score": grade_data.score,
+                "score": updated_progress.score,
                 "graded_by": current_user.clerk_id,
             },
         )
 
         score_label = (
-            f"{grade_data.score:.0f}%"
-            if isinstance(grade_data.score, (float, int))
+            f"{updated_progress.score:.0f}%"
+            if isinstance(updated_progress.score, (float, int))
             else "a new score"
         )
         await _create_notification_event(

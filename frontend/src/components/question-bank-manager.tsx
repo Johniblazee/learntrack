@@ -279,6 +279,10 @@ export default function QuestionBankManager() {
       state: {
         questionBankIds: [...selectedIds],
         initialAssignmentType: assignmentType,
+        workflowSource: {
+          label: 'Question Bank',
+          description: `${selectedIds.size} reusable question${selectedIds.size === 1 ? '' : 's'} were loaded from your question bank.`,
+        },
       }
     })
   }
@@ -935,7 +939,10 @@ export default function QuestionBankManager() {
       {selectedIds.size > 0 && (
         <div className="sticky bottom-0 z-40 pt-2">
           <div className="bg-card border border-border rounded-lg shadow-lg p-4 flex items-center justify-between">
-            <Badge variant="secondary">{selectedIds.size} question{selectedIds.size !== 1 ? 's' : ''} selected</Badge>
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary">{selectedIds.size} question{selectedIds.size !== 1 ? 's' : ''} selected</Badge>
+              <p className="text-sm text-muted-foreground">Use the selected bank questions to seed a draft assignment.</p>
+            </div>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={handleDeselectAll}>
                 <X className="w-4 h-4 mr-1" />
@@ -947,11 +954,11 @@ export default function QuestionBankManager() {
               </Button>
               <Button size="sm" variant="outline" onClick={() => handleAssignSelected('individual')}>
                 <Users className="w-4 h-4 mr-1" />
-                Assign to Students
+                Create for Students
               </Button>
               <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => handleAssignSelected('group')}>
                 <ClipboardList className="w-4 h-4 mr-1" />
-                Assign to Groups
+                Create for Groups
               </Button>
             </div>
           </div>

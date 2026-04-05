@@ -32,11 +32,20 @@ class QuestionAnswer(BaseModel):
     """Student answer to a question"""
 
     question_id: str
+    question_text: Optional[str] = None
+    question_type: Optional[str] = None
     answer: Optional[str] = None
     selected_options: List[str] = Field(default_factory=list)
     answer_type: AnswerType = AnswerType.UNANSWERED
     points_earned: float = 0.0
     points_possible: float = 1.0
+    auto_points_earned: Optional[float] = None
+    manual_points_earned: Optional[float] = None
+    final_points_earned: Optional[float] = None
+    requires_manual_review: bool = False
+    review_comment: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
     time_spent: Optional[int] = None  # seconds
     answered_at: Optional[datetime] = None
 
@@ -117,11 +126,20 @@ class AnswerSubmissionRequest(BaseModel):
     submit_assignment: bool = True
 
 
+class AnswerReviewUpdate(BaseModel):
+    """Tutor review for a manually graded answer."""
+
+    question_id: str
+    manual_points_earned: float = Field(..., ge=0)
+    review_comment: Optional[str] = None
+
+
 class GradeSubmissionRequest(BaseModel):
     """Payload for tutor grading updates"""
 
-    score: float = Field(..., ge=0, le=100)
+    score: Optional[float] = Field(default=None, ge=0, le=100)
     feedback: Optional[str] = None
+    answer_reviews: List[AnswerReviewUpdate] = Field(default_factory=list)
 
 
 class StudentProgress(BaseModel):

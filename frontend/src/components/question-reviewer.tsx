@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@clerk/clerk-react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CheckCircle, XCircle, AlertTriangle, Eye, Edit, ThumbsUp, ThumbsDown, Star, Search, BookOpen, MessageSquare, Flag, Clock, RefreshCw } from "lucide-react"
+import { CheckCircle, XCircle, AlertTriangle, Eye, Edit, ThumbsUp, ThumbsDown, Star, Search, BookOpen, MessageSquare, Flag, Clock, RefreshCw, ArrowRight } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { toast } from '@/contexts/ToastContext'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -160,6 +161,7 @@ const mapQuestionFromApi = (q: any): Question => {
 
 export default function QuestionReviewer() {
   const { getToken } = useAuth()
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState("review")
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
@@ -564,20 +566,20 @@ export default function QuestionReviewer() {
   const handlePublishApprovedQuestion = async (
     question: Question,
     options?: { silent?: boolean },
-  ): Promise<boolean> => {
+  ): Promise<string | null> => {
     if (!question.session_id) {
       if (!options?.silent) {
         toast.error('Session ID not found for this question')
       }
-      return false
+      return null
     }
 
     const subjectId = resolveSubjectIdForQuestion(question)
-    if (!subjectId) {
-      if (!options?.silent) {
-        toast.error('Select or fix the subject before publishing this question.')
-      }
-      return false
+      if (!subjectId) {
+        if (!options?.silent) {
+          toast.error('Select or fix the subject before publishing this question.')
+        }
+      return null
     }
 
     try {
@@ -636,7 +638,7 @@ export default function QuestionReviewer() {
             : 'The approved draft is now available in your question bank.',
         })
       }
-      return true
+      return publishedQuestionId || question.publishedQuestionId || null
     } catch (error: unknown) {
       console.error('Failed to publish approved question:', error)
       if (!options?.silent) {
@@ -644,7 +646,54 @@ export default function QuestionReviewer() {
           description: error instanceof Error ? error.message : 'Please try again later',
         })
       }
-      return false
+      return null
+    }
+  }
+
+  const handleCreateAssignmentFromApproved = async (questionsToUse: Question[]) => {
+    if (questionsToUse.length === 0) {
+      toast.error('Select at least one approved question')
+      return
+    }
+
+    try {
+      const publishResults = await Promise.all(
+        questionsToUse.map((question) => handlePublishApprovedQuestion(question, { silent: true })),
+      )
+
+      const publishedQuestionIds = publishResults.filter(Boolean) as string[]
+      if (publishedQuestionIds.length === 0) {
+        toast.error('No approved questions could be published to the question bank')
+        return
+      }
+
+      const uniqueTopics = Array.from(new Set(questionsToUse.map((question) => String(question.topic || '').trim()).filter(Boolean)))
+      const uniqueSubjectIds = Array.from(
+        new Set(
+          questionsToUse
+            .map((question) => resolveSubjectIdForQuestion(question) || '')
+            .filter(Boolean),
+        ),
+      )
+
+      navigate('/dashboard/assignments/create', {
+        state: {
+          questionBankIds: publishedQuestionIds,
+          prefillTitle:
+            questionsToUse.length === 1
+              ? `${questionsToUse[0].topic || 'Question'} Assignment`
+              : `Assignment from ${questionsToUse.length} approved questions`,
+          prefillTopic: uniqueTopics.length === 1 ? uniqueTopics[0] : '',
+          prefillSubjectId: uniqueSubjectIds.length === 1 ? uniqueSubjectIds[0] : '',
+          workflowSource: {
+            label: 'Question Review',
+            description: `${publishedQuestionIds.length} approved question${publishedQuestionIds.length === 1 ? '' : 's'} were published to the question bank and loaded here.`,
+          },
+        },
+      })
+    } catch (error) {
+      console.error('Failed to prepare approved questions for assignment creation:', error)
+      toast.error('Failed to prepare approved questions for assignment creation')
     }
   }
 
@@ -1592,6 +1641,15 @@ export default function QuestionReviewer() {
                         >
                           Clear
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleCreateAssignmentFromApproved(approvedQuestions.filter((question) => selectedApprovedQuestions.has(question.id)))}
+                          className="h-8"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
+                          Publish & Create Assignment
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -1745,6 +1803,13 @@ export default function QuestionReviewer() {
                         )}
 
                         <div className="px-6 py-4 bg-muted/20 border-t border-border flex items-center justify-end gap-3">
+                          <Button
+                            variant="outline"
+                            onClick={() => void handleCreateAssignmentFromApproved([question])}
+                          >
+                            <ArrowRight className="w-4 h-4 mr-2" />
+                            Create Assignment
+                          </Button>
                           <Button
                             onClick={() => void handlePublishApprovedQuestion(question)}
                             className="bg-primary hover:bg-primary/90"

@@ -25,10 +25,16 @@ import StudentSelector from '@/components/StudentSelector'
 import QuestionBankSelector, { QuestionItem } from '@/components/QuestionBankSelector'
 import { useSubjects } from '@/hooks/useQueries'
 
+interface WorkflowSourceState {
+  label?: string
+  description?: string
+}
+
 export default function CreateAssignmentView() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
+  const workflowSource = ((location.state as any)?.workflowSource || null) as WorkflowSourceState | null
   const initialAssignmentType = (() => {
     const maybeAssignmentType = (location.state as any)?.initialAssignmentType
     return maybeAssignmentType === 'group' || maybeAssignmentType === 'subject'
@@ -67,6 +73,9 @@ export default function CreateAssignmentView() {
     const maybeTemplate = (location.state as any)?.template
     const maybeQuestionBankIds = (location.state as any)?.questionBankIds
     const maybeInitialAssignmentType = (location.state as any)?.initialAssignmentType
+    const prefillTitle = String((location.state as any)?.prefillTitle || '')
+    const prefillTopic = String((location.state as any)?.prefillTopic || '')
+    const prefillSubjectId = String((location.state as any)?.prefillSubjectId || '')
 
     if (
       maybeInitialAssignmentType === 'individual' ||
@@ -163,7 +172,13 @@ export default function CreateAssignmentView() {
       if (appliedTemplateId === '__question_bank__') return
 
       const questionIds: string[] = maybeQuestionBankIds.map((id: any) => String(id))
-      setFormData((prev) => ({ ...prev, selectedQuestions: questionIds }))
+      setFormData((prev) => ({
+        ...prev,
+        title: prev.title || prefillTitle,
+        topic: prev.topic || prefillTopic,
+        subject: prev.subject || prefillSubjectId,
+        selectedQuestions: questionIds,
+      }))
 
       const hydrateQuestionDetails = async () => {
         if (questionIds.length === 0) {
@@ -213,7 +228,7 @@ export default function CreateAssignmentView() {
           if (uniqueSubjectIds.length === 1) {
             setFormData((prev) => ({
               ...prev,
-              subject: prev.subject || uniqueSubjectIds[0],
+              subject: prev.subject || prefillSubjectId || uniqueSubjectIds[0],
             }))
           }
         } catch (error) {
@@ -345,6 +360,20 @@ export default function CreateAssignmentView() {
           Back to Assignments
         </Button>
       </div>
+
+      {workflowSource?.label && (
+        <Card className="border border-border bg-muted/30">
+          <CardContent className="flex items-start justify-between gap-4 p-4">
+            <div>
+              <p className="text-sm font-medium text-foreground">Loaded from {workflowSource.label}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {workflowSource.description || 'Selected questions were loaded into this draft assignment.'}
+              </p>
+            </div>
+            <Badge variant="secondary">{formData.selectedQuestions.length} question{formData.selectedQuestions.length === 1 ? '' : 's'}</Badge>
+          </CardContent>
+        </Card>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
