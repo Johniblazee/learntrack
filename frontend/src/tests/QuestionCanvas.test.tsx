@@ -5,7 +5,7 @@ import { QuestionCanvas } from '@/components/question-generator/QuestionCanvas'
 
 
 describe('QuestionCanvas', () => {
-  it('shows publish and approve-all actions for the correct draft counts', () => {
+  it('shows publish or sync and approve-all actions for the current draft counts', () => {
     render(
       <QuestionCanvas
         isGenerating={false}
@@ -54,7 +54,7 @@ describe('QuestionCanvas', () => {
       />,
     )
 
-    expect(screen.getByText('Publish Approved (1)')).toBeInTheDocument()
+    expect(screen.getByText('Publish or Sync Approved (2)')).toBeInTheDocument()
     expect(screen.getByText('Approve All (1)')).toBeInTheDocument()
     expect(screen.getByText('1 published')).toBeInTheDocument()
   })

@@ -2,9 +2,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUser } from '@clerk/clerk-react'
 import { useApiClient } from '@/lib/api-client'
 
+export interface VisibleUserDetail {
+  user_id: string
+  name: string
+  role: string
+}
+
 interface VisibilityData {
   visibleUsers: string[]
   visibleUserIds: string[]
+  visibleUserDetails: VisibleUserDetail[]
   loading: boolean
   error: string | null
   canSeeUser: (userId: string) => boolean
@@ -28,6 +35,18 @@ export function useVisibility(): VisibilityData {
         : []
     },
     enabled: !!user,
+  })
+
+  const detailedQuery = useQuery({
+    queryKey: ['visibility', 'users-detailed'],
+    queryFn: async () => {
+      const response = await client.get('/visibility/visible-users-detailed')
+      if (response.error) throw new Error(response.error)
+      const data = response.data
+      return Array.isArray(data) ? (data as VisibleUserDetail[]) : []
+    },
+    enabled: !!user,
+    staleTime: 60_000,
   })
 
   useQuery({
@@ -71,6 +90,7 @@ export function useVisibility(): VisibilityData {
   return {
     visibleUsers,
     visibleUserIds: visibleUsers,
+    visibleUserDetails: detailedQuery.data || [],
     loading,
     error,
     canSeeUser,

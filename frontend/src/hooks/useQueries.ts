@@ -110,6 +110,14 @@ export interface StudentDashboardStatsResponse {
   current_grade: string
 }
 
+export interface TutorWorkflowSummary {
+  pendingReviewQuestions: number
+  approvedQuestionsReadyToPublish: number
+  draftAssignments: number
+  submissionsNeedingReview: number
+  submissionsReadyToRelease: number
+}
+
 export interface StudentSubjectPerformance {
   subject: string
   score: number
@@ -436,6 +444,79 @@ export function useDashboardStats() {
       return response.data
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
+  })
+}
+
+export function useTutorWorkflowSummary() {
+  const client = useApiClient()
+
+  return useQuery<TutorWorkflowSummary>({
+    queryKey: ['dashboard', 'workflow-summary'],
+    queryFn: async () => {
+      const [sessionsResponse, submissionsResponse] = await Promise.all([
+        client.get('/question-generator/sessions?per_page=100'),
+        client.get('/progress/submissions'),
+      ])
+
+      if (sessionsResponse.error) throw new Error(sessionsResponse.error)
+      if (submissionsResponse.error) throw new Error(submissionsResponse.error)
+
+      const sessionsPayload = sessionsResponse.data as {
+        items?: Array<{ questions?: Array<Record<string, unknown>> }>
+      } | undefined
+      const submissionsPayload = Array.isArray(submissionsResponse.data)
+        ? submissionsResponse.data
+        : []
+
+      const sessions = Array.isArray(sessionsPayload?.items) ? sessionsPayload.items : []
+
+      let draftAssignments = 0
+      let page = 1
+      let totalPages = 1
+
+      while (page <= totalPages) {
+        const assignmentsResponse = await client.get(`/assignments?page=${page}&per_page=100`)
+        if (assignmentsResponse.error) throw new Error(assignmentsResponse.error)
+
+        const payload = assignmentsResponse.data as PaginatedResponse<JsonRecord> | JsonRecord[]
+        const pageItems = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.items)
+            ? payload.items
+            : []
+
+        draftAssignments += pageItems.filter((assignment) => String(assignment?.status || '').toLowerCase() === 'draft').length
+        totalPages = Array.isArray(payload) ? 1 : Number(payload?.meta?.total_pages || 1)
+        page += 1
+      }
+
+      const sessionQuestions = sessions.flatMap((session) =>
+        Array.isArray(session?.questions) ? session.questions : [],
+      )
+
+      return {
+        pendingReviewQuestions: sessionQuestions.filter((question) => {
+          const status = String(question?.status || '').toLowerCase()
+          return status === 'pending'
+        }).length,
+        approvedQuestionsReadyToPublish: sessionQuestions.filter((question) => {
+          const status = String(question?.status || '').toLowerCase()
+          const publishedQuestionId = String(
+            question?.published_question_id || question?.publishedQuestionId || '',
+          ).trim()
+          return status === 'approved' && !publishedQuestionId
+        }).length,
+        draftAssignments,
+        submissionsNeedingReview: submissionsPayload.filter((submission) => String(submission?.status || '').toLowerCase() === 'pending').length,
+        submissionsReadyToRelease: submissionsPayload.filter((submission) => {
+          const status = String(submission?.status || '').toLowerCase()
+          const releasedAt = String(submission?.results_released_at || '').trim()
+          return status === 'graded' && !releasedAt
+        }).length,
+      }
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
   })
 }
 

@@ -90,7 +90,7 @@ Every MongoDB document carries a `tutor_id` field equal to the **tutor's Clerk u
 
 `DashboardPage` reads the role from `UserContext` and renders `TutorDashboard`, `StudentDashboard`, or `ParentDashboard`. Each dashboard defines its own nested `<Routes>` tree.
 
-The **Tutor Dashboard** is the most complex — it has 15+ nested views covering assignments (create, list, grade, templates), students, groups, content generation/review/bank, materials, subjects, messages, and invitations.
+The **Tutor Dashboard** is the most complex — it has 13+ nested views covering assignments (create, list, grade, templates), students, groups, content generation/review/bank, materials, messages, and invitations.
 
 Admin routes live under `/admin/*` and are guarded by `AdminProtectedRoute`, which checks `isSuperAdmin` plus an optional `requiredPermission` prop mapped to `AdminPermission` enum values.
 

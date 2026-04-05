@@ -490,6 +490,12 @@ export default function AssignmentTemplatesView() {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Assignment Templates</h1>
           <p className="text-muted-foreground mt-1">Create and manage reusable assignment templates</p>
+          <div className="mt-3 flex items-center gap-2">
+            <Badge variant="secondary">Optional for MVP</Badge>
+            <p className="text-sm text-muted-foreground">
+              Pilot delivery does not depend on templates. Use the direct draft and publish workflow first.
+            </p>
+          </div>
         </div>
         <Button onClick={openCreateEditor} className="bg-primary text-primary-foreground hover:bg-primary/90">
           <Plus className="w-4 h-4 mr-2" />

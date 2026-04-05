@@ -14,6 +14,9 @@ import {
   Search,
   Mail,
   MessageCircle,
+  PenSquare,
+  X,
+  Users,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -64,6 +67,7 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
   const client = useApiClient()
   const {
     visibleUserIds,
+    visibleUserDetails,
     loading: visibilityLoading,
     error: visibilityError,
   } = useVisibility()
@@ -86,6 +90,17 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   // Scroll container for the conversation list — used by the virtualizer (H8)
   const convListRef = useRef<HTMLDivElement>(null)
+  const [showContactPicker, setShowContactPicker] = useState(false)
+  const [contactSearch, setContactSearch] = useState("")
+  const [creatingConversation, setCreatingConversation] = useState(false)
+
+  const filteredContacts = useMemo(() => {
+    if (!visibleUserDetails.length) return []
+    const q = contactSearch.toLowerCase()
+    return visibleUserDetails.filter(
+      (u) => u.name.toLowerCase().includes(q) || u.role.toLowerCase().includes(q)
+    )
+  }, [visibleUserDetails, contactSearch])
 
   // Initialize socket connection
   useEffect(() => {
@@ -273,6 +288,28 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
     setEmailSubject("")
     setSelectedConversation(conversation)
     loadMessages(conversation._id)
+  }
+
+  const handleStartConversation = async (targetUserId: string) => {
+    try {
+      setCreatingConversation(true)
+      const response = await client.post(`/conversations/with-user/${targetUserId}`, {})
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      const conversation = response.data as Conversation
+      await loadConversations()
+      setSelectedConversation(conversation)
+      setShowContactPicker(false)
+      setContactSearch("")
+      if (conversation._id) {
+        await loadMessages(conversation._id)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to start conversation')
+    } finally {
+      setCreatingConversation(false)
+    }
   }
 
   const getOtherParticipantId = (conversation: Conversation) => {
@@ -524,16 +561,75 @@ export default function ConversationsView({ routeMode = 'chats' }: Conversations
       <div className="w-80 border-r border-border flex flex-col bg-card">
         {/* Header */}
         <div className="p-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground mb-4">{viewTitle}</h2>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder={routeMode === 'emails' ? 'Search people or message previews...' : 'Search conversations...'}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-10 bg-background border-border"
-            />
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-foreground">{viewTitle}</h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setShowContactPicker((prev) => !prev)}
+              title="New message"
+            >
+              {showContactPicker ? <X className="h-4 w-4" /> : <PenSquare className="h-4 w-4" />}
+            </Button>
           </div>
+
+          {showContactPicker ? (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search contacts..."
+                  value={contactSearch}
+                  onChange={(e) => setContactSearch(e.target.value)}
+                  className="pl-9 h-10 bg-background border-border"
+                  autoFocus
+                />
+              </div>
+              <div className="max-h-52 overflow-y-auto rounded-md border border-border bg-background">
+                {visibilityLoading || creatingConversation ? (
+                  <div className="flex items-center justify-center py-6">
+                    <LoadingSpinner size="sm" />
+                  </div>
+                ) : filteredContacts.length === 0 ? (
+                  <div className="py-6 text-center">
+                    <Users className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
+                    <p className="text-xs text-muted-foreground">No contacts found</p>
+                  </div>
+                ) : (
+                  filteredContacts.map((contact) => (
+                    <button
+                      key={contact.user_id}
+                      type="button"
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                      onClick={() => void handleStartConversation(contact.user_id)}
+                      disabled={creatingConversation}
+                    >
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="bg-muted text-muted-foreground text-xs">
+                          {contact.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{contact.name}</p>
+                        <p className="text-[11px] text-muted-foreground capitalize">{contact.role}</p>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder={routeMode === 'emails' ? 'Search people or message previews...' : 'Search conversations...'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-10 bg-background border-border"
+              />
+            </div>
+          )}
         </div>
 
         {/* Conversations List — virtualized to handle large lists without DOM bloat (H8) */}
