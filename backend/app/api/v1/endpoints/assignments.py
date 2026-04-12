@@ -156,7 +156,7 @@ async def get_my_assignments(
 
         result = await assignment_service.get_student_assignment_summaries(
             student_id=current_user.clerk_id,
-            tutor_id=current_user.tutor_id or current_user.clerk_id,
+            tutor_id=current_user.tenant_id,
             status=status,
             page=page,
             per_page=per_page,

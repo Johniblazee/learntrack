@@ -5,15 +5,17 @@ Allows privileged users to impersonate accounts for support/debugging
 
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 import secrets
 import structlog
 
+from app.core.config import settings
 from app.core.database import get_database
 from app.core.enhanced_auth import (
     AUTHENTICATED_ACTOR_STATE_KEY,
+    IMPERSONATION_SESSION_COOKIE,
     require_authenticated_user,
     ClerkUserContext,
 )
@@ -34,6 +36,36 @@ from app.api.v1.admin.audit_utils import log_admin_action as _log_admin_action
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+# Impersonation cookies live for the session lifetime (1 hour). In production,
+# frontend and backend may be served from different subdomains under the same
+# site; `SameSite=Lax` covers same-site navigation, and we flip to `Secure`
+# under HTTPS. The cookie is `httpOnly` so it is unreadable to any script (the
+# whole point — it neutralizes XSS-replayable session theft).
+_IMPERSONATION_COOKIE_MAX_AGE = 60 * 60  # 1 hour, matches ImpersonationSession TTL
+
+
+def _is_production() -> bool:
+    return str(getattr(settings, "ENVIRONMENT", "development")).lower() == "production"
+
+
+def _set_impersonation_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        key=IMPERSONATION_SESSION_COOKIE,
+        value=session_id,
+        max_age=_IMPERSONATION_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=_is_production(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_impersonation_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=IMPERSONATION_SESSION_COOKIE,
+        path="/",
+    )
 
 
 def _can_impersonate_any_user(current_user: ClerkUserContext) -> bool:
@@ -88,6 +120,7 @@ async def get_active_impersonation_session(
 async def start_impersonation(
     payload: ImpersonationStartRequest,
     request: Request,
+    response: Response,
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
@@ -160,6 +193,7 @@ async def start_impersonation(
         )
 
         await put_impersonation_session(session)
+        _set_impersonation_cookie(response, session_id)
 
         # Log the impersonation start
         await _log_admin_action(
@@ -208,16 +242,33 @@ async def start_impersonation(
 
 @router.post("/end")
 async def end_impersonation(
-    session_id: str,
     request: Request,
+    response: Response,
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """End an impersonation session"""
+    """End the caller's active impersonation session.
+
+    The session identifier is read from the `httpOnly` cookie — an explicit
+    `session_id` query parameter is no longer accepted, since allowing one
+    would let an XSS payload call this endpoint for any session it could
+    observe (defeats the cookie hardening).
+    """
     try:
+        session_id = request.cookies.get(IMPERSONATION_SESSION_COOKIE)
+        if not isinstance(session_id, str) or not session_id.strip():
+            # Clear the cookie defensively in case the browser still holds a
+            # stale copy, then return a 404 so the client can reset its UI.
+            _clear_impersonation_cookie(response)
+            raise HTTPException(
+                status_code=404, detail="Impersonation session not found"
+            )
+
+        session_id = session_id.strip()
         session = await get_impersonation_session_record(session_id)
 
         if not session:
+            _clear_impersonation_cookie(response)
             raise HTTPException(
                 status_code=404, detail="Impersonation session not found"
             )
@@ -231,6 +282,7 @@ async def end_impersonation(
 
         # Remove the session
         await remove_impersonation_session(session_id)
+        _clear_impersonation_cookie(response)
 
         # Log the impersonation end
         await _log_admin_action(
@@ -266,6 +318,55 @@ async def end_impersonation(
         raise HTTPException(
             status_code=500, detail=f"Failed to end impersonation: {str(e)}"
         )
+
+
+@router.get("/current")
+async def get_current_impersonation_session(
+    request: Request,
+    response: Response,
+    current_user: ClerkUserContext = Depends(require_authenticated_user),
+):
+    """Return the caller's active impersonation session (from cookie), if any.
+
+    Used by the frontend to rehydrate display state after a page reload — the
+    session cookie is `httpOnly`, so the frontend cannot read it directly and
+    must ask the server what the current session is.
+    """
+    session_id = request.cookies.get(IMPERSONATION_SESSION_COOKIE)
+    if not isinstance(session_id, str) or not session_id.strip():
+        return {"active": False}
+
+    session = await get_impersonation_session_record(session_id.strip())
+    if not session:
+        # Cookie is stale — drop it so the browser stops sending it.
+        _clear_impersonation_cookie(response)
+        return {"active": False}
+
+    requester_clerk_id = _get_requester_clerk_id(request, current_user)
+    if session.admin_clerk_id != requester_clerk_id:
+        # Someone else's session is being replayed by this admin's browser —
+        # do not leak any details; treat as no active session and clear.
+        _clear_impersonation_cookie(response)
+        return {"active": False}
+
+    remaining_minutes = max(
+        0,
+        int((session.expires_at - datetime.now(timezone.utc)).total_seconds() / 60),
+    )
+
+    return {
+        "active": True,
+        "session_id": session.session_id,
+        "target_user": {
+            "id": session.target_user_id,
+            "clerk_id": session.target_clerk_id,
+            "email": session.target_email,
+            "name": session.target_name,
+            "role": session.target_role,
+            "tutor_id": session.target_tutor_id,
+        },
+        "remaining_minutes": remaining_minutes,
+    }
 
 
 @router.get("/session/{session_id}")

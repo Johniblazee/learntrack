@@ -379,7 +379,11 @@ class UserService:
             raise DatabaseException(f"Failed to get user: {str(e)}")
 
     async def update_user_role(
-        self, clerk_id: str, new_role: UserRole
+        self,
+        clerk_id: str,
+        new_role: UserRole,
+        *,
+        mark_onboarding_complete: bool = False,
     ) -> Optional[User]:
         """Update a user's role, moving records across role collections when needed."""
         try:
@@ -402,6 +406,19 @@ class UserService:
 
             current_role = UserRole(source_doc.get("role", UserRole.STUDENT.value))
             if current_role == new_role:
+                if mark_onboarding_complete and not source_doc.get(
+                    "onboarding_completed"
+                ):
+                    await source_collection.update_one(
+                        {"_id": source_doc["_id"]},
+                        {
+                            "$set": {
+                                "onboarding_completed": True,
+                                "updated_at": datetime.now(timezone.utc),
+                            }
+                        },
+                    )
+                    source_doc["onboarding_completed"] = True
                 return User(**source_doc)
 
             now = datetime.now(timezone.utc)
@@ -410,6 +427,8 @@ class UserService:
             migrated_doc = {k: v for k, v in source_doc.items() if k != "_id"}
             migrated_doc["role"] = new_role.value
             migrated_doc["updated_at"] = now
+            if mark_onboarding_complete:
+                migrated_doc["onboarding_completed"] = True
 
             if new_role == UserRole.TUTOR:
                 migrated_doc["tutor_id"] = clerk_id

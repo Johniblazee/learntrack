@@ -128,14 +128,19 @@ async def lifespan(app: FastAPI):
         logger.error("Error during FastAPI application shutdown", error=str(e))
 
 
+_is_production = str(settings.ENVIRONMENT).lower() == "production"
+
 app = FastAPI(
     title="LearnTrack API",
     version="1.0.0",
     lifespan=lifespan,
     redirect_slashes=False,  # Disable automatic redirects to avoid auth issues with CORS
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    # Swagger UI and ReDoc use inline bootstrap scripts, which would require
+    # `'unsafe-inline'` in `script-src`. We'd rather tighten CSP in production
+    # than punch a hole in it for a page that shouldn't be exposed publicly.
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
     description="""
     ## LearnTrack - Smart Assignment & Progress Monitoring API
 
@@ -203,7 +208,7 @@ app.add_middleware(
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-LearnTrack-Impersonation-Session"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 

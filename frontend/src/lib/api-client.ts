@@ -6,30 +6,11 @@ import { API_BASE_URL } from './config'
 const API_ROOT = API_BASE_URL
 let globalTokenGetter: (() => Promise<string | null>) | null = null
 
-export const IMPERSONATION_STORAGE_KEY = 'impersonation_session'
+// Broadcast event fired whenever the active impersonation session changes so
+// that other contexts (e.g. UserContext) can refresh their cached data. The
+// session identifier itself lives in an `httpOnly` cookie set by the backend,
+// so the frontend never reads or writes it directly.
 export const IMPERSONATION_SESSION_CHANGED_EVENT = 'learntrack:impersonation-session-changed'
-
-function readImpersonationSessionId(): string | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  const raw = window.localStorage.getItem(IMPERSONATION_STORAGE_KEY)
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(raw)
-    if (typeof parsed?.sessionId === 'string' && parsed.sessionId.trim()) {
-      return parsed.sessionId
-    }
-  } catch {
-    return null
-  }
-
-  return null
-}
 
 export interface ApiResponse<T = any> {
   data?: T
@@ -75,11 +56,6 @@ export class ApiClient {
       const sanitized = endpoint.replace(/^\/api\/v\d+/, '')
       let path = sanitized.startsWith('/') ? sanitized : `/${sanitized}`
 
-      const impersonationSessionId = readImpersonationSessionId()
-      if (impersonationSessionId && !path.startsWith('/admin/')) {
-        headers['X-LearnTrack-Impersonation-Session'] = impersonationSessionId
-      }
-
       // Ensure trailing slash for root collection endpoints (FastAPI routes with redirect_slashes=False)
       // Only add trailing slash for top-level collection endpoints like /students, /groups, /invitations
       // Do NOT add trailing slash for nested paths like /dashboard/stats, /students/123, etc.
@@ -99,6 +75,9 @@ export class ApiClient {
       const response = await fetch(`${API_ROOT}${path}`, {
         ...options,
         headers,
+        // Send cookies so the impersonation session cookie (httpOnly) is
+        // included on every authenticated request.
+        credentials: 'include',
         signal: controller.signal,
       })
 

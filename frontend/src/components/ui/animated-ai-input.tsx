@@ -11,7 +11,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { AI_PROVIDERS } from "@/lib/ai-models";
 
 // Flatten all models from AI_PROVIDERS for the dropdown

@@ -199,8 +199,17 @@ class FakeCursor:
 
 
 class FakeCollection:
-    def __init__(self, documents: Optional[Iterable[Dict[str, Any]]] = None):
+    def __init__(
+        self,
+        documents: Optional[Iterable[Dict[str, Any]]] = None,
+        name: Optional[str] = None,
+    ):
         self.documents = [deepcopy(document) for document in documents or []]
+        # Motor collections expose `.name`; the user service uses it to decide
+        # whether the source and target collections differ during a role
+        # migration. Default to a unique sentinel so unnamed fakes still compare
+        # as distinct instances.
+        self.name = name or f"fake_collection_{id(self)}"
 
     def find(
         self,
@@ -286,11 +295,26 @@ class FakeCollection:
         query: Dict[str, Any],
         update: Dict[str, Any],
         return_document: bool = False,
+        upsert: bool = False,
+        **_: Any,
     ):
         for document in self.documents:
             if _matches(document, query):
                 _apply_update(document, update)
                 return deepcopy(document)
+
+        if upsert:
+            new_document: Dict[str, Any] = {}
+            for key, value in query.items():
+                if isinstance(key, str) and not key.startswith("$") and not isinstance(
+                    value, dict
+                ):
+                    new_document[key] = deepcopy(value)
+            new_document.update(deepcopy(update.get("$setOnInsert", {})))
+            _apply_update(new_document, update)
+            self.documents.append(new_document)
+            return deepcopy(new_document)
+
         return None
 
     async def insert_one(self, document: Dict[str, Any]):
@@ -357,12 +381,22 @@ class FakeCollection:
 
 
 class FakeDatabase(dict):
-    """Dict subclass that auto-creates FakeCollection for any key access."""
+    """Dict subclass that auto-creates FakeCollection for any key access.
+
+    Supports both dict-style (db["tutors"]) and attribute-style (db.tutors)
+    access, matching Motor's AsyncIOMotorDatabase interface.
+    """
 
     def __missing__(self, key):
-        collection = FakeCollection()
+        collection = FakeCollection(name=key)
         self[key] = collection
         return collection
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 
 # ---------------------------------------------------------------------------

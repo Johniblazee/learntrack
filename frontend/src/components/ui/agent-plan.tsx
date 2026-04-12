@@ -8,7 +8,7 @@ import {
   CircleDotDashed,
   CircleX,
 } from "lucide-react";
-import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
+import { motion, AnimatePresence, LayoutGroup } from "motion/react";
 
 // Type definitions
 interface Subtask {

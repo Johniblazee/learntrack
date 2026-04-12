@@ -1,123 +1,109 @@
 """
-Dependency injection for FastAPI endpoints
-Provides singleton service instances to avoid per-request instantiation
+Dependency injection for FastAPI endpoints.
+
+Services are created per-request rather than cached. The previous implementation
+keyed a class-name-only cache, which meant that once any test (or DB reconnect)
+swapped the underlying `AsyncIOMotorDatabase` handle, subsequent requests kept
+reusing the service bound to the old handle — a footgun that would not surface
+until the first time two database contexts coexisted. Since services are thin
+wrappers around the async Mongo driver, per-request construction is cheap and
+makes lifetime explicit.
 """
 
-import asyncio
 from typing import Annotated
 
 from fastapi import Depends
 from motor.motor_asyncio import AsyncIOMotorDatabase
-import structlog
 
 from app.core.database import get_database
 
-logger = structlog.get_logger()
 
-
-# Service factory functions with caching
-# These create service instances that are reused across requests
-class ServiceContainer:
-    """
-    Container for service instances.
-    Services are lazily initialized and cached by service class name only.
-    """
-
-    _instances: dict = {}
-    _lock: asyncio.Lock = asyncio.Lock()
-
-    @classmethod
-    async def get_service(cls, service_class, database: AsyncIOMotorDatabase):
-        """Get or create a service instance (thread-safe)"""
-        key = service_class.__name__
-        if key not in cls._instances:
-            async with cls._lock:
-                # Double-check after acquiring lock
-                if key not in cls._instances:
-                    cls._instances[key] = service_class(database)
-                    logger.debug(f"Created new {service_class.__name__} instance")
-        return cls._instances[key]
-
-    @classmethod
-    def clear(cls):
-        """Clear all cached service instances (useful for testing)"""
-        cls._instances.clear()
-
-
-# Question Service Dependency
-async def get_question_service(database: AsyncIOMotorDatabase = Depends(get_database)):
-    """Dependency to get QuestionService instance"""
+async def get_question_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     from app.services.question_service import QuestionService
 
-    return await ServiceContainer.get_service(QuestionService, database)
+    return QuestionService(database)
 
 
-# Assignment Service Dependency
 async def get_assignment_service(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Dependency to get AssignmentService instance"""
     from app.services.assignment_service import AssignmentService
 
-    return await ServiceContainer.get_service(AssignmentService, database)
+    return AssignmentService(database)
 
 
-# Subject Service Dependency
-async def get_subject_service(database: AsyncIOMotorDatabase = Depends(get_database)):
-    """Dependency to get SubjectService instance"""
+async def get_subject_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     from app.services.subject_service import SubjectService
 
-    return await ServiceContainer.get_service(SubjectService, database)
+    return SubjectService(database)
 
 
-# User Service Dependency
-async def get_user_service(database: AsyncIOMotorDatabase = Depends(get_database)):
-    """Dependency to get UserService instance"""
+async def get_user_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     from app.services.user_service import UserService
 
-    return await ServiceContainer.get_service(UserService, database)
+    return UserService(database)
 
 
-# Invitation Service Dependency
 async def get_invitation_service(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Dependency to get InvitationService instance"""
     from app.services.invitation_service import InvitationService
 
-    return await ServiceContainer.get_service(InvitationService, database)
+    return InvitationService(database)
 
 
-# Material Service Dependency
-async def get_material_service(database: AsyncIOMotorDatabase = Depends(get_database)):
-    """Dependency to get MaterialService instance"""
+async def get_material_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     from app.services.material_service import MaterialService
 
-    return await ServiceContainer.get_service(MaterialService, database)
+    return MaterialService(database)
 
 
-# Message Service Dependency
-async def get_message_service(database: AsyncIOMotorDatabase = Depends(get_database)):
-    """Dependency to get MessageService instance"""
+async def get_message_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     from app.services.message_service import MessageService
 
-    return await ServiceContainer.get_service(MessageService, database)
+    return MessageService(database)
 
 
-# Progress Service Dependency
-async def get_progress_service(database: AsyncIOMotorDatabase = Depends(get_database)):
-    """Dependency to get ProgressService instance"""
+async def get_progress_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     from app.services.progress_service import ProgressService
 
-    return await ServiceContainer.get_service(ProgressService, database)
+    return ProgressService(database)
 
 
-# RAG Service Dependency (special case - may need API keys)
-async def get_rag_service(database: AsyncIOMotorDatabase = Depends(get_database)):
-    """Dependency to get RAGService instance"""
+async def get_notification_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    from app.services.notification_service import NotificationService
+
+    return NotificationService(database)
+
+
+async def get_activity_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
+    from app.services.activity_service import ActivityService
+
+    return ActivityService(database)
+
+
+async def get_rag_service(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     from app.rag.services.rag_service import RAGService
 
-    return await ServiceContainer.get_service(RAGService, database)
+    return RAGService(database)
 
 
 # Type aliases for cleaner endpoint signatures
@@ -129,4 +115,6 @@ InvitationServiceDep = Annotated[object, Depends(get_invitation_service)]
 MaterialServiceDep = Annotated[object, Depends(get_material_service)]
 MessageServiceDep = Annotated[object, Depends(get_message_service)]
 ProgressServiceDep = Annotated[object, Depends(get_progress_service)]
+NotificationServiceDep = Annotated[object, Depends(get_notification_service)]
+ActivityServiceDep = Annotated[object, Depends(get_activity_service)]
 RAGServiceDep = Annotated[object, Depends(get_rag_service)]

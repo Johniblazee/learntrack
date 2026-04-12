@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import { CloudUpload, File, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'

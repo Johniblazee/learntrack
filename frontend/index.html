@@ -7,17 +7,20 @@
     <title>LearnTrack MVP</title>
     <meta name="description" content="AI-powered assignment management and student progress tracking" />
     <meta name="color-scheme" content="light dark" />
-    <script>
-      (function() {
-        try {
-          var stored = localStorage.getItem('learntrack-theme');
-          // Default to light mode instead of system preference
-          var theme = stored || 'light';
-          if (theme === 'dark') document.documentElement.classList.add('dark');
-          else document.documentElement.classList.remove('dark');
-        } catch (e) {}
-      })();
-    </script>
+    <!--
+      Content Security Policy (enforced in browsers that honor <meta> CSP).
+      Keep this in sync with the static headers in `vercel.json` — directives
+      that only work as HTTP headers (frame-ancestors, report-*) live there.
+
+      script-src intentionally omits 'unsafe-inline': all startup JS lives in
+      external files (theme-init, Vite bundles, Clerk). connect-src uses Vite's
+      build-time env substitution so the deployed backend origin is allowed.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://clerk.com https://*.clerk.com https://*.clerk.accounts.dev https://js.clerk.dev https://us.i.posthog.com https://us-assets.i.posthog.com; worker-src 'self' blob:; connect-src 'self' %VITE_API_BASE_URL% https://clerk.com https://*.clerk.com https://*.clerk.accounts.dev wss://*.clerk.accounts.dev https://api.clerk.com https://api.openai.com https://api.anthropic.com https://api.groq.com https://generativelanguage.googleapis.com https://us.i.posthog.com https://us-assets.i.posthog.com; form-action 'self';"
+    />
+    <script src="/theme-init.js"></script>
 
   </head>
   <body>

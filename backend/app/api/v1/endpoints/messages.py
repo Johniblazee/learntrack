@@ -34,10 +34,6 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
-def _resolve_tenant_id(current_user: ClerkUserContext) -> str:
-    return current_user.tutor_id or current_user.clerk_id
-
-
 def _sender_name(current_user: ClerkUserContext) -> str:
     return current_user.name or "Unknown User"
 
@@ -209,7 +205,7 @@ async def create_message(
     - **message_type**: Message type (text, image, file, system)
     """
     try:
-        tenant_id = _resolve_tenant_id(current_user)
+        tenant_id = current_user.tenant_id
         sender_name = _sender_name(current_user)
 
         service = MessageService(db)
@@ -274,7 +270,7 @@ async def send_email_message(
 ):
     """Send a message via email and store it in conversation history."""
     try:
-        tenant_id = _resolve_tenant_id(current_user)
+        tenant_id = current_user.tenant_id
         conversation_service = ConversationService(db)
 
         conversation = await conversation_service.create_conversation(
@@ -398,7 +394,7 @@ async def list_messages(
         result = await service.list_messages(
             conversation_id=conversation_id,
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
             page=page,
             page_size=page_size,
         )
@@ -433,7 +429,7 @@ async def get_message(
         message = await service.get_message(
             message_id=message_id,
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return message
     except NotFoundError as e:
@@ -467,7 +463,7 @@ async def update_message(
             message_id=message_id,
             message_data=message_data,
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return message
     except NotFoundError as e:
@@ -498,7 +494,7 @@ async def delete_message(
         await service.delete_message(
             message_id=message_id,
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return None
     except NotFoundError as e:
@@ -529,7 +525,7 @@ async def mark_message_as_read(
         await service.mark_as_read(
             message_id=message_id,
             user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return None
     except NotFoundError as e:

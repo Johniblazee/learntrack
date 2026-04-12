@@ -125,7 +125,7 @@ async def get_dashboard_stats(
     Get aggregated document statistics for the dashboard.
     Returns counts by status, format, processor, and storage usage.
     """
-    tutor_id = current_user.tutor_id or current_user.clerk_id
+    tutor_id = current_user.tenant_id
     files_collection = db.files
 
     # Build base query for tutor's non-deleted files

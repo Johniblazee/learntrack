@@ -80,10 +80,6 @@ def _material_type_from_file(file_name: str, content_type: Optional[str]) -> str
     return "other"
 
 
-def _tenant_tutor_id(current_user: ClerkUserContext) -> str:
-    return current_user.tutor_id or current_user.clerk_id
-
-
 async def _authorize_uploaded_file_access(
     *,
     file_name: str,
@@ -99,7 +95,7 @@ async def _authorize_uploaded_file_access(
                 raise HTTPException(status_code=403, detail="Access forbidden")
             return file_doc
 
-        tenant_tutor_id = _tenant_tutor_id(current_user)
+        tenant_tutor_id = current_user.tenant_id
         if file_tutor_id != tenant_tutor_id:
             raise HTTPException(status_code=404, detail="File not found")
 
@@ -124,7 +120,7 @@ async def _authorize_uploaded_file_access(
     else:
         material_query.update(
             {
-                "tutor_id": _tenant_tutor_id(current_user),
+                "tutor_id": current_user.tenant_id,
                 "status": MaterialStatus.ACTIVE.value,
                 "shared_with_students": True,
             }
@@ -563,11 +559,10 @@ async def get_material(
 ):
     """Get a specific material."""
     try:
-        tenant_tutor_id = current_user.tutor_id or current_user.clerk_id
         material_service = MaterialService(database)
         material = await material_service.get_material_by_id(
             material_id=material_id,
-            tutor_id=tenant_tutor_id,
+            tutor_id=current_user.tenant_id,
         )
 
         if current_user.role.value != "tutor" and not material.shared_with_students:
@@ -689,7 +684,7 @@ async def track_download(
         material_service = MaterialService(database)
         material = await material_service.get_material_by_id(
             material_id=material_id,
-            tutor_id=_tenant_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         if current_user.role.value != "tutor" and not material.shared_with_students:
             raise HTTPException(status_code=403, detail="Material is private")

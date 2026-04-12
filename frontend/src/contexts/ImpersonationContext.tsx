@@ -1,14 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from '@clerk/clerk-react'
-import {
-  IMPERSONATION_SESSION_CHANGED_EVENT,
-  IMPERSONATION_STORAGE_KEY,
-} from '@/lib/api-client'
+import { IMPERSONATION_SESSION_CHANGED_EVENT } from '@/lib/api-client'
 import { API_BASE_URL } from '@/lib/config'
-
-// localStorage key that tracks when any tab last validated the session.
-// Used so other tabs can skip redundant API calls (M5).
-const LAST_VALIDATED_KEY = `${IMPERSONATION_STORAGE_KEY}_last_validated`
 
 // BroadcastChannel name shared across tabs for the same origin.
 const BC_CHANNEL_NAME = 'learntrack_impersonation'
@@ -37,7 +30,7 @@ interface ImpersonationSession {
 }
 
 type BcMessage =
-  | { type: 'session_validated'; session: ImpersonationSession }
+  | { type: 'session_changed' }
   | { type: 'session_cleared' }
 
 interface ImpersonationContextType {
@@ -52,42 +45,44 @@ interface ImpersonationContextType {
 
 const ImpersonationContext = createContext<ImpersonationContextType | undefined>(undefined)
 
-const STORAGE_KEY = IMPERSONATION_STORAGE_KEY
+async function fetchCurrentSession(token: string): Promise<ImpersonationSession | null> {
+  const response = await fetch(`${API_BASE_URL}/admin/impersonation/current`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+  })
 
-function parseStoredSession(raw: string | null): ImpersonationSession | null {
-  if (!raw) {
+  if (!response.ok) {
     return null
   }
 
-  try {
-    const parsed = JSON.parse(raw)
-    const sessionId = typeof parsed?.sessionId === 'string' ? parsed.sessionId.trim() : ''
-    const targetUser = parsed?.targetUser
-
-    if (!sessionId || !targetUser || typeof targetUser !== 'object') {
-      return null
-    }
-
-    const targetClerkId = typeof targetUser.clerk_id === 'string' ? targetUser.clerk_id.trim() : ''
-    if (!targetClerkId) {
-      return null
-    }
-
-    const expiresInMinutes = Number(parsed?.expiresInMinutes)
-    return {
-      sessionId,
-      targetUser: {
-        id: typeof targetUser.id === 'string' ? targetUser.id : '',
-        clerk_id: targetClerkId,
-        email: typeof targetUser.email === 'string' ? targetUser.email : '',
-        name: typeof targetUser.name === 'string' ? targetUser.name : 'Unknown',
-        role: typeof targetUser.role === 'string' ? targetUser.role : 'student',
-        tutor_id: typeof targetUser.tutor_id === 'string' ? targetUser.tutor_id : undefined,
-      },
-      expiresInMinutes: Number.isFinite(expiresInMinutes) ? expiresInMinutes : 0,
-    }
-  } catch {
+  const data = await response.json().catch(() => null)
+  if (!data || data.active !== true) {
     return null
+  }
+
+  const targetClerkId = typeof data?.target_user?.clerk_id === 'string' ? data.target_user.clerk_id : ''
+  if (!targetClerkId) {
+    return null
+  }
+
+  return {
+    sessionId: typeof data?.session_id === 'string' ? data.session_id : '',
+    targetUser: {
+      id: typeof data?.target_user?.id === 'string' ? data.target_user.id : '',
+      clerk_id: targetClerkId,
+      email: typeof data?.target_user?.email === 'string' ? data.target_user.email : '',
+      name: typeof data?.target_user?.name === 'string' ? data.target_user.name : 'Unknown',
+      role: typeof data?.target_user?.role === 'string' ? data.target_user.role : 'student',
+      tutor_id:
+        typeof data?.target_user?.tutor_id === 'string' ? data.target_user.tutor_id : undefined,
+    },
+    expiresInMinutes:
+      typeof data?.remaining_minutes === 'number' && Number.isFinite(data.remaining_minutes)
+        ? data.remaining_minutes
+        : 0,
   }
 }
 
@@ -97,7 +92,9 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // BroadcastChannel for cross-tab coordination (M5)
+  // BroadcastChannel for cross-tab coordination — the cookie itself is
+  // shared across tabs automatically; this just lets other tabs refresh their
+  // React state when the session starts or ends.
   const bcRef = useRef<BroadcastChannel | null>(null)
 
   useEffect(() => {
@@ -105,12 +102,21 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
     const bc = new BroadcastChannel(BC_CHANNEL_NAME)
     bcRef.current = bc
 
-    bc.onmessage = (event: MessageEvent<BcMessage>) => {
-      if (event.data.type === 'session_validated') {
-        // Another tab validated — adopt its result without an API call
-        setSession(event.data.session)
-      } else if (event.data.type === 'session_cleared') {
+    bc.onmessage = async (event: MessageEvent<BcMessage>) => {
+      if (event.data.type === 'session_cleared') {
         setSession(null)
+        return
+      }
+
+      if (event.data.type === 'session_changed') {
+        try {
+          const token = await getToken()
+          if (!token) return
+          const refreshed = await fetchCurrentSession(token)
+          setSession(refreshed)
+        } catch (err) {
+          console.error('Failed to refresh impersonation session after broadcast:', err)
+        }
       }
     }
 
@@ -118,139 +124,65 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
       bc.close()
       bcRef.current = null
     }
+  }, [getToken])
+
+  const broadcastChanged = useCallback(() => {
+    bcRef.current?.postMessage({ type: 'session_changed' } satisfies BcMessage)
   }, [])
 
-  const persistSession = useCallback((nextSession: ImpersonationSession) => {
-    setSession(nextSession)
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
-      window.localStorage.setItem(LAST_VALIDATED_KEY, Date.now().toString())
-      emitImpersonationSessionChangedEvent()
-      // Broadcast to other tabs so they don't need to hit the API (M5)
-      bcRef.current?.postMessage({ type: 'session_validated', session: nextSession } satisfies BcMessage)
-    }
+  const broadcastCleared = useCallback(() => {
+    bcRef.current?.postMessage({ type: 'session_cleared' } satisfies BcMessage)
   }, [])
 
-  const clearSession = useCallback(() => {
-    setSession(null)
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(STORAGE_KEY)
-      window.localStorage.removeItem(LAST_VALIDATED_KEY)
-      emitImpersonationSessionChangedEvent()
-      bcRef.current?.postMessage({ type: 'session_cleared' } satisfies BcMessage)
-    }
-  }, [])
-
-  const validateSession = useCallback(async (sessionId: string, force = false) => {
-    const normalizedSessionId = sessionId.trim()
-    if (!normalizedSessionId) {
-      clearSession()
-      return false
-    }
-
-    // Skip API call if another tab validated within the last 55 seconds (M5)
-    if (!force && typeof window !== 'undefined') {
-      const lastValidated = parseInt(window.localStorage.getItem(LAST_VALIDATED_KEY) || '0', 10)
-      if (Date.now() - lastValidated < 55_000) {
-        return true
-      }
-    }
-
+  const refreshFromServer = useCallback(async () => {
     try {
       const token = await getToken()
       if (!token) {
-        clearSession()
-        return false
+        setSession(null)
+        return
       }
 
-      const response = await fetch(`${API_BASE_URL}/admin/impersonation/session/${normalizedSessionId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        clearSession()
-        if (response.status === 404) {
-          setError('User preview session expired. Start a new session to continue.')
-        }
-        return false
-      }
-
-      const data = await response.json()
-      const refreshedSession: ImpersonationSession = {
-        sessionId: typeof data?.session_id === 'string' ? data.session_id : normalizedSessionId,
-        targetUser: {
-          id: typeof data?.target_user?.id === 'string' ? data.target_user.id : '',
-          clerk_id: typeof data?.target_user?.clerk_id === 'string' ? data.target_user.clerk_id : '',
-          email: typeof data?.target_user?.email === 'string' ? data.target_user.email : '',
-          name: typeof data?.target_user?.name === 'string' ? data.target_user.name : 'Unknown',
-          role: typeof data?.target_user?.role === 'string' ? data.target_user.role : 'student',
-          tutor_id:
-            typeof data?.target_user?.tutor_id === 'string' ? data.target_user.tutor_id : undefined,
-        },
-        expiresInMinutes:
-          typeof data?.remaining_minutes === 'number' && Number.isFinite(data.remaining_minutes)
-            ? data.remaining_minutes
-            : 0,
-      }
-
-      if (!refreshedSession.targetUser.clerk_id) {
-        clearSession()
-        setError('User preview session is invalid. Start a new session to continue.')
-        return false
-      }
-
-      persistSession(refreshedSession)
-      return true
-    } catch (validationError) {
-      console.error('Failed to validate impersonation session:', validationError)
-      return false
+      const currentSession = await fetchCurrentSession(token)
+      setSession(currentSession)
+    } catch (err) {
+      console.error('Failed to load impersonation session:', err)
+      setSession(null)
     }
-  }, [clearSession, getToken, persistSession])
+  }, [getToken])
 
-  // Load session from localStorage on mount
+  // On mount: ask the backend whether there's an active session for the
+  // cookie the browser is already sending.
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
+    void refreshFromServer()
+  }, [refreshFromServer])
 
-    const storedSession = parseStoredSession(window.localStorage.getItem(STORAGE_KEY))
-    if (!storedSession) {
-      window.localStorage.removeItem(STORAGE_KEY)
-      return
-    }
-
-    setSession(storedSession)
-    void validateSession(storedSession.sessionId)
-  }, [validateSession])
-
+  // Revalidate on focus / visibility / interval — same cadence as before, just
+  // against the new `/current` endpoint.
   useEffect(() => {
     if (typeof window === 'undefined' || !session?.sessionId) {
       return
     }
 
-    const revalidateSession = () => {
-      void validateSession(session.sessionId)
-    }
-
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        revalidateSession()
+        void refreshFromServer()
       }
     }
 
-    window.addEventListener('focus', revalidateSession)
+    const handleFocus = () => {
+      void refreshFromServer()
+    }
+
+    window.addEventListener('focus', handleFocus)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    const intervalId = window.setInterval(revalidateSession, 60_000)
+    const intervalId = window.setInterval(() => void refreshFromServer(), 60_000)
 
     return () => {
-      window.removeEventListener('focus', revalidateSession)
+      window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.clearInterval(intervalId)
     }
-  }, [session?.sessionId, validateSession])
+  }, [session?.sessionId, refreshFromServer])
 
   const startImpersonation = useCallback(async (userId: string) => {
     try {
@@ -261,19 +193,20 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
       if (!token) {
         throw new Error('Authentication token is missing')
       }
-      
+
       const response = await fetch(`${API_BASE_URL}/admin/impersonation/start`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify({ target_user_id: userId })
       })
 
       if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.detail || 'Failed to start impersonation')
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data?.detail || 'Failed to start impersonation')
       }
 
       const data = await response.json()
@@ -290,38 +223,36 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
         expiresInMinutes: data.expires_in_minutes
       }
 
-      persistSession(newSession)
+      setSession(newSession)
+      emitImpersonationSessionChangedEvent()
+      broadcastChanged()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
       throw err
     } finally {
       setIsLoading(false)
     }
-  }, [getToken, persistSession])
+  }, [getToken, broadcastChanged])
 
   const endImpersonation = useCallback(async () => {
-    if (!session) {
-      clearSession()
-      return
-    }
-
     let endError: string | null = null
-    
+
     try {
       setIsLoading(true)
       setError(null)
       const token = await getToken()
 
       if (token) {
-        const response = await fetch(`${API_BASE_URL}/admin/impersonation/end?session_id=${session.sessionId}`, {
+        const response = await fetch(`${API_BASE_URL}/admin/impersonation/end`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
+          credentials: 'include',
         })
 
-        if (!response.ok) {
+        if (!response.ok && response.status !== 404) {
           const payload = await response.json().catch(() => ({}))
           endError = payload?.detail || 'Failed to stop user preview session'
         }
@@ -329,13 +260,15 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
     } catch (err) {
       endError = err instanceof Error ? err.message : 'Unknown error'
     } finally {
-      clearSession()
+      setSession(null)
+      emitImpersonationSessionChangedEvent()
+      broadcastCleared()
       if (endError) {
         setError(endError)
       }
       setIsLoading(false)
     }
-  }, [clearSession, getToken, session])
+  }, [getToken, broadcastCleared])
 
   const value: ImpersonationContextType = {
     isImpersonating: session !== null,
@@ -361,4 +294,3 @@ export function useImpersonation() {
   }
   return context
 }
-

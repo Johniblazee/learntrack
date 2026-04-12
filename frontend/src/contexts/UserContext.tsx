@@ -37,6 +37,7 @@ export interface BackendUser {
   student_ids?: string[]  // For parents
   is_super_admin?: boolean
   admin_permissions?: AdminPermission[]
+  onboarding_completed?: boolean
 }
 
 // ─── Identity context (stable: role, tutorId, Clerk presence) ────────────────
@@ -54,6 +55,7 @@ interface UserIdentityContextType {
   isTutor: boolean
   isStudent: boolean
   isParent: boolean
+  onboardingCompleted: boolean
   refreshBackendUser: () => Promise<void>
 }
 
@@ -147,6 +149,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const role = backendUser?.role || (clerkUser?.publicMetadata?.role as UserRole) || null
   const tutorId = backendUser?.tutor_id || null
   const studentIds = useMemo(() => backendUser?.student_ids || [], [backendUser?.student_ids])
+  const onboardingCompleted = backendUser?.onboarding_completed === true
 
   // ── Derived permission fields ────────────────────────────────────────────────
 
@@ -190,9 +193,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isTutor: role === 'tutor',
       isStudent: role === 'student',
       isParent: role === 'parent',
+      onboardingCompleted,
       refreshBackendUser: fetchBackendUser,
     }),
-    [clerkUser, isLoaded, isSignedIn, backendUser, isBackendLoaded, backendError, role, tutorId, studentIds, fetchBackendUser],
+    [clerkUser, isLoaded, isSignedIn, backendUser, isBackendLoaded, backendError, role, tutorId, studentIds, onboardingCompleted, fetchBackendUser],
   )
 
   const permissionsValue = useMemo<UserPermissionsContextType>(

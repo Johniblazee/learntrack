@@ -87,9 +87,7 @@ class NotificationService:
 
             # Send notification via WebSocket
             try:
-                from app.api.v1.endpoints.websocket import (
-                    send_notification_via_websocket,
-                )
+                from app.core.realtime import send_notification_via_websocket
 
                 await send_notification_via_websocket(
                     notification_data.recipient_id, notification.model_dump()
@@ -134,9 +132,7 @@ class NotificationService:
 
             # Fire WebSocket notifications concurrently (best-effort)
             try:
-                from app.api.v1.endpoints.websocket import (
-                    send_notification_via_websocket,
-                )
+                from app.core.realtime import send_notification_via_websocket
                 import asyncio
 
                 ws_tasks = []

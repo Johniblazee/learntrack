@@ -24,8 +24,11 @@ logger = structlog.get_logger()
 # Shared httpx client — initialized lazily to avoid startup overhead.
 _clerk_http_client: Optional[httpx.AsyncClient] = None
 
-# Header containing active admin impersonation session ID.
-IMPERSONATION_SESSION_HEADER = "x-learntrack-impersonation-session"
+# Cookie containing the active admin impersonation session ID. This replaces
+# the legacy `X-LearnTrack-Impersonation-Session` header: a header-based token
+# is reachable by any script that runs on the page (including XSS payloads
+# through the CSP's `unsafe-inline` gap), whereas an `httpOnly` cookie is not.
+IMPERSONATION_SESSION_COOKIE = "ltk_imp_session"
 
 # Request state keys used to keep track of the original authenticated actor
 # and whether an impersonation override is active for this request.
@@ -91,6 +94,19 @@ class ClerkUserContext(BaseModel):
     def auth0_id(self) -> str:
         """Backward compatibility property - returns clerk_id"""
         return self.clerk_id
+
+    @property
+    def tenant_id(self) -> str:
+        """Return the tenant (tutor) scope this user belongs to.
+
+        Tenant isolation in LearnTrack is keyed by `tutor_id`: a tutor's own
+        Clerk ID, or — for students/parents — the Clerk ID of the tutor who
+        owns them. `tutor_id` is populated by the auth layer for every role,
+        but historical code has been defensive with `tutor_id or clerk_id`
+        fallbacks. This accessor centralizes that fallback so endpoints don't
+        need to re-derive the tenant key inline.
+        """
+        return (self.tutor_id or self.clerk_id).strip()
 
     @property
     def has_full_admin_access(self) -> bool:
@@ -721,7 +737,7 @@ async def _apply_impersonation_session_override(
     current_user: ClerkUserContext, request: Request
 ) -> ClerkUserContext:
     """Apply admin impersonation session override if present and valid."""
-    session_id = request.headers.get(IMPERSONATION_SESSION_HEADER)
+    session_id = request.cookies.get(IMPERSONATION_SESSION_COOKIE)
     if not isinstance(session_id, str) or not session_id.strip():
         return current_user
 

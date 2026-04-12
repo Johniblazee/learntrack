@@ -883,7 +883,7 @@ async def get_student_dashboard_stats(
         assignment_service = AssignmentService(database)
         assignment_result = await assignment_service.get_student_assignment_summaries(
             student_id=current_user.clerk_id,
-            tutor_id=current_user.tutor_id or current_user.clerk_id,
+            tutor_id=current_user.tenant_id,
             page=1,
             per_page=1000,
         )

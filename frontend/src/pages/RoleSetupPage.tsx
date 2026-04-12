@@ -1,13 +1,17 @@
-import { useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { GraduationCap, BookOpen, Users } from "lucide-react"
 import { toast } from '@/contexts/ToastContext'
+import { useApiClient } from '@/lib/api-client'
+import { useUserContext } from '@/contexts/UserContext'
+
+type OnboardingRole = 'tutor' | 'student' | 'parent'
 
 export default function RoleSetupPage() {
-  const { user } = useUser()
   const navigate = useNavigate()
-  const [selectedRole, setSelectedRole] = useState<string>('')
+  const apiClient = useApiClient()
+  const { refreshBackendUser } = useUserContext()
+  const [selectedRole, setSelectedRole] = useState<OnboardingRole | ''>('')
   const [isLoading, setIsLoading] = useState(false)
 
   const handleContinue = async () => {
@@ -15,30 +19,33 @@ export default function RoleSetupPage() {
 
     setIsLoading(true)
     try {
-      // Update user metadata with selected role
-      await user?.update({
-        unsafeMetadata: {
-          ...user.unsafeMetadata,
-          role: selectedRole
-        }
-      })
+      const response = await apiClient.post('/users/me/role', { role: selectedRole })
 
-      // Force reload user data to get updated metadata
-      await user?.reload()
+      if (response.error || response.status >= 400) {
+        throw new Error(response.error || `Failed to set role (${response.status})`)
+      }
 
-      // Redirect to dashboard
+      await refreshBackendUser()
       navigate('/dashboard')
     } catch (error) {
       console.error('Error updating role:', error)
       toast.error('Failed to set role', {
-        description: 'Please try again or contact support if the issue persists.'
+        description: error instanceof Error && error.message
+          ? error.message
+          : 'Please try again or contact support if the issue persists.',
       })
     } finally {
       setIsLoading(false)
     }
   }
 
-  const roles = [
+  const roles: Array<{
+    id: OnboardingRole
+    title: string
+    description: string
+    icon: typeof GraduationCap
+    iconColor: string
+  }> = [
     {
       id: 'tutor',
       title: 'I am a Tutor',

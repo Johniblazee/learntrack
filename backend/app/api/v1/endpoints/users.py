@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pydantic import BaseModel, field_validator
 import structlog
 from typing import Any, Dict
 
@@ -8,6 +9,24 @@ from app.core.enhanced_auth import require_authenticated_user, ClerkUserContext
 from app.services.user_service import UserService
 from app.models.user import User, UserRole, UserCreate, UserUpdate
 from app.core.config import settings
+
+
+SELF_ASSIGNABLE_ROLES = {UserRole.TUTOR, UserRole.STUDENT, UserRole.PARENT}
+
+
+class RoleAssignmentRequest(BaseModel):
+    """Payload for first-time role self-assignment during onboarding."""
+
+    role: UserRole
+
+    @field_validator("role")
+    @classmethod
+    def _reject_privileged_roles(cls, value: UserRole) -> UserRole:
+        if value not in SELF_ASSIGNABLE_ROLES:
+            raise ValueError(
+                "Role cannot be self-assigned. Contact an administrator."
+            )
+        return value
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -52,6 +71,7 @@ def _serialize_user_for_response(user: Any) -> Dict[str, Any]:
             permission.value if hasattr(permission, "value") else permission
             for permission in (user.admin_permissions or [])
         ],
+        "onboarding_completed": bool(getattr(user, "onboarding_completed", False)),
     }
 
 
@@ -103,6 +123,7 @@ async def read_users_me(
                 ]
                 if current_user.admin_permissions
                 else [],
+                "onboarding_completed": False,
             }
     except Exception as e:
         logger.error(
@@ -156,18 +177,62 @@ async def update_users_me(
         raise HTTPException(status_code=500, detail="Failed to update user profile")
 
 
-@router.put("/me/role")
-async def update_user_role(
-    role_data: dict,
+@router.post("/me/role")
+async def assign_initial_role(
+    payload: RoleAssignmentRequest,
     current_user: ClerkUserContext = Depends(require_authenticated_user),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
-    """Roles must be assigned through the invite/onboarding flow."""
-    del role_data, current_user, db
-    raise HTTPException(
-        status_code=403,
-        detail="Self-service role changes are disabled. Use the invite or onboarding flow.",
+    """Assign the signed-in user's initial role during onboarding.
+
+    Trust boundary notes:
+    - ``super_admin`` is never self-assignable; the pydantic validator rejects
+      it before the handler body runs.
+    - Once the user has completed onboarding (``onboarding_completed=True`` or
+      ``is_super_admin=True``), subsequent calls are refused to prevent a
+      student from silently promoting themselves to a tutor. Legitimate role
+      changes after onboarding must go through the admin interface.
+    """
+    user_service = UserService(db)
+    existing_user = await user_service.get_user_by_clerk_id(current_user.clerk_id)
+
+    if not existing_user:
+        logger.warning(
+            "Role assignment attempted before user sync",
+            clerk_id=current_user.clerk_id,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="User record is not ready yet. Please retry in a moment.",
+        )
+
+    if getattr(existing_user, "is_super_admin", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Super administrators cannot change their own role.",
+        )
+
+    if getattr(existing_user, "onboarding_completed", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Role already assigned. Contact an administrator to change roles.",
+        )
+
+    updated_user = await user_service.update_user_role(
+        current_user.clerk_id,
+        payload.role,
+        mark_onboarding_complete=True,
     )
+
+    if not updated_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    logger.info(
+        "User completed onboarding role assignment",
+        clerk_id=current_user.clerk_id,
+        role=payload.role.value,
+    )
+    return _serialize_user_for_response(updated_user)
 
 
 @router.get("/{clerk_id}", response_model=User)

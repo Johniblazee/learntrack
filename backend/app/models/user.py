@@ -142,6 +142,7 @@ class UserInDB(UserBase):
     claimed_at: Optional[datetime] = None
     last_invited_at: Optional[datetime] = None
     invitation_sent_count: int = 0
+    onboarding_completed: bool = False
 
     # Super admin fields
     is_super_admin: bool = False  # Flag for super admin users

@@ -19,7 +19,7 @@ export default function ProtectedRoute({
   redirectOnDeny
 }: ProtectedRouteProps) {
   const { isSignedIn, isLoaded } = useUser()
-  const { role, isBackendLoaded } = useUserContext()
+  const { role, isBackendLoaded, onboardingCompleted, backendUser, isSuperAdmin } = useUserContext()
   const location = useLocation()
 
   // Loading state
@@ -30,6 +30,15 @@ export default function ProtectedRoute({
   // Not signed in - redirect to sign-in
   if (!isSignedIn) {
     return <Navigate to="/sign-in" state={{ from: location }} replace />
+  }
+
+  // First-time users must complete onboarding before accessing any protected route.
+  // Super admins and users still on the role-setup page itself are exempt.
+  const isOnRoleSetupRoute = location.pathname.startsWith('/role-setup')
+  const needsOnboarding =
+    !!backendUser && !onboardingCompleted && !isSuperAdmin && !isOnRoleSetupRoute
+  if (needsOnboarding) {
+    return <Navigate to="/role-setup" state={{ from: location }} replace />
   }
 
   // Check role if required

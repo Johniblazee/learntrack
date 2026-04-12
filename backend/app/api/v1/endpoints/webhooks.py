@@ -22,18 +22,18 @@ def _get_svix_webhook_tools():
 
 
 def _get_metadata(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Merge Clerk metadata dictionaries with public metadata precedence."""
-    merged: Dict[str, Any] = {}
+    """Return only server-owned Clerk metadata.
 
-    unsafe_metadata = data.get("unsafe_metadata")
+    `unsafe_metadata` is user-editable from the browser, so it must never
+    participate in authorization decisions (role, tutor assignment, admin
+    flags). Only `public_metadata` — which is server-written via the Clerk
+    Backend API — is trusted here. Role assignment for self-service signups
+    happens via POST /users/me/role, not via this webhook payload.
+    """
     public_metadata = data.get("public_metadata")
-
-    if isinstance(unsafe_metadata, dict):
-        merged.update(unsafe_metadata)
     if isinstance(public_metadata, dict):
-        merged.update(public_metadata)
-
-    return merged
+        return dict(public_metadata)
+    return {}
 
 
 def _collection_name_for_role(role: UserRole) -> str:

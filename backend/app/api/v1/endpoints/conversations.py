@@ -20,10 +20,6 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
-def _resolve_tenant_id(current_user: ClerkUserContext) -> str:
-    return current_user.tutor_id or current_user.clerk_id
-
-
 @router.post("/", response_model=Conversation, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     conversation_data: ConversationCreate,
@@ -42,7 +38,7 @@ async def create_conversation(
         conversation = await service.create_conversation(
             conversation_data=conversation_data,
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
             current_user_role=current_user.role,
         )
         return conversation
@@ -78,7 +74,7 @@ async def list_conversations(
         service = ConversationService(db)
         conversations = await service.list_conversations(
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
             limit=limit,
         )
         return ConversationListResponse(
@@ -108,7 +104,7 @@ async def get_conversation(
         conversation = await service.get_conversation(
             conversation_id=conversation_id,
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return conversation
     except NotFoundError as e:
@@ -139,7 +135,7 @@ async def mark_conversation_as_read(
         await service.mark_as_read(
             conversation_id=conversation_id,
             user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return None
     except NotFoundError as e:
@@ -167,7 +163,7 @@ async def get_unread_count(
     try:
         service = ConversationService(db)
         count = await service.get_total_unread_count(
-            user_id=current_user.clerk_id, tutor_id=_resolve_tenant_id(current_user)
+            user_id=current_user.clerk_id, tutor_id=current_user.tenant_id
         )
         return {"unread_count": count}
     except Exception as e:
@@ -206,7 +202,7 @@ async def get_or_create_conversation_with_user(
         conversation = await service.create_conversation(
             conversation_data=conversation_data,
             current_user_id=current_user.clerk_id,
-            tutor_id=_resolve_tenant_id(current_user),
+            tutor_id=current_user.tenant_id,
             current_user_role=current_user.role,
         )
         return conversation

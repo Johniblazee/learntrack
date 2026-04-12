@@ -23,10 +23,6 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
-def _resolve_tutor_id(current_user: ClerkUserContext) -> str:
-    return current_user.tutor_id or current_user.clerk_id
-
-
 @router.post("/", response_model=Subject, status_code=status.HTTP_201_CREATED)
 async def create_subject(
     subject_data: SubjectCreate,
@@ -38,7 +34,7 @@ async def create_subject(
         subject_service = SubjectService(database)
         return await subject_service.create_subject(
             subject_data,
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
     except ValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -56,7 +52,7 @@ async def create_subject(
         logger.error(
             "Failed to create subject",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -73,7 +69,7 @@ async def get_subjects(
     try:
         subject_service = SubjectService(database)
         return await subject_service.get_subjects_by_tutor(
-            tutor_id=_resolve_tutor_id(current_user)
+            tutor_id=current_user.tenant_id
         )
     except DatabaseException as e:
         logger.error("Subject list database error", error=str(e))
@@ -85,7 +81,7 @@ async def get_subjects(
         logger.error(
             "Failed to get subjects",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -104,7 +100,7 @@ async def get_subject(
         subject_service = SubjectService(database)
         subject = await subject_service.get_subject_by_id(
             subject_id,
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         if subject is None:
             raise NotFoundError("Subject", subject_id)
@@ -125,7 +121,7 @@ async def get_subject(
         logger.error(
             "Failed to get subject",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
             subject_id=subject_id,
         )
         raise HTTPException(
@@ -145,7 +141,7 @@ async def get_subject_with_stats(
         subject_service = SubjectService(database)
         subject_stats = await subject_service.get_subject_with_stats(
             subject_id,
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         if subject_stats is None:
             raise NotFoundError("Subject", subject_id)
@@ -170,7 +166,7 @@ async def get_subject_with_stats(
         logger.error(
             "Failed to get subject stats",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
             subject_id=subject_id,
         )
         raise HTTPException(
@@ -192,7 +188,7 @@ async def update_subject(
         return await subject_service.update_subject(
             subject_id,
             subject_update,
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
     except ValidationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -212,7 +208,7 @@ async def update_subject(
         logger.error(
             "Failed to update subject",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
             subject_id=subject_id,
         )
         raise HTTPException(
@@ -232,7 +228,7 @@ async def delete_subject(
         subject_service = SubjectService(database)
         await subject_service.delete_subject(
             subject_id,
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return {"message": "Subject deleted successfully"}
     except ValidationError as e:
@@ -253,7 +249,7 @@ async def delete_subject(
         logger.error(
             "Failed to delete subject",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
             subject_id=subject_id,
         )
         raise HTTPException(
@@ -275,7 +271,7 @@ async def add_topic_to_subject(
         subject = await subject_service.add_topic_to_subject(
             subject_id,
             topic,
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return {"message": f"Topic '{topic}' added successfully", "subject": subject}
     except ValidationError as e:
@@ -299,7 +295,7 @@ async def add_topic_to_subject(
         logger.error(
             "Failed to add topic",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
             subject_id=subject_id,
             topic=topic,
         )
@@ -322,7 +318,7 @@ async def remove_topic_from_subject(
         subject = await subject_service.remove_topic_from_subject(
             subject_id,
             topic,
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
         )
         return {"message": f"Topic '{topic}' removed successfully", "subject": subject}
     except ValidationError as e:
@@ -346,7 +342,7 @@ async def remove_topic_from_subject(
         logger.error(
             "Failed to remove topic",
             error=str(e),
-            tutor_id=_resolve_tutor_id(current_user),
+            tutor_id=current_user.tenant_id,
             subject_id=subject_id,
             topic=topic,
         )

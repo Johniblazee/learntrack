@@ -42,12 +42,26 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self.preload = preload
         self.frame_options = frame_options
 
-        # Default CSP policy
-        # Note: 'unsafe-inline' kept for style-src (needed for dynamic styles);
-        # nonce-based CSP requires frontend changes and should be phased in later.
+        # CSP policy. The backend mostly serves JSON, so CSP really governs
+        # the few HTML responses it emits (Swagger UI `/docs`, ReDoc `/redoc`,
+        # error pages). In production, `/docs` and `/redoc` are disabled in
+        # `main.py`, so we can drop `'unsafe-inline'` from `script-src` — no
+        # legitimate backend-served HTML needs inline scripts, and leaving it
+        # in place materially raises XSS impact. Development still needs it so
+        # Swagger UI works locally. `style-src` keeps `'unsafe-inline'`
+        # regardless: Tailwind's runtime and FastAPI's bundled pages rely on
+        # inline styles, and a nonce-based style policy would require frontend
+        # build-time changes that are out of scope for this pass.
+        is_production = str(settings.ENVIRONMENT).lower() == "production"
+        script_src = (
+            "'self' https://clerk.com https://*.clerk.accounts.dev https://cdn.jsdelivr.net"
+            if is_production
+            else "'self' 'unsafe-inline' https://clerk.com https://*.clerk.accounts.dev https://cdn.jsdelivr.net"
+        )
+
         self.csp_policy = csp_policy or {
             "default-src": "'self'",
-            "script-src": "'self' 'unsafe-inline' https://clerk.com https://*.clerk.accounts.dev https://cdn.jsdelivr.net",
+            "script-src": script_src,
             "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
             "img-src": "'self' data: https: blob: https://fastapi.tiangolo.com",
             "font-src": "'self' https://fonts.gstatic.com",
