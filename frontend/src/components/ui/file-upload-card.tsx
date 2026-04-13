@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { CloudUpload, File, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import { CloudUpload, File as FileIcon, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
@@ -36,6 +36,7 @@ export function FileUploadCard({
 }: FileUploadCardProps) {
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inputId = 'file-upload-card-input'
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -68,7 +69,8 @@ export function FileUploadCard({
   return (
     <div className={cn('space-y-4', className)}>
       {/* Drop zone */}
-      <div
+      <label
+        htmlFor={inputId}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -87,15 +89,17 @@ export function FileUploadCard({
         <p className="text-xs text-muted-foreground">
           PDF, DOCX, PNG, JPG, MP4, and more
         </p>
-      </div>
+      </label>
 
       <input
+        id={inputId}
         ref={fileInputRef}
         type="file"
         className="hidden"
         accept={accept}
         multiple
         onChange={handleInputChange}
+        aria-label="Upload files"
       />
 
       {/* File list */}
@@ -116,7 +120,7 @@ export function FileUploadCard({
             ) : f.status === 'error' ? (
               <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
             ) : (
-              <File className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+              <FileIcon className="w-5 h-5 text-muted-foreground flex-shrink-0" />
             )}
 
             {/* Info + progress */}
@@ -140,6 +144,7 @@ export function FileUploadCard({
             {/* Remove button */}
             <button
               type="button"
+              aria-label={`Remove ${f.name}`}
               onClick={(e) => {
                 e.stopPropagation()
                 onRemoveFile(f.id)
