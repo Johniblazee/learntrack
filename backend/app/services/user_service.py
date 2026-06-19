@@ -50,6 +50,137 @@ class UserService:
         else:
             raise ValueError(f"Unknown role: {role}")
 
+    async def _find_user_document_by_email(self, email: str):
+        """Find the raw user document and source collection by email."""
+        for collection in [
+            self.tutors_collection,
+            self.students_collection,
+            self.parents_collection,
+        ]:
+            user = await collection.find_one({"email": email})
+            if user:
+                return user, collection
+        return None, None
+
+    async def _migrate_tutor_identity_references(
+        self, old_tutor_id: str, new_tutor_id: str
+    ) -> None:
+        """Move tutor-scoped references forward after a Clerk identity change."""
+        if not old_tutor_id or old_tutor_id == new_tutor_id:
+            return
+
+        now = datetime.now(timezone.utc)
+        tutor_scoped_collections = [
+            "students",
+            "parents",
+            "assignments",
+            "questions",
+            "materials",
+            "material_folders",
+            "groups",
+            "invitations",
+            "progress",
+            "subjects",
+            "activities",
+        ]
+
+        for collection_name in tutor_scoped_collections:
+            collection = self.db[collection_name]
+            await collection.update_many(
+                {"tutor_id": old_tutor_id},
+                {"$set": {"tutor_id": new_tutor_id, "updated_at": now}},
+            )
+            await collection.update_many(
+                {"tenant_id": old_tutor_id},
+                {"$set": {"tenant_id": new_tutor_id, "updated_at": now}},
+            )
+
+        await self.db.students.update_many(
+            {"student_tutors": old_tutor_id},
+            {
+                "$addToSet": {"student_tutors": new_tutor_id},
+                "$pull": {"student_tutors": old_tutor_id},
+                "$set": {"updated_at": now},
+            },
+        )
+
+        await self.db.generation_sessions.update_many(
+            {"user_id": old_tutor_id},
+            {"$set": {"user_id": new_tutor_id, "updated_at": now}},
+        )
+        await self.db.generation_sessions.update_many(
+            {"tenant_id": old_tutor_id},
+            {"$set": {"tenant_id": new_tutor_id, "updated_at": now}},
+        )
+
+    async def relink_user_identity_by_email(self, user_context) -> Optional[User]:
+        """Relink an existing user when Clerk issues a new `clerk_id` for the same email."""
+        if not user_context.email:
+            return None
+
+        source_doc, source_collection = await self._find_user_document_by_email(
+            user_context.email
+        )
+        if not source_doc or not source_collection:
+            return None
+
+        existing_clerk_id = source_doc.get("clerk_id")
+        if existing_clerk_id == user_context.clerk_id:
+            return User(**source_doc)
+
+        now = datetime.now(timezone.utc)
+        role_value = source_doc.get("role") or user_context.role.value
+        update_data: Dict[str, Any] = {
+            "clerk_id": user_context.clerk_id,
+            "email": user_context.email,
+            "name": user_context.name,
+            "updated_at": now,
+        }
+
+        if role_value in {UserRole.TUTOR.value, UserRole.SUPER_ADMIN.value}:
+            update_data["tutor_id"] = user_context.clerk_id
+            update_data["tenant_id"] = user_context.clerk_id
+
+        if role_value == UserRole.STUDENT.value:
+            update_data.setdefault("account_status", AccountStatus.CLAIMED.value)
+            update_data.setdefault("claimed_at", now)
+
+        updated = await source_collection.find_one_and_update(
+            {"_id": source_doc["_id"]},
+            {"$set": update_data},
+            return_document=ReturnDocument.AFTER,
+        )
+
+        if (
+            role_value in {UserRole.TUTOR.value, UserRole.SUPER_ADMIN.value}
+            and existing_clerk_id
+        ):
+            await self._migrate_tutor_identity_references(
+                existing_clerk_id, user_context.clerk_id
+            )
+
+        logger.info(
+            "Relinked user identity by email",
+            email=user_context.email,
+            old_clerk_id=existing_clerk_id,
+            new_clerk_id=user_context.clerk_id,
+            role=role_value,
+        )
+
+        try:
+            from app.core.enhanced_auth import invalidate_user_db_cache
+
+            if existing_clerk_id:
+                invalidate_user_db_cache(existing_clerk_id)
+            invalidate_user_db_cache(user_context.clerk_id)
+        except Exception:
+            logger.debug(
+                "Failed to invalidate auth cache after relink",
+                clerk_id=user_context.clerk_id,
+            )
+
+        return User(**updated) if updated else None
+
     async def _mark_unclaimed_student_status(
         self,
         *,

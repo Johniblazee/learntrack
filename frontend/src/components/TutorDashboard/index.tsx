@@ -46,7 +46,7 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
   const { isImpersonating } = useImpersonation()
 
   // Use React Query for dashboard stats
-  const { data: dashboardStats, isLoading: loading } = useDashboardStats()
+  const { data: dashboardStats, isLoading: loading, error: statsError } = useDashboardStats()
 
   const actorName = user?.fullName || user?.firstName || "Tutor"
   const actorEmail = user?.primaryEmailAddress?.emailAddress || ""
@@ -227,7 +227,7 @@ export default function TutorDashboard({ onBack }: TutorDashboardProps) {
         <div className="flex flex-1 flex-col gap-4 p-4 bg-background">
           <Routes>
             {/* Default route - Overview */}
-            <Route index element={<OverviewView dashboardStats={dashboardStats} loading={loading} onViewChange={handleViewChange} />} />
+            <Route index element={<OverviewView dashboardStats={dashboardStats} loading={loading} statsError={statsError} onViewChange={handleViewChange} />} />
 
             {/* Students routes */}
             <Route path="students" element={<StudentManager />} />

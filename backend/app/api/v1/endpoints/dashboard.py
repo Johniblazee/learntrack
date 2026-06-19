@@ -81,13 +81,13 @@ async def get_dashboard_stats(
 
         # 1. Count total students for this tutor from students collection
         total_students = await database.students.count_documents(
-            {"tutor_id": current_user.clerk_id, "is_active": True}
+            {"tutor_id": current_user.tutor_id, "is_active": True}
         )
 
         # 2. Count active assignments
         active_assignments = await database.assignments.count_documents(
             {
-                "tutor_id": current_user.clerk_id,
+                "tutor_id": current_user.tutor_id,
                 "status": {"$in": list(LIVE_ASSIGNMENT_STATUSES)},
             }
         )
@@ -96,7 +96,7 @@ async def get_dashboard_stats(
         pipeline = [
             {
                 "$match": {
-                    "tutor_id": current_user.clerk_id,
+                    "tutor_id": current_user.tutor_id,
                     "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     "score": {"$ne": None},
                 }
@@ -119,7 +119,7 @@ async def get_dashboard_stats(
         active_students = await database.progress.distinct(
             "student_id",
             {
-                "tutor_id": current_user.clerk_id,
+                "tutor_id": current_user.tutor_id,
                 "$or": [
                     {"submitted_at": {"$gte": seven_days_ago}},
                     {"updated_at": {"$gte": seven_days_ago}},
@@ -161,7 +161,7 @@ async def get_top_performers(
         pipeline = [
             {
                 "$match": {
-                    "tutor_id": current_user.clerk_id,
+                    "tutor_id": current_user.tutor_id,
                     "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     "score": {"$ne": None},
                 }
@@ -306,7 +306,7 @@ async def get_subject_performance(
     """Get subject performance data calculated from real progress records."""
     try:
         subjects = await database.subjects.find(
-            {"tutor_id": current_user.clerk_id}
+            {"tutor_id": current_user.tutor_id}
         ).to_list(length=100)
         if not subjects:
             return []
@@ -314,7 +314,7 @@ async def get_subject_performance(
         subject_ids = [subject.get("_id") for subject in subjects if subject.get("_id")]
         assignments = await database.assignments.find(
             {
-                "tutor_id": current_user.clerk_id,
+                "tutor_id": current_user.tutor_id,
                 "subject_id": {"$in": subject_ids},
             },
             {"_id": 1, "subject_id": 1, "student_ids": 1},
@@ -329,7 +329,7 @@ async def get_subject_performance(
         if assignment_ids:
             progress_docs = await database.progress.find(
                 {
-                    "tutor_id": current_user.clerk_id,
+                    "tutor_id": current_user.tutor_id,
                     "assignment_id": {"$in": assignment_ids},
                 },
                 {"assignment_id": 1, "score": 1, "status": 1},
@@ -411,7 +411,7 @@ async def get_recent_activity(
     """Get recent tutor activity feed derived from tracked activity events."""
     try:
         activity_docs = (
-            await database.activities.find({"tutor_id": current_user.clerk_id})
+            await database.activities.find({"tutor_id": current_user.tutor_id})
             .sort("created_at", -1)
             .limit(limit)
             .to_list(length=limit)
@@ -557,13 +557,13 @@ async def get_upcoming_deadlines(
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         total_students = await database.students.count_documents(
-            {"tutor_id": current_user.clerk_id, "is_active": True}
+            {"tutor_id": current_user.tutor_id, "is_active": True}
         )
 
         assignments = (
             await database.assignments.find(
                 {
-                    "tutor_id": current_user.clerk_id,
+                    "tutor_id": current_user.tutor_id,
                     "due_date": {
                         "$gte": today_start
                     },  # Include assignments from start of today
@@ -600,7 +600,7 @@ async def get_upcoming_deadlines(
             progress_pipeline = [
                 {
                     "$match": {
-                        "tutor_id": current_user.clerk_id,
+                        "tutor_id": current_user.tutor_id,
                         "assignment_id": {"$in": assignment_ids},
                         "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     }
@@ -687,7 +687,7 @@ async def get_performance_chart(
         pipeline = [
             {
                 "$match": {
-                    "tutor_id": current_user.clerk_id,
+                    "tutor_id": current_user.tutor_id,
                     "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     "score": {"$ne": None},
                     "$or": [
@@ -772,7 +772,7 @@ async def get_progress_chart(
 
         # Get all subjects for this tutor
         subjects = await database.subjects.find(
-            {"tutor_id": current_user.clerk_id}
+            {"tutor_id": current_user.tutor_id}
         ).to_list(length=100)
         subject_map = {str(s.get("_id")): s.get("name", "Unknown") for s in subjects}
 
@@ -780,7 +780,7 @@ async def get_progress_chart(
         # Get assignments created in the date range
         assignments = await database.assignments.find(
             {
-                "tutor_id": current_user.clerk_id,
+                "tutor_id": current_user.tutor_id,
                 "created_at": {"$gte": start_date, "$lte": end_date},
             }
         ).to_list(length=1000)
@@ -795,7 +795,7 @@ async def get_progress_chart(
             submission_pipeline = [
                 {
                     "$match": {
-                        "tutor_id": current_user.clerk_id,
+                        "tutor_id": current_user.tutor_id,
                         "assignment_id": {"$in": assignment_ids},
                         "status": {"$in": list(COMPLETED_PROGRESS_STATUSES)},
                     }

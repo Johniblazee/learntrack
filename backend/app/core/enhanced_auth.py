@@ -52,6 +52,16 @@ _user_db_cache: TTLCache = TTLCache(maxsize=10000, ttl=60)
 _clerk_api_failure_cache: Dict[str, tuple] = {}
 
 
+def invalidate_user_db_cache(clerk_id: str) -> None:
+    """Remove a user from auth-layer caches after a mutation (e.g. role change).
+
+    Without this, the next authenticated request would see stale data for up
+    to 60 s (DB cache) or skip re-syncing for up to 5 min (sync cache).
+    """
+    _user_db_cache.pop(clerk_id, None)
+    _user_sync_cache.pop(clerk_id, None)
+
+
 def _get_clerk_http_client() -> httpx.AsyncClient:
     global _clerk_http_client
     if _clerk_http_client is None:
@@ -488,6 +498,49 @@ class EnhancedClerkJWTBearer:
             email = email or f"{user_id}@noreply.learntrack.app"  # Fallback email
             name = name or "Unknown User"
 
+            # If the Clerk identity changed, recover the existing DB user by email
+            # before finalizing role/tenant scoping. This restores visibility to
+            # historical tutor-owned data that was keyed by the previous clerk_id.
+            if not db_user and email and not email.endswith("@noreply.learntrack.app"):
+                try:
+                    from app.services.user_service import UserService
+
+                    db = await get_database()
+                    user_service = UserService(db)
+                    relinked_user = await user_service.relink_user_identity_by_email(
+                        ClerkUserContext(
+                            user_id=user_id,
+                            clerk_id=user_id,
+                            email=email,
+                            name=name,
+                            role=UserRole.TUTOR,
+                            roles=[UserRole.TUTOR],
+                            permissions=[],
+                            session_id=payload.get("sid"),
+                            organization_id=payload.get("org_id"),
+                            created_at=datetime.fromtimestamp(
+                                payload.get("iat", 0), tz=timezone.utc
+                            ),
+                            last_sign_in=datetime.now(timezone.utc),
+                            tutor_id=user_id,
+                            student_ids=[],
+                        )
+                    )
+                    if relinked_user:
+                        db_user = await self._get_user_from_database(user_id)
+                        logger.info(
+                            "Recovered existing user from email during auth",
+                            clerk_id=user_id,
+                            email=email,
+                        )
+                except Exception as relink_error:
+                    logger.warning(
+                        "Failed email-based identity recovery during auth",
+                        clerk_id=user_id,
+                        email=email,
+                        error=str(relink_error),
+                    )
+
             # Extract role from metadata
             role_str = metadata.get(
                 "role", "student"
@@ -531,14 +584,35 @@ class EnhancedClerkJWTBearer:
                 except ValueError:
                     logger.warning("Invalid admin permission", permission=perm)
 
-            # Check database for super admin status (database overrides JWT)
-            # db_user was already fetched earlier, reuse it here
+            # Database role is authoritative — override metadata-derived role.
+            # The webhook handler and POST /users/me/role ensure the DB role
+            # is always correct; metadata may be empty when Clerk JWTs don't
+            # include public_metadata or the DB lacks a public_metadata field.
             if db_user:
-                # Override with database values if they exist
+                db_role_str = db_user.get("role")
+                if db_role_str:
+                    try:
+                        role = UserRole(
+                            db_role_str.lower()
+                            if isinstance(db_role_str, str)
+                            else db_role_str
+                        )
+                    except ValueError:
+                        logger.warning(
+                            "Invalid role in database, keeping metadata-derived role",
+                            db_role=db_role_str,
+                            metadata_role=role.value,
+                            user_id=user_id,
+                        )
+                # Sync role_enums and permissions with the DB-authoritative role
+                if role not in role_enums:
+                    role_enums = [role] + [r for r in role_enums if r != role]
+                permissions = self._get_role_permissions(role)
+
+                # Super admin checks
                 if db_user.get("is_super_admin"):
                     is_super_admin = True
-                if db_user.get("role") == "super_admin":
-                    role = UserRole.SUPER_ADMIN
+                if role == UserRole.SUPER_ADMIN:
                     is_super_admin = True
                 db_admin_perms = db_user.get("admin_permissions", [])
                 if db_admin_perms:
@@ -844,6 +918,13 @@ async def require_tutor(
 ) -> ClerkUserContext:
     """Require tutor role (super admins also have access)"""
     if current_user.role != UserRole.TUTOR and not current_user.is_super_admin:
+        logger.warning(
+            "Tutor access denied",
+            clerk_id=current_user.clerk_id,
+            role=current_user.role.value,
+            tutor_id=current_user.tutor_id,
+            path=str(request.url.path),
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Tutor access required"
         )

@@ -5,7 +5,7 @@ import { QuestionCanvas } from '@/components/question-generator/QuestionCanvas'
 
 
 describe('QuestionCanvas', () => {
-  it('shows publish or sync and approve-all actions for the current draft counts', () => {
+  it('shows publish and approve-all actions for the current draft counts', () => {
     render(
       <QuestionCanvas
         isGenerating={false}
@@ -13,6 +13,8 @@ describe('QuestionCanvas', () => {
         thinkingSteps={[]}
         progress={{ current: 3, total: 3 }}
         foundSources={[]}
+        activeIndex={0}
+        onActiveIndexChange={vi.fn()}
         questions={[
           {
             question_id: 'q1',
@@ -54,7 +56,7 @@ describe('QuestionCanvas', () => {
       />,
     )
 
-    expect(screen.getByText('Publish or Sync Approved (2)')).toBeInTheDocument()
+    expect(screen.getByText('Publish (2)')).toBeInTheDocument()
     expect(screen.getByText('Approve All (1)')).toBeInTheDocument()
     expect(screen.getByText('1 published')).toBeInTheDocument()
   })

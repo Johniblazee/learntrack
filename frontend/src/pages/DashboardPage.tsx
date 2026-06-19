@@ -13,8 +13,11 @@ import { useNotificationSocket } from '@/hooks/useNotificationSocket'
 
 type DashboardView = 'tutor' | 'student' | 'parent'
 
-function isDashboardRole(value: unknown): value is DashboardView {
-  return value === 'tutor' || value === 'student' || value === 'parent'
+function toDashboardView(value: unknown): DashboardView | null {
+  if (value === 'tutor' || value === 'super_admin') return 'tutor'
+  if (value === 'student') return 'student'
+  if (value === 'parent') return 'parent'
+  return null
 }
 
 export default function DashboardPage() {
@@ -27,11 +30,9 @@ export default function DashboardPage() {
   useNotificationSocket()
 
   const clerkRole = (user?.publicMetadata?.role || user?.unsafeMetadata?.role) as string | undefined
-  const validClerkRole = isDashboardRole(clerkRole) ? clerkRole : null
-  const validBackendRole = isDashboardRole(backendRole) ? backendRole : null
-  const validImpersonatedRole = isDashboardRole(impersonatedUser?.role)
-    ? impersonatedUser.role
-    : null
+  const validClerkRole = toDashboardView(clerkRole)
+  const validBackendRole = toDashboardView(backendRole)
+  const validImpersonatedRole = toDashboardView(impersonatedUser?.role)
   const hasRoleMismatch =
     !isImpersonating &&
     isBackendLoaded &&

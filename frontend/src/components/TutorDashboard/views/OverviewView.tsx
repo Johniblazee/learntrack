@@ -17,10 +17,11 @@ import { useTutorWorkflowSummary } from "@/hooks/useQueries"
 interface OverviewViewProps {
   dashboardStats: any
   loading: boolean
+  statsError?: Error | null
   onViewChange: (view: string) => void
 }
 
-export function OverviewView({ dashboardStats, loading, onViewChange }: OverviewViewProps) {
+export function OverviewView({ dashboardStats, loading, statsError, onViewChange }: OverviewViewProps) {
   const { user } = useUser()
   const { backendUser } = useUserContext()
   const { isImpersonating } = useImpersonation()
@@ -57,7 +58,7 @@ export function OverviewView({ dashboardStats, loading, onViewChange }: Overview
         </div>
 
         {/* Stats Cards */}
-        <StatsCards dashboardStats={dashboardStats} loading={loading} />
+        <StatsCards dashboardStats={dashboardStats} loading={loading} error={statsError} />
 
         <Card className="border border-border bg-card shadow-sm">
           <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">

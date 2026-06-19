@@ -5,7 +5,7 @@ import structlog
 from typing import Any, Dict
 
 from app.core.database import get_database
-from app.core.enhanced_auth import require_authenticated_user, ClerkUserContext
+from app.core.enhanced_auth import require_authenticated_user, ClerkUserContext, invalidate_user_db_cache
 from app.services.user_service import UserService
 from app.models.user import User, UserRole, UserCreate, UserUpdate
 from app.core.config import settings
@@ -223,6 +223,9 @@ async def assign_initial_role(
         payload.role,
         mark_onboarding_complete=True,
     )
+
+    # Flush auth-layer caches so the next request picks up the new role
+    invalidate_user_db_cache(current_user.clerk_id)
 
     if not updated_user:
         raise HTTPException(status_code=404, detail="User not found")

@@ -10,6 +10,7 @@ interface StatsCardsProps {
     engagement_rate?: number
   } | null | undefined
   loading: boolean
+  error?: Error | null
 }
 
 interface StatCard {
@@ -21,9 +22,13 @@ interface StatCard {
   hasData: boolean
 }
 
-export function StatsCards({ dashboardStats, loading }: StatsCardsProps) {
+export function StatsCards({ dashboardStats, loading, error }: StatsCardsProps) {
   // Check if we have actual data (not just default/empty values)
   const hasData = dashboardStats !== null && dashboardStats !== undefined
+  const hasError = !loading && !!error
+
+  const errorSubtitle = hasError ? (error?.message || "Failed to load") : "No data"
+  const errorColor = hasError ? "text-destructive" : "text-muted-foreground/50"
 
   const stats: StatCard[] = [
     {
@@ -31,8 +36,8 @@ export function StatsCards({ dashboardStats, loading }: StatsCardsProps) {
       value: hasData && dashboardStats.total_students !== undefined
         ? dashboardStats.total_students.toString()
         : "--",
-      subtitle: hasData ? "Active students" : "No data",
-      subtitleColor: hasData ? "text-muted-foreground" : "text-muted-foreground/50",
+      subtitle: hasData ? "Active students" : errorSubtitle,
+      subtitleColor: hasData ? "text-muted-foreground" : errorColor,
       icon: Users,
       hasData: hasData && dashboardStats.total_students !== undefined
     },
@@ -41,8 +46,8 @@ export function StatsCards({ dashboardStats, loading }: StatsCardsProps) {
       value: hasData && dashboardStats.active_assignments !== undefined
         ? dashboardStats.active_assignments.toString()
         : "--",
-      subtitle: hasData ? "Currently active" : "No data",
-      subtitleColor: hasData ? "text-muted-foreground" : "text-muted-foreground/50",
+      subtitle: hasData ? "Currently active" : errorSubtitle,
+      subtitleColor: hasData ? "text-muted-foreground" : errorColor,
       icon: FileText,
       hasData: hasData && dashboardStats.active_assignments !== undefined
     },
@@ -51,8 +56,8 @@ export function StatsCards({ dashboardStats, loading }: StatsCardsProps) {
       value: hasData && dashboardStats.avg_performance !== undefined
         ? `${dashboardStats.avg_performance}%`
         : "--%",
-      subtitle: hasData ? "Class average" : "No data",
-      subtitleColor: hasData ? "text-muted-foreground" : "text-muted-foreground/50",
+      subtitle: hasData ? "Class average" : errorSubtitle,
+      subtitleColor: hasData ? "text-muted-foreground" : errorColor,
       icon: BarChart3,
       hasData: hasData && dashboardStats.avg_performance !== undefined
     },
@@ -61,8 +66,8 @@ export function StatsCards({ dashboardStats, loading }: StatsCardsProps) {
       value: hasData && dashboardStats.engagement_rate !== undefined
         ? `${dashboardStats.engagement_rate}%`
         : "--%",
-      subtitle: hasData ? "Last 7 days" : "No data",
-      subtitleColor: hasData ? "text-muted-foreground" : "text-muted-foreground/50",
+      subtitle: hasData ? "Last 7 days" : errorSubtitle,
+      subtitleColor: hasData ? "text-muted-foreground" : errorColor,
       icon: TrendingUp,
       hasData: hasData && dashboardStats.engagement_rate !== undefined
     }

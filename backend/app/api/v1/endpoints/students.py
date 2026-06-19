@@ -125,11 +125,12 @@ async def list_students_for_tutor(
         pagination = PaginationParams(page=page, per_page=per_page)
 
         # Get total count
-        total = await user_service.get_students_count_for_tutor(current_user.clerk_id)
+        tenant_tutor_id = current_user.tenant_id
+        total = await user_service.get_students_count_for_tutor(tenant_tutor_id)
 
         # Get paginated students
         students = await user_service.get_students_for_tutor_paginated(
-            tutor_id=current_user.clerk_id, skip=pagination.skip, limit=pagination.limit
+            tutor_id=tenant_tutor_id, skip=pagination.skip, limit=pagination.limit
         )
 
         # Batch-fetch parents for all students with a single $in query (avoids N+1)
@@ -160,7 +161,7 @@ async def list_students_for_tutor(
                         {"student_ids": {"$in": all_expanded}},
                         {"parent_children": {"$in": all_expanded}},
                     ],
-                    "tutor_id": current_user.clerk_id,
+                    "tutor_id": tenant_tutor_id,
                     "is_active": {"$ne": False},
                 }
             )

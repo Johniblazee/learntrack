@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { motion } from 'motion/react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Settings, Sparkles } from 'lucide-react'
@@ -123,6 +122,7 @@ export function OpenCanvasGenerator() {
   const [currentAction, setCurrentAction] = useState<string | null>(null)
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([])
   const [foundSources, setFoundSources] = useState<Array<{ id: string; title: string; excerpt: string }>>([])
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0)
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -221,28 +221,7 @@ export function OpenCanvasGenerator() {
     }
   }, [fetchAvailableSources, isSettingsOpen])
 
-  // Fetch sessions
-  const fetchSessions = useCallback(async () => {
-    try {
-      const token = await getToken()
-      const response = await fetch(`${API_BASE_URL}/question-generator/sessions?per_page=100`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setSessions(data.items || [])  // Fixed: backend returns 'items', not 'sessions'
-      }
-    } catch (error) {
-      console.error('Failed to fetch sessions:', error)
-    }
-  }, [getToken])
-
-  // Load sessions on mount
-  useEffect(() => {
-    fetchSessions()
-  }, [fetchSessions])
-
-  const getErrorDetail = useCallback(async (response: Response, fallback: string): Promise<string> => {
+  async function getErrorDetail(response: Response, fallback: string): Promise<string> {
     try {
       const data = await response.json()
       if (typeof data?.detail === 'string' && data.detail.trim()) {
@@ -255,7 +234,32 @@ export function OpenCanvasGenerator() {
       // ignore JSON parsing errors
     }
     return fallback
-  }, [])
+  }
+
+  // Fetch sessions
+  const fetchSessions = useCallback(async () => {
+    try {
+      const token = await getToken()
+      const response = await fetch(`${API_BASE_URL}/question-generator/sessions?per_page=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setSessions(data.items || [])  // Fixed: backend returns 'items', not 'sessions'
+      } else {
+        const detail = await getErrorDetail(response, 'Failed to load generation history')
+        console.error('Failed to fetch generation sessions:', detail)
+        toast.error(detail)
+      }
+    } catch (error) {
+      console.error('Failed to fetch sessions:', error)
+    }
+  }, [getToken, getErrorDetail])
+
+  // Load sessions on mount
+  useEffect(() => {
+    fetchSessions()
+  }, [fetchSessions])
 
   const resetAgentStatus = useCallback(() => {
     setCurrentAction(null)
@@ -378,6 +382,7 @@ export function OpenCanvasGenerator() {
     setQuestions([])
     setStreamingContent('')
     setGenerationProgressCurrent(0)
+    setActiveQuestionIndex(0)
     resetAgentStatus()
     setCurrentAction('Preparing generation...')
 
@@ -949,9 +954,14 @@ export function OpenCanvasGenerator() {
     }
 
     const previousQuestions = questions
+    const deletedIndex = questions.findIndex(q => q.question_id === questionId)
     setQuestions((previous) => previous.filter((question) => question.question_id !== questionId))
     if (selectedQuestionId === questionId) {
       setSelectedQuestionId(null)
+    }
+    // Adjust active index if the deleted question was at or after active position
+    if (deletedIndex >= 0 && deletedIndex <= activeQuestionIndex && activeQuestionIndex > 0) {
+      setActiveQuestionIndex(prev => prev - 1)
     }
 
     try {
@@ -1121,6 +1131,7 @@ export function OpenCanvasGenerator() {
     setStreamingContent('')
     setGenerationProgressCurrent(0)
     setSelectedQuestionId(null)
+    setActiveQuestionIndex(0)
     resetAgentStatus()
     toast.success('Started new conversation')
   }, [currentSessionId, questions, chatMessages, resetAgentStatus])
@@ -1172,6 +1183,7 @@ export function OpenCanvasGenerator() {
           setGenerationProgressCurrent(0)
           setChatMessages([])
           setSelectedQuestionId(null)
+          setActiveQuestionIndex(0)
           resetAgentStatus()
         }
       }
@@ -1227,6 +1239,7 @@ export function OpenCanvasGenerator() {
 
     const cachedSession = sessionSnapshots[sessionId]
     setCurrentSessionId(sessionId)
+    setActiveQuestionIndex(0)
 
     if (cachedSession) {
       setQuestions(cachedSession.questions)
@@ -1323,6 +1336,25 @@ export function OpenCanvasGenerator() {
     URL.revokeObjectURL(url)
   }, [questions, currentSessionId])
 
+  const handleCycleVersion = useCallback((questionId: string, direction: 'prev' | 'next') => {
+    setQuestions(prev => prev.map(q => {
+      if (q.question_id !== questionId || !q.versions || q.versions.length === 0) return q
+      const currentIdx = q.currentVersionIndex ?? q.versions.length
+      const maxIdx = q.versions.length
+      const nextIdx = direction === 'prev'
+        ? Math.max(0, currentIdx - 1)
+        : Math.min(maxIdx, currentIdx + 1)
+      if (nextIdx === currentIdx) return q
+
+      if (nextIdx < q.versions.length) {
+        const version = q.versions[nextIdx]
+        return { ...q, ...version, versions: q.versions, currentVersionIndex: nextIdx }
+      }
+      // nextIdx === versions.length means the latest (current) version
+      return { ...q, currentVersionIndex: nextIdx }
+    }))
+  }, [])
+
   // Convert sessions to ChatSession format
   const chatSessions = sessions
     .map((session) => ({
@@ -1415,51 +1447,29 @@ export function OpenCanvasGenerator() {
 
         {/* Questions Panel (Right - 70%) */}
         <div className="w-[70%] overflow-hidden flex flex-col">
-          {questions.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col items-center justify-center py-20 text-center"
-              >
-                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                  <Sparkles className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <h3 className="text-lg font-semibold mb-2">No questions yet</h3>
-                <p className="text-sm text-muted-foreground max-w-sm mb-6">
-                  Configure your settings and generate questions, or start chatting with the AI assistant.
-                </p>
-                <Button
-                  onClick={() => setIsSettingsOpen(true)}
-                  className="bg-[#5c4a38] hover:bg-[#4a3c2e]"
-                >
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Start Generating
-                </Button>
-              </motion.div>
-            </div>
-          ) : (
-            <QuestionCanvas
-              isGenerating={isGenerating}
-              currentAction={currentAction}
-              thinkingSteps={thinkingSteps}
-              progress={{
-                current: isGenerating ? generationProgressCurrent : questions.length,
-                total: settings.questionCount,
-              }}
-              foundSources={foundSources}
-              questions={questions}
-              streamingContent={streamingContent}
-              onEdit={handleInlineEdit}
-              onApprove={handleApprove}
-              onReject={handleReject}
-              onDelete={handleDelete}
-              onApproveAll={handleApproveAll}
-              onPublishApproved={handlePublishApproved}
-              onExport={handleExport}
-              onRequestRegenerate={handleRequestRegenerate}
-            />
-          )}
+          <QuestionCanvas
+            isGenerating={isGenerating}
+            currentAction={currentAction}
+            thinkingSteps={thinkingSteps}
+            progress={{
+              current: isGenerating ? generationProgressCurrent : questions.length,
+              total: settings.questionCount,
+            }}
+            foundSources={foundSources}
+            questions={questions}
+            streamingContent={streamingContent}
+            activeIndex={activeQuestionIndex}
+            onActiveIndexChange={setActiveQuestionIndex}
+            onEdit={handleInlineEdit}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onDelete={handleDelete}
+            onCycleVersion={handleCycleVersion}
+            onApproveAll={handleApproveAll}
+            onPublishApproved={handlePublishApproved}
+            onExport={handleExport}
+            onRequestRegenerate={handleRequestRegenerate}
+          />
         </div>
       </div>
 
